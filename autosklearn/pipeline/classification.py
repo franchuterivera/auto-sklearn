@@ -20,6 +20,8 @@ from autosklearn.pipeline.base import BasePipeline
 from autosklearn.pipeline.constants import SPARSE
 
 
+from memory_profiler import profile
+
 class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
     """This class implements the classification task.
 
@@ -68,6 +70,7 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
 
     """
 
+    @profile
     def __init__(self, config=None, steps=None, dataset_properties=None,
                  include=None, exclude=None, random_state=None,
                  init_params=None):
@@ -76,6 +79,7 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
             config, steps, dataset_properties, include, exclude,
             random_state, init_params)
 
+    @profile
     def fit_transformer(self, X, y, fit_params=None):
 
         if fit_params is None:
@@ -99,6 +103,7 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
 
         return X, fit_params
 
+    @profile
     def predict_proba(self, X, batch_size=None):
         """predict_proba.
 
@@ -141,6 +146,7 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
 
                 return y
 
+    @profile
     def _get_hyperparameter_search_space(self, include=None, exclude=None,
                                          dataset_properties=None):
         """Create the hyperparameter configuration space.
@@ -274,6 +280,7 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
         self.dataset_properties_ = dataset_properties
         return cs
 
+    @profile
     def _get_pipeline_steps(self):
         steps = []
 
@@ -294,5 +301,6 @@ class SimpleClassificationPipeline(ClassifierMixin, BasePipeline):
 
         return steps
 
+    @profile
     def _get_estimator_hyperparameter_name(self):
         return "classifier"

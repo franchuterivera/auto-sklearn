@@ -8,7 +8,7 @@
 import sys
 import time
 from collections import OrderedDict
-
+from memory_profiler import profile
 
 class TimingTask(object):
     _name = False
@@ -19,11 +19,13 @@ class TimingTask(object):
     _wall_tac = False
     _wall_dur = False
 
+    @profile
     def __init__(self, name):
         self._name = name
         self._cpu_tic = time.process_time()
         self._wall_tic = time.time()
 
+    @profile
     def stop(self):
         if not self._cpu_tac:
             self._cpu_tac = time.process_time()
@@ -34,34 +36,42 @@ class TimingTask(object):
             sys.stdout.write('Task has already stopped\n')
 
     @property
+    @profile
     def name(self):
         return self._name
 
     @property
+    @profile
     def cpu_tic(self):
         return self._cpu_tic
 
     @property
+    @profile
     def cpu_tac(self):
         return self._cpu_tac
 
     @property
+    @profile
     def cpu_dur(self):
         return self._cpu_dur
 
     @property
+    @profile
     def wall_tic(self):
         return self._wall_tic
 
     @property
+    @profile
     def wall_tac(self):
         return self._wall_tac
 
     @property
+    @profile
     def wall_dur(self):
         return self._wall_dur
 
     @property
+    @profile
     def dur(self):
         return self._cpu_dur, self._wall_dur
 
@@ -71,10 +81,12 @@ class StopWatch:
     """Class to collect all timing tasks."""
     _tasks = None
 
+    @profile
     def __init__(self):
         self._tasks = OrderedDict()
         self._tasks['stopwatch_time'] = TimingTask('stopwatch_time')
 
+    @profile
     def insert_task(self, name, cpu_dur, wall_dur):
         if name not in self._tasks:
             self._tasks[name] = TimingTask(name)
@@ -82,10 +94,12 @@ class StopWatch:
             self._tasks[name]._wall_dur = wall_dur
             self._tasks[name]._cpu_dur = cpu_dur
 
+    @profile
     def start_task(self, name):
         if name not in self._tasks:
             self._tasks[name] = TimingTask(name)
 
+    @profile
     def wall_elapsed(self, name):
         tmp = time.time()
         if name in self._tasks:
@@ -95,6 +109,7 @@ class StopWatch:
             else:
                 return self._tasks[name].wall_dur
 
+    @profile
     def cpu_elapsed(self, name):
         tmp = time.process_time()
         if name in self._tasks:
@@ -104,32 +119,38 @@ class StopWatch:
             else:
                 return self._tasks[name].cpu_dur
 
+    @profile
     def stop_task(self, name):
         try:
             self._tasks[name].stop()
         except KeyError:
             sys.stderr.write('There is no such task: %s\n' % name)
 
+    @profile
     def get_cpu_dur(self, name):
         try:
             return self._tasks[name].cpu_dur
         except KeyError:
             sys.stderr.write('There is no such task: %s\n' % name)
 
+    @profile
     def get_wall_dur(self, name):
         try:
             return self._tasks[name].wall_dur
         except KeyError:
             sys.stderr.write('There is no such task: %s\n' % name)
 
+    @profile
     def cpu_sum(self):
         """Return sum of CPU time for all so far finished tasks."""
         return sum([max(0, self._tasks[tsk].cpu_dur) for tsk in self._tasks])
 
+    @profile
     def wall_sum(self):
         """Return sum of CPU time for all so far finished tasks."""
         return sum([max(0, self._tasks[tsk].wall_dur) for tsk in self._tasks])
 
+    @profile
     def __repr__(self):
         ret_str = '| %10s | %10s | %10s | %10s | %10s | %10s | %10s |\n' % \
                   ('Name', 'CPUStart', 'CPUEnd', 'CPUDur', 'WallStart',

@@ -3,9 +3,11 @@ import logging
 import logging.config
 import os
 
+from memory_profiler import profile
 import yaml
 
 
+@profile
 def setup_logger(output_file=None, logging_config=None):
     # logging_config must be a dictionary object specifying the configuration
     # for the loggers to be used in auto-sklearn.
@@ -22,10 +24,12 @@ def setup_logger(output_file=None, logging_config=None):
         logging.config.dictConfig(logging_config)
 
 
+@profile
 def _create_logger(name):
     return logging.getLogger(name)
 
 
+@profile
 def get_logger(name):
     logger = PickableLoggerAdapter(name)
     return logger
@@ -33,10 +37,12 @@ def get_logger(name):
 
 class PickableLoggerAdapter(object):
 
+    @profile
     def __init__(self, name):
         self.name = name
         self.logger = _create_logger(name)
 
+    @profile
     def __getstate__(self):
         """
         Method is called when pickle dumps an object.
@@ -48,6 +54,7 @@ class PickableLoggerAdapter(object):
         """
         return {'name': self.name}
 
+    @profile
     def __setstate__(self, state):
         """
         Method is called when pickle loads an object. Retrieves the name and
@@ -61,26 +68,34 @@ class PickableLoggerAdapter(object):
         self.name = state['name']
         self.logger = _create_logger(self.name)
 
+    @profile
     def debug(self, msg, *args, **kwargs):
         self.logger.debug(msg, *args, **kwargs)
 
+    @profile
     def info(self, msg, *args, **kwargs):
         self.logger.info(msg, *args, **kwargs)
 
+    @profile
     def warning(self, msg, *args, **kwargs):
         self.logger.warning(msg, *args, **kwargs)
 
+    @profile
     def error(self, msg, *args, **kwargs):
         self.logger.error(msg, *args, **kwargs)
 
+    @profile
     def exception(self, msg, *args, **kwargs):
         self.logger.exception(msg, *args, **kwargs)
 
+    @profile
     def critical(self, msg, *args, **kwargs):
         self.logger.critical(msg, *args, **kwargs)
 
+    @profile
     def log(self, level, msg, *args, **kwargs):
         self.logger.log(level, msg, *args, **kwargs)
 
+    @profile
     def isEnabledFor(self, level):
         return self.logger.isEnabledFor(level)

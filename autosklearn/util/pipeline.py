@@ -4,6 +4,7 @@ from autosklearn.constants import CLASSIFICATION_TASKS, REGRESSION_TASKS, BINARY
 from autosklearn.pipeline.classification import SimpleClassificationPipeline
 from autosklearn.pipeline.regression import SimpleRegressionPipeline
 
+from memory_profiler import profile
 
 __all__ = [
     'get_configuration_space',
@@ -11,6 +12,7 @@ __all__ = [
 ]
 
 
+@profile
 def get_configuration_space(info,
                             include_estimators=None,
                             exclude_estimators=None,
@@ -52,6 +54,7 @@ def get_configuration_space(info,
         return _get_classification_configuration_space(info, include, exclude)
 
 
+@profile
 def _get_regression_configuration_space(info, include, exclude):
     sparse = False
     if info['is_sparse'] == 1:
@@ -64,6 +67,7 @@ def _get_regression_configuration_space(info, include, exclude):
     return configuration_space
 
 
+@profile
 def _get_classification_configuration_space(info, include, exclude):
     task_type = info['task']
 
@@ -95,6 +99,7 @@ def _get_classification_configuration_space(info, include, exclude):
         get_hyperparameter_search_space()
 
 
+@profile
 def get_class(info):
     if info['task'] in REGRESSION_TASKS:
         return SimpleRegressionPipeline

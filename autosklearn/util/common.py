@@ -3,12 +3,14 @@
 import os
 import warnings
 
+from memory_profiler import profile
 __all__ = [
     'check_pid',
     'warn_if_not_float'
 ]
 
 
+@profile
 def warn_if_not_float(X, estimator='This algorithm'):
     """Warning utility function to check that data type is floating point.
     Returns True if a warning was raised (i.e. the input is not float) and
@@ -23,6 +25,7 @@ def warn_if_not_float(X, estimator='This algorithm'):
     return False
 
 
+@profile
 def check_pid(pid):
     """Check For the existence of a unix pid."""
     try:
@@ -33,24 +36,28 @@ def check_pid(pid):
         return True
 
 
+@profile
 def check_true(p):
     if p in ("True", "true", 1, True):
         return True
     return False
 
 
+@profile
 def check_false(p):
     if p in ("False", "false", 0, False):
         return True
     return False
 
 
+@profile
 def check_none(p):
     if p in ("None", "none", None):
         return True
     return False
 
 
+@profile
 def check_for_bool(p):
     if check_false(p):
         return False

@@ -7,8 +7,10 @@ from ConfigSpace.forbidden import ForbiddenEqualsClause
 
 from autosklearn.pipeline.constants import \
     SIGNED_DATA, UNSIGNED_DATA, PREDICTIONS, INPUT, DENSE, SPARSE
+from memory_profiler import profile
 
 
+@profile
 def get_match_array(pipeline, dataset_properties,
                     include=None, exclude=None):
     sparse = dataset_properties.get('sparse')
@@ -103,6 +105,7 @@ def get_match_array(pipeline, dataset_properties,
     return matches
 
 
+@profile
 def find_active_choices(matches, node, node_idx, dataset_properties, include=None, exclude=None):
     if not hasattr(node, "get_available_components"):
         raise ValueError()
@@ -122,6 +125,7 @@ def find_active_choices(matches, node, node_idx, dataset_properties, include=Non
     return choices
 
 
+@profile
 def add_forbidden(conf_space, pipeline, matches, dataset_properties,
                   include, exclude):
     # Not sure if this works for 3D

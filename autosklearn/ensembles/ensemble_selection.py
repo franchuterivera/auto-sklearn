@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 from collections import Counter
 import random
 
@@ -10,6 +12,7 @@ from autosklearn.metrics import Scorer
 
 
 class EnsembleSelection(AbstractEnsemble):
+    @profile
     def __init__(
         self,
         ensemble_size: int,
@@ -28,6 +31,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.mode = mode
         self.random_state = random_state
 
+    @profile
     def fit(self, predictions, labels, identifiers):
         self.ensemble_size = int(self.ensemble_size)
         if self.ensemble_size < 1:
@@ -47,6 +51,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.identifiers_ = identifiers
         return self
 
+    @profile
     def _fit(self, predictions, labels):
         if self.mode == 'fast':
             self._fast(predictions, labels)
@@ -54,6 +59,7 @@ class EnsembleSelection(AbstractEnsemble):
             self._slow(predictions, labels)
         return self
 
+    @profile
     def _fast(self, predictions, labels):
         """Fast version of Rich Caruana's ensemble selection method."""
         self.num_input_models_ = len(predictions)
@@ -117,6 +123,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.trajectory_ = trajectory
         self.train_score_ = trajectory[-1]
 
+    @profile
     def _slow(self, predictions, labels):
         """Rich Caruana's ensemble selection method."""
         self.num_input_models_ = len(predictions)
@@ -168,6 +175,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.trajectory_ = np.array(trajectory)
         self.train_score_ = trajectory[-1]
 
+    @profile
     def _calculate_weights(self):
         ensemble_members = Counter(self.indices_).most_common()
         weights = np.zeros((self.num_input_models_,), dtype=float)
@@ -180,6 +188,7 @@ class EnsembleSelection(AbstractEnsemble):
 
         self.weights_ = weights
 
+    @profile
     def _sorted_initialization(self, predictions, labels, n_best):
         perf = np.zeros([predictions.shape[0]])
 
@@ -190,6 +199,7 @@ class EnsembleSelection(AbstractEnsemble):
         indices = np.argsort(perf)[perf.shape[0] - n_best:]
         return indices
 
+    @profile
     def _bagging(self, predictions, labels, fraction=0.5, n_bags=20):
         """Rich Caruana's ensemble selection method with bagging."""
         raise ValueError('Bagging might not work with class-based interface!')
@@ -206,6 +216,7 @@ class EnsembleSelection(AbstractEnsemble):
 
         return np.array(order_of_each_bag)
 
+    @profile
     def predict(self, predictions):
         predictions = np.asarray(predictions)
 
@@ -225,6 +236,7 @@ class EnsembleSelection(AbstractEnsemble):
             raise ValueError("The dimensions of ensemble predictions"
                              " and ensemble weights do not match!")
 
+    @profile
     def __str__(self):
         return 'Ensemble Selection:\n\tTrajectory: %s\n\tMembers: %s' \
                '\n\tWeights: %s\n\tIdentifiers: %s' % \
@@ -235,6 +247,7 @@ class EnsembleSelection(AbstractEnsemble):
                           enumerate(self.identifiers_)
                           if self.weights_[idx] > 0]))
 
+    @profile
     def get_models_with_weights(self, models):
         output = []
 
@@ -248,6 +261,7 @@ class EnsembleSelection(AbstractEnsemble):
 
         return output
 
+    @profile
     def get_selected_model_identifiers(self):
         output = []
 
@@ -258,5 +272,6 @@ class EnsembleSelection(AbstractEnsemble):
 
         return output
 
+    @profile
     def get_validation_performance(self):
         return self.trajectory_[-1]

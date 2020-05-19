@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 from abc import ABCMeta
 
 import numpy as np
@@ -17,6 +19,7 @@ class BasePipeline(Pipeline):
     This class should not be instantiated, only subclassed."""
     __metaclass__ = ABCMeta
 
+    @profile
     def __init__(self, config=None, steps=None, dataset_properties=None,
                  include=None, exclude=None, random_state=None,
                  init_params=None):
@@ -62,6 +65,7 @@ class BasePipeline(Pipeline):
 
         self._additional_run_info = {}
 
+    @profile
     def fit(self, X, y, **fit_params):
         """Fit the selected algorithm to the training data.
 
@@ -92,6 +96,7 @@ class BasePipeline(Pipeline):
         self.fit_estimator(X, y, **fit_params)
         return self
 
+    @profile
     def fit_transformer(self, X, y, fit_params=None):
         self.num_targets = 1 if len(y.shape) == 1 else y.shape[1]
         if fit_params is None:
@@ -103,31 +108,38 @@ class BasePipeline(Pipeline):
             fit_params = {}
         return Xt, fit_params
 
+    @profile
     def fit_estimator(self, X, y, **fit_params):
         fit_params = {key.replace(":", "__"): value for key, value in
                       fit_params.items()}
         self._final_estimator.fit(X, y, **fit_params)
         return self
 
+    @profile
     def iterative_fit(self, X, y, n_iter=1, **fit_params):
         self._final_estimator.iterative_fit(X, y, n_iter=n_iter,
                                             **fit_params)
 
+    @profile
     def estimator_supports_iterative_fit(self):
         return self._final_estimator.estimator_supports_iterative_fit()
 
+    @profile
     def get_max_iter(self):
         if self.estimator_supports_iterative_fit():
             return self._final_estimator.get_max_iter()
         else:
             raise NotImplementedError()
 
+    @profile
     def configuration_fully_fitted(self):
         return self._final_estimator.configuration_fully_fitted()
 
+    @profile
     def get_current_iter(self):
         return self._final_estimator.get_current_iter()
 
+    @profile
     def predict(self, X, batch_size=None):
         """Predict the classes using the selected model.
 
@@ -172,6 +184,7 @@ class BasePipeline(Pipeline):
 
                 return y
 
+    @profile
     def set_hyperparameters(self, configuration, init_params=None):
         self.configuration = configuration
 
@@ -209,6 +222,7 @@ class BasePipeline(Pipeline):
 
         return self
 
+    @profile
     def get_hyperparameter_search_space(self, dataset_properties=None):
         """Return the configuration space for the CASH problem.
 
@@ -224,6 +238,7 @@ class BasePipeline(Pipeline):
                 dataset_properties=self.dataset_properties)
         return self.config_space
 
+    @profile
     def _get_hyperparameter_search_space(self, include=None, exclude=None,
                                          dataset_properties=None):
         """Return the configuration space for the CASH problem.
@@ -265,6 +280,7 @@ class BasePipeline(Pipeline):
         """
         raise NotImplementedError()
 
+    @profile
     def _get_base_search_space(self, cs, dataset_properties, exclude,
                                include, pipeline):
         if include is None:
@@ -345,6 +361,7 @@ class BasePipeline(Pipeline):
 
         return cs
 
+    @profile
     def __repr__(self):
         class_name = self.__class__.__name__
 
@@ -385,12 +402,15 @@ class BasePipeline(Pipeline):
 
         return rval
 
+    @profile
     def _get_pipeline_steps(self):
         raise NotImplementedError()
 
+    @profile
     def _get_estimator_hyperparameter_name(self):
         raise NotImplementedError()
 
+    @profile
     def get_additional_run_info(self):
         """Allows retrieving additional run information from the pipeline.
 

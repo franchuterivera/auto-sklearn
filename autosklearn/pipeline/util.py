@@ -10,7 +10,9 @@ import sklearn
 import sklearn.base
 import sklearn.datasets
 
+from memory_profiler import profile
 
+@profile
 def find_sklearn_classes(class_):
     classifiers = set()
     all_subdirectories = []
@@ -44,6 +46,7 @@ def find_sklearn_classes(class_):
         print(classifier)
 
 
+@profile
 def get_dataset(dataset='iris', make_sparse=False, add_NaNs=False,
                 train_size_maximum=150, make_multilabel=False,
                 make_binary=False):
@@ -97,6 +100,7 @@ def get_dataset(dataset='iris', make_sparse=False, add_NaNs=False,
     return X_train, Y_train, X_test, Y_test
 
 
+@profile
 def _test_classifier(classifier, dataset='iris', sparse=False,
                      train_size_maximum=150, make_multilabel=False,
                      make_binary=False):
@@ -114,10 +118,12 @@ def _test_classifier(classifier, dataset='iris', sparse=False,
                                default if default[hp_name] is not None})
     if hasattr(classifier, 'iterative_fit'):
         class counter(object):
+            @profile
             def __init__(self, func):
                 self.n_calls = 0
                 self.func = func
 
+            @profile
             def __call__(self, *args, **kwargs):
                 self.n_calls += 1
                 return self.func(*args, **kwargs)
@@ -134,6 +140,7 @@ def _test_classifier(classifier, dataset='iris', sparse=False,
     return predictions, Y_test, n_calls
 
 
+@profile
 def _test_classifier_iterative_fit(classifier, dataset='iris', sparse=False):
     X_train, Y_train, X_test, Y_test = get_dataset(dataset=dataset,
                                                    make_sparse=sparse)
@@ -149,6 +156,7 @@ def _test_classifier_iterative_fit(classifier, dataset='iris', sparse=False):
     return predictions, Y_test, classifier
 
 
+@profile
 def _test_classifier_predict_proba(classifier, dataset='iris', sparse=False,
                                    train_size_maximum=150,
                                    make_multilabel=False,
@@ -168,6 +176,7 @@ def _test_classifier_predict_proba(classifier, dataset='iris', sparse=False,
     return predictions, Y_test
 
 
+@profile
 def _test_preprocessing(Preprocessor, dataset='iris', make_sparse=False,
                         train_size_maximum=150):
     X_train, Y_train, X_test, Y_test = get_dataset(dataset=dataset,
@@ -186,6 +195,7 @@ def _test_preprocessing(Preprocessor, dataset='iris', make_sparse=False,
 
 
 class PreprocessingTestCase(unittest.TestCase):
+    @profile
     def _test_preprocessing_dtype(self, Preprocessor, add_NaNs=False,
                                   test_sparse=True, dataset='iris'):
         # Dense
@@ -244,6 +254,7 @@ class PreprocessingTestCase(unittest.TestCase):
             # self.assertEqual(Xt.dtype, np.float64)
 
 
+@profile
 def _test_regressor(Regressor, dataset='diabetes', sparse=False):
     X_train, Y_train, X_test, Y_test = get_dataset(dataset=dataset,
                                                    make_sparse=sparse)
@@ -259,10 +270,12 @@ def _test_regressor(Regressor, dataset='diabetes', sparse=False):
 
     if hasattr(regressor, 'iterative_fit'):
         class counter(object):
+            @profile
             def __init__(self, func):
                 self.n_calls = 0
                 self.func = func
 
+            @profile
             def __call__(self, *args, **kwargs):
                 self.n_calls += 1
                 return self.func(*args, **kwargs)
@@ -284,6 +297,7 @@ def _test_regressor(Regressor, dataset='diabetes', sparse=False):
     return predictions, Y_test, n_calls
 
 
+@profile
 def _test_regressor_iterative_fit(Regressor, dataset='diabetes', sparse=False):
     X_train, Y_train, X_test, Y_test = get_dataset(dataset=dataset,
                                                    make_sparse=sparse)

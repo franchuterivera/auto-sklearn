@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 from collections import OrderedDict
 import copy
 from itertools import product
@@ -66,6 +68,7 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
     --------
 
     """
+    @profile
     def __init__(self, config=None, steps=None, dataset_properties=None,
                  include=None, exclude=None, random_state=None,
                  init_params=None):
@@ -76,18 +79,21 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
             include=include, exclude=exclude, random_state=random_state,
             init_params=init_params)
 
+    @profile
     def fit_estimator(self, X, y, **fit_params):
         self.y_max_ = np.nanmax(y)
         self.y_min_ = np.nanmin(y)
         return super(SimpleRegressionPipeline, self).fit_estimator(
             X, y, **fit_params)
 
+    @profile
     def iterative_fit(self, X, y, n_iter=1, **fit_params):
         self.y_max_ = np.nanmax(y)
         self.y_min_ = np.nanmin(y)
         return super(SimpleRegressionPipeline, self).iterative_fit(
             X, y, n_iter=n_iter, **fit_params)
 
+    @profile
     def predict(self, X, batch_size=None):
         y = super().predict(X, batch_size=batch_size)
         y[y > (2 * self.y_max_)] = 2 * self.y_max_
@@ -97,6 +103,7 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
             y[y < (0.5 * self.y_min_)] = 0.5 * self.y_min_
         return y
 
+    @profile
     def get_available_components(self, available_comp, data_prop, inc, exc):
         components_dict = OrderedDict()
         for name in available_comp:
@@ -111,6 +118,7 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
             components_dict[name] = entry
         return components_dict
 
+    @profile
     def _get_hyperparameter_search_space(self, include=None, exclude=None,
                                          dataset_properties=None):
         """Return the configuration space for the CASH problem.
@@ -237,9 +245,11 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
         self.dataset_properties_ = dataset_properties
         return cs
 
+    @profile
     def _get_estimator_components(self):
         return regression_components._regressors
 
+    @profile
     def _get_pipeline_steps(self, init_params=None):
         steps = []
 
@@ -257,5 +267,6 @@ class SimpleRegressionPipeline(RegressorMixin, BasePipeline):
 
         return steps
 
+    @profile
     def _get_estimator_hyperparameter_name(self):
         return "regressor"

@@ -58,8 +58,10 @@ EXCLUDE_META_FEATURES_REGRESSION = {
     'PCA',
 }
 
+from memory_profiler import profile
 
 # dataset helpers
+@profile
 def load_data(dataset_info, backend, max_mem=None):
     try:
         D = backend.load_datamanager()
@@ -76,6 +78,7 @@ def load_data(dataset_info, backend, max_mem=None):
 
 
 # metalearning helpers
+@profile
 def _calculate_metafeatures(data_feat_type, data_info_task, basename,
                             x_train, y_train, watcher, logger):
     # == Calculate metafeatures
@@ -108,6 +111,7 @@ def _calculate_metafeatures(data_feat_type, data_info_task, basename,
     return result
 
 
+@profile
 def _calculate_metafeatures_encoded(basename, x_train, y_train, watcher,
                                     task, logger):
     EXCLUDE_META_FEATURES = EXCLUDE_META_FEATURES_CLASSIFICATION \
@@ -128,6 +132,7 @@ def _calculate_metafeatures_encoded(basename, x_train, y_train, watcher,
     return result
 
 
+@profile
 def _get_metalearning_configurations(meta_base, basename, metric,
                                      configuration_space,
                                      task,
@@ -152,6 +157,7 @@ def _get_metalearning_configurations(meta_base, basename, metric,
     return metalearning_configurations
 
 
+@profile
 def _print_debug_info_of_init_configuration(initial_configurations, basename,
                                             time_for_task, logger, watcher):
     logger.debug('Initial Configurations: (%d)' % len(initial_configurations))
@@ -164,6 +170,7 @@ def _print_debug_info_of_init_configuration(initial_configurations, basename,
         basename, time_for_task - watcher.wall_elapsed(basename))
 
 
+@profile
 def get_smac_object(
     scenario_dict,
     seed,
@@ -195,6 +202,7 @@ def get_smac_object(
 
 class AutoMLSMBO(object):
 
+    @profile
     def __init__(self, config_space, dataset_name,
                  backend,
                  total_walltime_limit,
@@ -258,11 +266,13 @@ class AutoMLSMBO(object):
         logger_name = '%s(%d):%s' % (self.__class__.__name__, self.seed, ":" + dataset_name_)
         self.logger = get_logger(logger_name)
 
+    @profile
     def _send_warnings_to_log(self, message, category, filename, lineno,
                               file=None, line=None):
         self.logger.debug('%s:%s: %s:%s', filename, lineno, category.__name__,
                           message)
 
+    @profile
     def reset_data_manager(self, max_mem=None):
         if max_mem is None:
             max_mem = self.data_memory_limit
@@ -277,6 +287,7 @@ class AutoMLSMBO(object):
 
         self.task = self.datamanager.info['task']
 
+    @profile
     def collect_metalearning_suggestions(self, meta_base):
         metalearning_configurations = _get_metalearning_configurations(
             meta_base=meta_base,
@@ -297,6 +308,7 @@ class AutoMLSMBO(object):
 
         return metalearning_configurations
 
+    @profile
     def _calculate_metafeatures(self):
         with warnings.catch_warnings():
             warnings.showwarning = self._send_warnings_to_log
@@ -311,6 +323,7 @@ class AutoMLSMBO(object):
                 logger=self.logger)
             return meta_features
 
+    @profile
     def _calculate_metafeatures_with_limits(self, time_limit):
         res = None
         time_limit = max(time_limit, 1)
@@ -326,6 +339,7 @@ class AutoMLSMBO(object):
 
         return res
 
+    @profile
     def _calculate_metafeatures_encoded(self):
         with warnings.catch_warnings():
             warnings.showwarning = self._send_warnings_to_log
@@ -339,6 +353,7 @@ class AutoMLSMBO(object):
                 self.logger)
             return meta_features_encoded
 
+    @profile
     def _calculate_metafeatures_encoded_with_limits(self, time_limit):
         res = None
         time_limit = max(time_limit, 1)
@@ -355,6 +370,7 @@ class AutoMLSMBO(object):
 
         return res
 
+    @profile
     def run_smbo(self):
 
         self.watcher.start_task('SMBO')
@@ -504,6 +520,7 @@ class AutoMLSMBO(object):
 
         return self.runhistory, self.trajectory, self._budget_type
 
+    @profile
     def get_metalearning_suggestions(self):
         # == METALEARNING suggestions
         # we start by evaluating the defaults on the full dataset again

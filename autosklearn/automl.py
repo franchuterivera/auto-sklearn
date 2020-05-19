@@ -38,7 +38,10 @@ from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION
 
+from memory_profiler import profile
 
+
+@profile
 def _model_predict(self, X, batch_size, identifier):
     def send_warnings_to_log(
             message, category, filename, lineno, file=None, line=None):
@@ -71,6 +74,7 @@ def _model_predict(self, X, batch_size, identifier):
 
 class AutoML(BaseEstimator):
 
+    @profile
     def __init__(self,
                  backend,
                  time_left_for_this_task,
@@ -153,6 +157,7 @@ class AutoML(BaseEstimator):
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
 
+    @profile
     def fit(
         self,
         X: np.ndarray,
@@ -222,6 +227,7 @@ class AutoML(BaseEstimator):
         )
 
     # TODO this is very old code which can be dropped!
+    @profile
     def fit_automl_dataset(self, dataset, metric, load_models=True):
         self._stopwatch = StopWatch()
         self._backend.save_start_time(self._seed)
@@ -247,6 +253,7 @@ class AutoML(BaseEstimator):
             load_models=load_models,
         )
 
+    @profile
     def fit_on_datamanager(self, datamanager, metric, load_models=True):
         self._stopwatch = StopWatch()
         self._backend.save_start_time(self._seed)
@@ -263,6 +270,7 @@ class AutoML(BaseEstimator):
             load_models=load_models,
         )
 
+    @profile
     def _get_logger(self, name):
         logger_name = 'AutoML(%d):%s' % (self._seed, name)
         setup_logger(os.path.join(self._backend.temporary_directory,
@@ -272,14 +280,17 @@ class AutoML(BaseEstimator):
         return get_logger(logger_name)
 
     @staticmethod
+    @profile
     def _start_task(watcher, task_name):
         watcher.start_task(task_name)
 
     @staticmethod
+    @profile
     def _stop_task(watcher, task_name):
         watcher.stop_task(task_name)
 
     @staticmethod
+    @profile
     def _print_load_time(basename, time_left_for_this_task,
                          time_for_load_data, logger):
 
@@ -289,6 +300,7 @@ class AutoML(BaseEstimator):
                     (basename, time_left_after_reading))
         return time_for_load_data
 
+    @profile
     def _do_dummy_prediction(self, datamanager, num_run):
 
         # When using partial-cv it makes no sense to do dummy predictions
@@ -327,6 +339,7 @@ class AutoML(BaseEstimator):
 
         return ta.num_run
 
+    @profile
     def _fit(
         self,
         datamanager: AbstractDataManager,
@@ -528,6 +541,7 @@ class AutoML(BaseEstimator):
 
         return self
 
+    @profile
     def refit(self, X, y):
 
         if self._keep_models is not True:
@@ -579,6 +593,7 @@ class AutoML(BaseEstimator):
         self._can_predict = True
         return self
 
+    @profile
     def predict(self, X, batch_size=None, n_jobs=1):
         """predict.
 
@@ -638,6 +653,7 @@ class AutoML(BaseEstimator):
 
         return predictions
 
+    @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
@@ -656,6 +672,7 @@ class AutoML(BaseEstimator):
         self._load_models()
         return self
 
+    @profile
     def _get_ensemble_process(self, time_left_for_ensembles,
                               task=None, metric=None, precision=None,
                               dataset_name=None, max_iterations=None,
@@ -709,6 +726,7 @@ class AutoML(BaseEstimator):
             random_state=self._seed,
         )
 
+    @profile
     def _load_models(self):
         if self._shared_mode:
             seed = -1
@@ -737,6 +755,7 @@ class AutoML(BaseEstimator):
         else:
             self.models_ = []
 
+    @profile
     def score(self, X, y):
         # fix: Consider only index 1 of second dimension
         # Don't know if the reshaping should be done there or in calculate_score
@@ -748,6 +767,7 @@ class AutoML(BaseEstimator):
                                all_scoring_functions=False)
 
     @property
+    @profile
     def cv_results_(self):
         results = dict()
 
@@ -838,6 +858,7 @@ class AutoML(BaseEstimator):
 
         return results
 
+    @profile
     def sprint_statistics(self):
         cv_results = self.cv_results_
         sio = io.StringIO()
@@ -872,6 +893,7 @@ class AutoML(BaseEstimator):
                   'limit: %d\n' % num_memout)
         return sio.getvalue()
 
+    @profile
     def get_models_with_weights(self):
         if self.models_ is None or len(self.models_) == 0 or \
                 self.ensemble_ is None:
@@ -879,6 +901,7 @@ class AutoML(BaseEstimator):
 
         return self.ensemble_.get_models_with_weights(self.models_)
 
+    @profile
     def show_models(self):
         models_with_weights = self.get_models_with_weights()
 
@@ -890,6 +913,7 @@ class AutoML(BaseEstimator):
 
             return sio.getvalue()
 
+    @profile
     def _create_search_space(self, tmp_dir, backend, datamanager,
                              include_estimators=None,
                              exclude_estimators=None,
@@ -914,6 +938,7 @@ class AutoML(BaseEstimator):
 
         return configuration_space, configspace_path
 
+    @profile
     def configuration_space_created_hook(self, datamanager, configuration_space):
         return configuration_space
 
@@ -922,16 +947,19 @@ class BaseAutoML(AutoML):
     """Base class for AutoML objects to hold abstract functions for both
     regression and classification."""
 
+    @profile
     def __init__(self, *args, **kwargs):
         self._n_outputs = 1
         super().__init__(*args, **kwargs)
 
+    @profile
     def _perform_input_checks(self, X, y):
         X = self._check_X(X)
         if y is not None:
             y = self._check_y(y)
         return X, y
 
+    @profile
     def _check_X(self, X):
         X = sklearn.utils.check_array(X, accept_sparse="csr",
                                       force_all_finite=False)
@@ -939,6 +967,7 @@ class BaseAutoML(AutoML):
             X.sort_indices()
         return X
 
+    @profile
     def _check_y(self, y):
         y = sklearn.utils.check_array(y, ensure_2d=False)
 
@@ -951,6 +980,7 @@ class BaseAutoML(AutoML):
 
         return y
 
+    @profile
     def refit(self, X, y):
         X, y = self._perform_input_checks(X, y)
         _n_outputs = 1 if len(y.shape) == 1 else y.shape[1]
@@ -960,6 +990,7 @@ class BaseAutoML(AutoML):
 
         return super().refit(X, y)
 
+    @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
@@ -976,6 +1007,7 @@ class BaseAutoML(AutoML):
 
 
 class AutoMLClassifier(BaseAutoML):
+    @profile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -983,6 +1015,7 @@ class AutoMLClassifier(BaseAutoML):
                               'multiclass': MULTICLASS_CLASSIFICATION,
                               'binary': BINARY_CLASSIFICATION}
 
+    @profile
     def fit(
         self,
         X: np.ndarray,
@@ -1041,6 +1074,7 @@ class AutoMLClassifier(BaseAutoML):
             load_models=load_models,
         )
 
+    @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
@@ -1053,6 +1087,7 @@ class AutoMLClassifier(BaseAutoML):
         return super().fit_ensemble(y, task, metric, precision, dataset_name,
                                     ensemble_nbest, ensemble_size)
 
+    @profile
     def _process_target_classes(self, y):
         y = super()._check_y(y)
         self._n_outputs = 1 if len(y.shape) == 1 else y.shape[1]
@@ -1076,6 +1111,7 @@ class AutoMLClassifier(BaseAutoML):
 
         return y, _classes, _n_classes
 
+    @profile
     def predict(self, X, batch_size=None, n_jobs=1):
         predicted_probabilities = super().predict(X, batch_size=batch_size,
                                                   n_jobs=n_jobs)
@@ -1097,14 +1133,17 @@ class AutoMLClassifier(BaseAutoML):
 
             return predicted_classes
 
+    @profile
     def predict_proba(self, X, batch_size=None, n_jobs=1):
         return super().predict(X, batch_size=batch_size, n_jobs=n_jobs)
 
 
 class AutoMLRegressor(BaseAutoML):
+    @profile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    @profile
     def fit(
         self,
         X: np.ndarray,
@@ -1136,6 +1175,7 @@ class AutoMLRegressor(BaseAutoML):
             load_models=load_models,
         )
 
+    @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):

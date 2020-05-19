@@ -2,12 +2,14 @@ import importlib
 import pkg_resources
 import re
 from distutils.version import LooseVersion
+from memory_profiler import profile
 
 SUBPATTERN = r'((?P<operation%d>==|>=|>|<)(?P<version%d>(\d+)?(\.[a-zA-Z0-9]+)?(\.\d+)?))'
 RE_PATTERN = re.compile(
     r'^(?P<name>[\w\-]+)%s?(,%s)?$' % (SUBPATTERN % (1, 1), SUBPATTERN % (2, 2)))
 
 
+@profile
 def verify_packages(packages):
     if not packages:
         return
@@ -28,6 +30,7 @@ def verify_packages(packages):
             raise ValueError('Unable to read requirement: %s' % package)
 
 
+@profile
 def _verify_package(name, operation, version):
     try:
         module = pkg_resources.get_distribution(name)
@@ -62,6 +65,7 @@ def _verify_package(name, operation, version):
 class MissingPackageError(Exception):
     error_message = 'Mandatory package \'{name}\' not found!'
 
+    @profile
     def __init__(self, package_name):
         self.package_name = package_name
         super(MissingPackageError, self).__init__(
@@ -71,6 +75,7 @@ class MissingPackageError(Exception):
 class IncorrectPackageVersionError(Exception):
     error_message = "'{name} {installed_version}' version mismatch ({operation}{required_version})"
 
+    @profile
     def __init__(self, package_name, installed_version, operation, required_version):
         self.package_name = package_name
         self.installed_version = installed_version

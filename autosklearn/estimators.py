@@ -11,13 +11,17 @@ import joblib
 from autosklearn.automl import AutoMLClassifier, AutoMLRegressor, BaseAutoML
 from autosklearn.util.backend import create, get_randomized_directory_names
 
+from memory_profiler import profile
 
+
+@profile
 def _fit_automl(automl, kwargs, load_models):
     return automl.fit(load_models=load_models, **kwargs)
 
 
 class AutoSklearnEstimator(BaseEstimator):
 
+    @profile
     def __init__(
         self,
         time_left_for_this_task=3600,
@@ -78,6 +82,7 @@ class AutoSklearnEstimator(BaseEstimator):
             ensemble.
 
         max_models_on_disc: int, optional (default=50),
+            @profile
             Defines the maximum number of models that are kept in the disc.
             The additional number of models are permanently deleted. Due to the
             nature of this variable, it sets the upper limit on how many models
@@ -266,6 +271,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self._n_jobs = None
         super().__init__()
 
+    @profile
     def build_automl(
         self,
         seed: int,
@@ -325,6 +331,7 @@ class AutoSklearnEstimator(BaseEstimator):
 
         return automl
 
+    @profile
     def fit(self, **kwargs):
         self._automl = []
         if self.shared_mode and self.n_jobs:
@@ -421,6 +428,7 @@ class AutoSklearnEstimator(BaseEstimator):
 
         return self
 
+    @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
@@ -498,6 +506,7 @@ class AutoSklearnEstimator(BaseEstimator):
         )
         return self
 
+    @profile
     def refit(self, X, y):
         """Refit all models found with fit to new data.
 
@@ -526,16 +535,20 @@ class AutoSklearnEstimator(BaseEstimator):
         self._automl[0].refit(X, y)
         return self
 
+    @profile
     def predict(self, X, batch_size=None, n_jobs=1):
         return self._automl[0].predict(X, batch_size=batch_size, n_jobs=n_jobs)
 
+    @profile
     def predict_proba(self, X, batch_size=None, n_jobs=1):
         return self._automl[0].predict_proba(
              X, batch_size=batch_size, n_jobs=n_jobs)
 
+    @profile
     def score(self, X, y):
         return self._automl[0].score(X, y)
 
+    @profile
     def show_models(self):
         """Return a representation of the final ensemble found by auto-sklearn.
 
@@ -546,6 +559,7 @@ class AutoSklearnEstimator(BaseEstimator):
         """
         return self._automl[0].show_models()
 
+    @profile
     def get_models_with_weights(self):
         """Return a list of the final ensemble found by auto-sklearn.
 
@@ -557,21 +571,25 @@ class AutoSklearnEstimator(BaseEstimator):
         return self._automl[0].get_models_with_weights()
 
     @property
+    @profile
     def cv_results_(self):
         return self._automl[0].cv_results_
 
     @property
+    @profile
     def trajectory_(self):
         if len(self._automl) > 1:
             raise NotImplementedError()
         return self._automl[0].trajectory_
 
     @property
+    @profile
     def fANOVA_input_(self):
         if len(self._automl) > 1:
             raise NotImplementedError()
         return self._automl[0].fANOVA_input_
 
+    @profile
     def sprint_statistics(self):
         """Return the following statistics of the training result:
 
@@ -590,9 +608,11 @@ class AutoSklearnEstimator(BaseEstimator):
         """
         return self._automl[0].sprint_statistics()
 
+    @profile
     def _get_automl_class(self):
         raise NotImplementedError()
 
+    @profile
     def get_configuration_space(self, X, y):
         self._automl = self.build_automl()
         return self._automl[0].fit(X, y, only_return_configuration_space=True)
@@ -604,6 +624,7 @@ class AutoSklearnClassifier(AutoSklearnEstimator):
 
     """
 
+    @profile
     def fit(self, X, y,
             X_test=None,
             y_test=None,
@@ -683,6 +704,7 @@ class AutoSklearnClassifier(AutoSklearnEstimator):
 
         return self
 
+    @profile
     def predict(self, X, batch_size=None, n_jobs=1):
         """Predict classes for X.
 
@@ -698,6 +720,7 @@ class AutoSklearnClassifier(AutoSklearnEstimator):
         """
         return super().predict(X, batch_size=batch_size, n_jobs=n_jobs)
 
+    @profile
     def predict_proba(self, X, batch_size=None, n_jobs=1):
 
         """Predict probabilities of classes for all samples X.
@@ -736,6 +759,7 @@ class AutoSklearnClassifier(AutoSklearnEstimator):
 
         return pred_proba
 
+    @profile
     def _get_automl_class(self):
         return AutoMLClassifier
 
@@ -746,6 +770,7 @@ class AutoSklearnRegressor(AutoSklearnEstimator):
 
     """
 
+    @profile
     def fit(self, X, y,
             X_test=None,
             y_test=None,
@@ -821,6 +846,7 @@ class AutoSklearnRegressor(AutoSklearnEstimator):
 
         return self
 
+    @profile
     def predict(self, X, batch_size=None, n_jobs=1):
         """Predict regression target for X.
 
@@ -836,5 +862,6 @@ class AutoSklearnRegressor(AutoSklearnEstimator):
         """
         return super().predict(X, batch_size=batch_size, n_jobs=n_jobs)
 
+    @profile
     def _get_automl_class(self):
         return AutoMLRegressor

@@ -25,8 +25,10 @@ Y_ENSEMBLE = 0
 Y_VALID = 1
 Y_TEST = 2
 
+from memory_profiler import profile
 
 class EnsembleBuilder(multiprocessing.Process):
+    @profile
     def __init__(
             self,
             backend: Backend,
@@ -70,6 +72,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 Both wrt to validation predictions
                 If performance_range_threshold > 0, might return less models
             max_models_on_disc: int
+               @profile
                Defines the maximum number of models that are kept in the disc.
                If int, it must be greater or equal than 1. If None, feature is disabled.
                It defines an upper bound on the models that can be used in the ensemble.
@@ -191,6 +194,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
         self.validation_performance_ = np.inf
 
+    @profile
     def run(self):
         buffer_time = 5  # TODO: Buffer time should also be used in main!?
         while True:
@@ -220,6 +224,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     continue
             break
 
+    @profile
     def main(self, return_pred=False):
         """
 
@@ -319,6 +324,7 @@ class EnsembleBuilder(multiprocessing.Process):
         if return_pred:
             return valid_pred, test_pred
 
+    @profile
     def read_ensemble_preds(self):
         """
             reading predictions on ensemble building data set;
@@ -462,6 +468,7 @@ class EnsembleBuilder(multiprocessing.Process):
         )
         return True
 
+    @profile
     def get_n_best_preds(self):
         """
             get best n predictions (i.e., keys of self.read_preds)
@@ -579,6 +586,7 @@ class EnsembleBuilder(multiprocessing.Process):
         # return best scored keys of self.read_preds
         return sorted_keys[:ensemble_n_best]
 
+    @profile
     def get_valid_test_preds(self, selected_keys: list):
         """
         get valid and test predictions from disc
@@ -680,6 +688,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
         return success_keys_valid, success_keys_test
 
+    @profile
     def fit_ensemble(self, selected_keys: list):
         """
             fit ensemble
@@ -760,6 +769,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
         return ensemble
 
+    @profile
     def predict(self, set_: str,
                 ensemble: AbstractEnsemble,
                 selected_keys: list,
@@ -821,6 +831,7 @@ class EnsembleBuilder(multiprocessing.Process):
             return None
         # TODO: ADD saving of predictions on "ensemble data"
 
+    @profile
     def _get_list_of_sorted_preds(self):
         """
             Returns a list of sorted predictions in descending order
@@ -847,9 +858,11 @@ class EnsembleBuilder(multiprocessing.Process):
         sorted_keys = list(reversed(sorted(sorted_keys, key=lambda x: x[1])))
         return sorted_keys
 
+    @profile
     def _delete_excess_models(self):
         """
             Deletes models excess models on disc. self.max_models_on_disc
+            @profile
             defines the upper limit on how many models to keep.
             Any additional model with a worst score than the top
             self.max_models_on_disc is deleted.
@@ -950,6 +963,7 @@ class EnsembleBuilder(multiprocessing.Process):
             for lock in locks:
                 lock.release()
 
+    @profile
     def _read_np_fn(self, fp):
         if self.precision == "16":
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float16)

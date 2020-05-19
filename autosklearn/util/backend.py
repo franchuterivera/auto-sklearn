@@ -11,6 +11,7 @@ import shutil
 import socket
 from typing import Union
 
+from memory_profiler import profile
 from autosklearn.util import logging_ as logging
 
 
@@ -19,6 +20,7 @@ __all__ = [
 ]
 
 
+@profile
 def create(temporary_directory,
            output_directory,
            delete_tmp_folder_after_terminate=True,
@@ -33,6 +35,7 @@ def create(temporary_directory,
     return backend
 
 
+@profile
 def get_randomized_directory_names(
     temporary_directory=None,
     output_directory=None,
@@ -77,6 +80,7 @@ def get_randomized_directory_names(
 
 class BackendContext(object):
 
+    @profile
     def __init__(self,
                  temporary_directory,
                  output_directory,
@@ -106,15 +110,18 @@ class BackendContext(object):
         self.create_directories()
 
     @property
+    @profile
     def output_directory(self):
         # make sure that tilde does not appear on the path.
         return os.path.expanduser(os.path.expandvars(self.__output_directory))
 
     @property
+    @profile
     def temporary_directory(self):
         # make sure that tilde does not appear on the path.
         return os.path.expanduser(os.path.expandvars(self.__temporary_directory))
 
+    @profile
     def create_directories(self):
         if self.shared_mode:
             # If shared_mode == True, the tmp and output dir will be shared
@@ -137,9 +144,11 @@ class BackendContext(object):
             os.makedirs(self.output_directory)
             self._output_dir_created = True
 
+    @profile
     def __del__(self):
         self.delete_directories(force=False)
 
+    @profile
     def delete_directories(self, force=True):
         if self.delete_output_folder_after_terminate or force:
             if self._output_dir_created is False and self.shared_mode is False:
@@ -180,6 +189,7 @@ class Backend(object):
     * true targets of the ensemble
     """
 
+    @profile
     def __init__(self, context):
         self.logger = logging.get_logger(__name__)
         self.context = context
@@ -198,13 +208,16 @@ class Backend(object):
         self._make_internals_directory()
 
     @property
+    @profile
     def output_directory(self):
         return self.context.output_directory
 
     @property
+    @profile
     def temporary_directory(self):
         return self.context.temporary_directory
 
+    @profile
     def _make_internals_directory(self):
         try:
             os.makedirs(self.internals_directory)
@@ -212,10 +225,12 @@ class Backend(object):
             self.logger.debug("_make_internals_directory: %s" % e)
             pass
 
+    @profile
     def _get_start_time_filename(self, seed):
         seed = int(seed)
         return os.path.join(self.internals_directory, "start_time_%d" % seed)
 
+    @profile
     def save_start_time(self, seed):
         self._make_internals_directory()
         start_time = time.time()
@@ -237,14 +252,17 @@ class Backend(object):
 
         return filepath
 
+    @profile
     def load_start_time(self, seed):
         with open(self._get_start_time_filename(seed), 'r') as fh:
             start_time = float(fh.read())
         return start_time
 
+    @profile
     def get_smac_output_directory(self):
         return os.path.join(self.temporary_directory, 'smac3-output')
 
+    @profile
     def get_smac_output_directory_for_run(self, seed):
         return os.path.join(
             self.temporary_directory,
@@ -252,6 +270,7 @@ class Backend(object):
             'run_%d' % seed
         )
 
+    @profile
     def get_smac_output_glob(self, smac_run_id: Union[str, int] = 1) -> str:
         return os.path.join(
             glob.escape(self.temporary_directory),
@@ -259,10 +278,12 @@ class Backend(object):
             'run_%s' % str(smac_run_id),
         )
 
+    @profile
     def _get_targets_ensemble_filename(self):
         return os.path.join(self.internals_directory,
                             "true_targets_ensemble.npy")
 
+    @profile
     def save_targets_ensemble(self, targets):
         self._make_internals_directory()
         if not isinstance(targets, np.ndarray):
@@ -302,6 +323,7 @@ class Backend(object):
 
         return filepath
 
+    @profile
     def load_targets_ensemble(self):
         filepath = self._get_targets_ensemble_filename()
 
@@ -311,9 +333,11 @@ class Backend(object):
 
         return targets
 
+    @profile
     def _get_datamanager_pickle_filename(self):
         return os.path.join(self.internals_directory, 'datamanager.pkl')
 
+    @profile
     def save_datamanager(self, datamanager):
         self._make_internals_directory()
         filepath = self._get_datamanager_pickle_filename()
@@ -328,19 +352,23 @@ class Backend(object):
 
         return filepath
 
+    @profile
     def load_datamanager(self):
         filepath = self._get_datamanager_pickle_filename()
         with lockfile.LockFile(filepath):
             with open(filepath, 'rb') as fh:
                 return pickle.load(fh)
 
+    @profile
     def get_model_dir(self):
         return os.path.join(self.internals_directory, 'models')
 
+    @profile
     def get_model_path(self, seed, idx, budget):
         return os.path.join(self.get_model_dir(),
                             '%s.%s.%s.model' % (seed, idx, budget))
 
+    @profile
     def save_model(self, model, filepath):
         with tempfile.NamedTemporaryFile('wb', dir=os.path.dirname(
                 filepath), delete=False) as fh:
@@ -349,6 +377,7 @@ class Backend(object):
 
         os.rename(tempname, filepath)
 
+    @profile
     def list_all_models(self, seed):
         model_directory = self.get_model_dir()
         if seed >= 0:
@@ -362,11 +391,13 @@ class Backend(object):
 
         return model_files
 
+    @profile
     def load_all_models(self, seed):
         model_files = self.list_all_models(seed)
         models = self.load_models_by_file_names(model_files)
         return models
 
+    @profile
     def load_models_by_file_names(self, model_file_names):
         models = dict()
 
@@ -390,6 +421,7 @@ class Backend(object):
 
         return models
 
+    @profile
     def load_models_by_identifiers(self, identifiers):
         models = dict()
 
@@ -400,6 +432,7 @@ class Backend(object):
 
         return models
 
+    @profile
     def load_model_by_seed_and_id_and_budget(self, seed, idx, budget):
         model_directory = self.get_model_dir()
 
@@ -408,9 +441,11 @@ class Backend(object):
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
 
+    @profile
     def get_ensemble_dir(self):
         return os.path.join(self.internals_directory, 'ensembles')
 
+    @profile
     def load_ensemble(self, seed):
         ensemble_dir = self.get_ensemble_dir()
 
@@ -433,6 +468,7 @@ class Backend(object):
 
         return ensemble_members_run_numbers
 
+    @profile
     def save_ensemble(self, ensemble, idx, seed):
         try:
             os.makedirs(self.get_ensemble_dir())
@@ -449,10 +485,12 @@ class Backend(object):
             tempname = fh.name
         os.rename(tempname, filepath)
 
+    @profile
     def _get_prediction_output_dir(self, subset):
         return os.path.join(self.internals_directory,
                             'predictions_%s' % subset)
 
+    @profile
     def get_prediction_output_path(self, subset, automl_seed, idx, budget):
         output_dir = self._get_prediction_output_dir(subset)
         # Make sure an output directory exists
@@ -462,6 +500,7 @@ class Backend(object):
         return os.path.join(output_dir, 'predictions_%s_%s_%s_%s.npy' %
                             (subset, automl_seed, idx, budget))
 
+    @profile
     def save_predictions_as_npy(self, predictions, filepath):
         with tempfile.NamedTemporaryFile('wb', dir=os.path.dirname(
                 filepath), delete=False) as fh:
@@ -469,6 +508,7 @@ class Backend(object):
             tempname = fh.name
         os.rename(tempname, filepath)
 
+    @profile
     def save_predictions_as_txt(self, predictions, subset, idx, precision, prefix=None):
         # Write prediction scores in prescribed format
         filepath = os.path.join(
@@ -488,6 +528,7 @@ class Backend(object):
             tempname = output_file.name
         os.rename(tempname, filepath)
 
+    @profile
     def write_txt_file(self, filepath, data, name):
         with lockfile.LockFile(filepath):
             with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(

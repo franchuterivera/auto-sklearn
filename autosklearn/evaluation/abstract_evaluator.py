@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 import os
 import time
 import warnings
@@ -31,6 +33,7 @@ WriteTask = namedtuple('WriteTask', ['lock', 'writer', 'args'])
 
 
 class MyDummyClassifier(DummyClassifier):
+    @profile
     def __init__(self, configuration, random_state, init_params=None):
         self.configuration = configuration
         if configuration == 1:
@@ -38,18 +41,22 @@ class MyDummyClassifier(DummyClassifier):
         else:
             super(MyDummyClassifier, self).__init__(strategy="most_frequent")
 
+    @profile
     def pre_transform(self, X, y, fit_params=None):  # pylint: disable=R0201
         if fit_params is None:
             fit_params = {}
         return X, fit_params
 
+    @profile
     def fit(self, X, y, sample_weight=None):
         return super(MyDummyClassifier, self).fit(np.ones((X.shape[0], 1)), y,
                                                   sample_weight=sample_weight)
 
+    @profile
     def fit_estimator(self, X, y, fit_params=None):
         return self.fit(X, y)
 
+    @profile
     def predict_proba(self, X, batch_size=1000):
         new_X = np.ones((X.shape[0], 1))
         probas = super(MyDummyClassifier, self).predict_proba(new_X)
@@ -57,14 +64,17 @@ class MyDummyClassifier(DummyClassifier):
             np.float32)
         return probas
 
+    @profile
     def estimator_supports_iterative_fit(self):  # pylint: disable=R0201
         return False
 
+    @profile
     def get_additional_run_info(self):  # pylint: disable=R0201
         return None
 
 
 class MyDummyRegressor(DummyRegressor):
+    @profile
     def __init__(self, configuration, random_state, init_params=None):
         self.configuration = configuration
         if configuration == 1:
@@ -72,30 +82,38 @@ class MyDummyRegressor(DummyRegressor):
         else:
             super(MyDummyRegressor, self).__init__(strategy='median')
 
+    @profile
     def pre_transform(self, X, y, fit_params=None):
         if fit_params is None:
             fit_params = {}
         return X, fit_params
 
+    @profile
     def fit(self, X, y, sample_weight=None):
         return super(MyDummyRegressor, self).fit(np.ones((X.shape[0], 1)), y,
                                                  sample_weight=sample_weight)
 
+    @profile
     def fit_estimator(self, X, y, fit_params=None):
         return self.fit(X, y)
 
+    @profile
     def predict(self, X, batch_size=1000):
         new_X = np.ones((X.shape[0], 1))
         return super(MyDummyRegressor, self).predict(new_X).astype(np.float32)
 
+    @profile
     def estimator_supports_iterative_fit(self):  # pylint: disable=R0201
         return False
 
+    @profile
     def get_additional_run_info(self):  # pylint: disable=R0201
         return None
 
 
+@profile
 def _fit_and_suppress_warnings(logger, model, X, y):
+    @profile
     def send_warnings_to_log(message, category, filename, lineno,
                              file=None, line=None):
         logger.debug('%s:%s: %s:%s',
@@ -110,6 +128,7 @@ def _fit_and_suppress_warnings(logger, model, X, y):
 
 
 class AbstractEvaluator(object):
+    @profile
     def __init__(self, backend, queue, metric,
                  configuration=None,
                  all_scoring_functions=False,
@@ -196,6 +215,7 @@ class AbstractEvaluator(object):
         self.budget = budget
         self.budget_type = budget_type
 
+    @profile
     def _get_model(self):
         if not isinstance(self.configuration, Configuration):
             model = self.model_class(configuration=self.configuration,
@@ -216,6 +236,7 @@ class AbstractEvaluator(object):
                                      init_params=self._init_params)
         return model
 
+    @profile
     def _loss(self, y_true, y_hat, all_scoring_functions=None):
         all_scoring_functions = (
             self.all_scoring_functions
@@ -243,6 +264,7 @@ class AbstractEvaluator(object):
 
         return err
 
+    @profile
     def finish_up(self, loss, train_loss,  opt_pred, valid_pred, test_pred,
                   additional_run_info, file_output, final_call, status):
         """This function does everything necessary after the fitting is done:
@@ -298,6 +320,7 @@ class AbstractEvaluator(object):
 
         self.queue.put(rval_dict)
 
+    @profile
     def calculate_auxiliary_losses(
         self,
         Y_valid_pred,
@@ -325,6 +348,7 @@ class AbstractEvaluator(object):
 
         return validation_loss, test_loss
 
+    @profile
     def file_output(
             self,
             Y_optimization_pred,
@@ -461,7 +485,9 @@ class AbstractEvaluator(object):
 
         return None, {}
 
+    @profile
     def _predict_proba(self, X, model, task_type, Y_train):
+        @profile
         def send_warnings_to_log(message, category, filename, lineno,
                                  file=None, line=None):
             self.logger.debug('%s:%s: %s:%s' %
@@ -475,7 +501,9 @@ class AbstractEvaluator(object):
         Y_pred = self._ensure_prediction_array_sizes(Y_pred, Y_train)
         return Y_pred
 
+    @profile
     def _predict_regression(self, X, model, task_type, Y_train=None):
+        @profile
         def send_warnings_to_log(message, category, filename, lineno,
                                  file=None, line=None):
             self.logger.debug('%s:%s: %s:%s' %
@@ -491,6 +519,7 @@ class AbstractEvaluator(object):
 
         return Y_pred
 
+    @profile
     def _ensure_prediction_array_sizes(self, prediction, Y_train):
         num_classes = self.datamanager.info['label_num']
 

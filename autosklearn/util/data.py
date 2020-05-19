@@ -3,6 +3,7 @@
 # challenge
 
 import numpy as np
+from memory_profiler import profile
 
 __all__ = [
     'predict_RAM_usage',
@@ -11,6 +12,7 @@ __all__ = [
 ]
 
 
+@profile
 def binarization(array):
     # Takes a binary-class datafile and turn the max value (positive class)
     # into 1 and the min into 0
@@ -27,11 +29,13 @@ def binarization(array):
     return np.array(array, dtype=int)
 
 
+@profile
 def multilabel_to_multiclass(array):
     array = binarization(array)
     return np.array([np.nonzero(array[i, :])[0][0] for i in range(len(array))])
 
 
+@profile
 def convert_to_num(Ybin):
     """
     Convert binary targets to numeric vector
@@ -45,6 +49,7 @@ def convert_to_num(Ybin):
     return result
 
 
+@profile
 def convert_to_bin(Ycont, nval, verbose=True):
     # Convert numeric vector to binary (typically classification target values)
     if verbose:
@@ -57,6 +62,7 @@ def convert_to_bin(Ycont, nval, verbose=True):
     return Ybin
 
 
+@profile
 def predict_RAM_usage(X, categorical):
     # Return estimated RAM usage of dataset after OneHotEncoding in bytes.
     estimated_columns = 0

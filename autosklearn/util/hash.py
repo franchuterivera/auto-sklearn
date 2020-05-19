@@ -1,9 +1,11 @@
 import hashlib
 
+from memory_profiler import profile
 import numpy as np
 import scipy.sparse
 
 
+@profile
 def hash_array_or_matrix(X):
     m = hashlib.md5()
 

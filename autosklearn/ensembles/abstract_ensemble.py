@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 from abc import ABCMeta, abstractmethod
 
 
@@ -5,6 +7,7 @@ class AbstractEnsemble(object):
     __metaclass__ = ABCMeta
 
     @abstractmethod
+    @profile
     def fit(self, base_models_predictions, true_targets, model_identifiers):
         """Fit an ensemble given predictions of base models and targets.
 
@@ -30,6 +33,7 @@ class AbstractEnsemble(object):
         pass
 
     @abstractmethod
+    @profile
     def predict(self, base_models_predictions):
         """Create ensemble predictions from the base model predictions.
 
@@ -45,6 +49,7 @@ class AbstractEnsemble(object):
         self
 
     @abstractmethod
+    @profile
     def get_models_with_weights(self, models):
         """Return a list of (weight, model) pairs
 
@@ -60,6 +65,7 @@ class AbstractEnsemble(object):
         """
 
     @abstractmethod
+    @profile
     def get_selected_model_identifiers(self):
         """Return identifiers of models in the ensemble.
 
@@ -71,6 +77,7 @@ class AbstractEnsemble(object):
         """
 
     @abstractmethod
+    @profile
     def get_validation_performance(self):
         """Return validation performance of ensemble.
 

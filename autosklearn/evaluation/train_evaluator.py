@@ -1,3 +1,5 @@
+from memory_profiler import profile
+
 import copy
 import json
 
@@ -52,6 +54,7 @@ __baseCrossValidator_defaults__ = {'GroupKFold': {'n_splits': 3},
                                    }
 
 
+@profile
 def _get_y_array(y, task_type):
     if task_type in CLASSIFICATION_TASKS and task_type != \
             MULTILABEL_CLASSIFICATION:
@@ -60,6 +63,7 @@ def _get_y_array(y, task_type):
         return y
 
 
+@profile
 def subsample_indices(train_indices, subsample, task_type, Y_train):
 
     if not isinstance(subsample, float):
@@ -96,6 +100,7 @@ def subsample_indices(train_indices, subsample, task_type, Y_train):
     return train_indices
 
 
+@profile
 def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train_indices,
                      task_type):
     if (
@@ -139,6 +144,7 @@ def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train
 
 
 class TrainEvaluator(AbstractEvaluator):
+    @profile
     def __init__(self, backend, queue, metric,
                  configuration=None,
                  all_scoring_functions=False,
@@ -195,6 +201,7 @@ class TrainEvaluator(AbstractEvaluator):
         self.partial = True
         self.keep_models = keep_models
 
+    @profile
     def fit_predict_and_loss(self, iterative=False):
         """Fit, predict and compute the loss for cross-validation and
         holdout (both iterative and non-iterative)"""
@@ -615,6 +622,7 @@ class TrainEvaluator(AbstractEvaluator):
                 status=status,
             )
 
+    @profile
     def partial_fit_predict_and_loss(self, fold, iterative=False):
         """Fit, predict and compute the loss for eval_partial_cv (both iterative and normal)"""
 
@@ -678,6 +686,7 @@ class TrainEvaluator(AbstractEvaluator):
                 status=status
             )
 
+    @profile
     def _partial_fit_and_predict_iterative(self, fold, train_indices, test_indices,
                                            add_model_to_self):
         model = self._get_model()
@@ -790,6 +799,7 @@ class TrainEvaluator(AbstractEvaluator):
             )
             return
 
+    @profile
     def _partial_fit_and_predict_standard(self, fold, train_indices, test_indices,
                                           add_model_to_self=False):
         model = self._get_model()
@@ -824,6 +834,7 @@ class TrainEvaluator(AbstractEvaluator):
             additional_run_info,
         )
 
+    @profile
     def _partial_fit_and_predict_budget(self, fold, train_indices, test_indices,
                                         add_model_to_self=False):
 
@@ -861,6 +872,7 @@ class TrainEvaluator(AbstractEvaluator):
             additional_run_info,
         )
 
+    @profile
     def _predict(self, model, test_indices, train_indices):
         train_pred = self.predict_function(self.X_train[train_indices],
                                            model, self.task_type,
@@ -888,6 +900,7 @@ class TrainEvaluator(AbstractEvaluator):
 
         return train_pred, opt_pred, valid_pred, test_pred
 
+    @profile
     def get_splitter(self, D):
 
         if self.resampling_strategy_args is None:
@@ -1021,6 +1034,7 @@ class TrainEvaluator(AbstractEvaluator):
 
 
 # create closure for evaluating an algorithm
+@profile
 def eval_holdout(
         queue,
         config,
@@ -1062,6 +1076,7 @@ def eval_holdout(
     evaluator.fit_predict_and_loss(iterative=iterative)
 
 
+@profile
 def eval_iterative_holdout(
         queue,
         config,
@@ -1103,6 +1118,7 @@ def eval_iterative_holdout(
     )
 
 
+@profile
 def eval_partial_cv(
         queue,
         config,
@@ -1150,6 +1166,7 @@ def eval_partial_cv(
     evaluator.partial_fit_predict_and_loss(fold=fold, iterative=iterative)
 
 
+@profile
 def eval_partial_cv_iterative(
         queue,
         config,
@@ -1192,6 +1209,7 @@ def eval_partial_cv_iterative(
 
 
 # create closure for evaluating an algorithm
+@profile
 def eval_cv(
         queue,
         config,
@@ -1234,6 +1252,7 @@ def eval_cv(
     evaluator.fit_predict_and_loss(iterative=iterative)
 
 
+@profile
 def eval_iterative_cv(
         queue,
         config,

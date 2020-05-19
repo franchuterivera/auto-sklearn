@@ -1,4 +1,6 @@
 # -*- encoding: utf-8 -*-
+from memory_profiler import profile
+
 from smac.tae.execute_ta_run import StatusType
 
 from autosklearn.evaluation.abstract_evaluator import (
@@ -16,6 +18,7 @@ __all__ = [
 
 class TestEvaluator(AbstractEvaluator):
 
+    @profile
     def __init__(self, backend, queue, metric,
                  configuration=None,
                  all_scoring_functions=False,
@@ -48,6 +51,7 @@ class TestEvaluator(AbstractEvaluator):
 
         self.model = self._get_model()
 
+    @profile
     def fit_predict_and_loss(self):
         _fit_and_suppress_warnings(self.logger, self.model, self.X_train, self.Y_train)
         loss, Y_pred, _, _ = self.predict_and_loss()
@@ -63,6 +67,7 @@ class TestEvaluator(AbstractEvaluator):
             status=StatusType.SUCCESS,
         )
 
+    @profile
     def predict_and_loss(self, train=False):
 
         if train:
@@ -94,6 +99,7 @@ class TestEvaluator(AbstractEvaluator):
 
 # create closure for evaluating an algorithm
 # Has a stupid name so pytest doesn't regard it as a test
+@profile
 def eval_t(queue, config, backend, metric, seed, num_run, instance,
            all_scoring_functions, output_y_hat_optimization, include,
            exclude, disable_file_output, init_params=None, budget_type=None,
