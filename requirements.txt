@@ -18,3 +18,8 @@ ConfigSpace>=0.4.0,<0.5
 pynisher>=0.4.2
 pyrfr>=0.7,<0.9
 smac>=0.12
+memory_profiler
+emcee
+scikit-optimize
+pyDOE
+
