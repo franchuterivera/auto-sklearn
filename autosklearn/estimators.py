@@ -13,6 +13,9 @@ from autosklearn.util.backend import create, get_randomized_directory_names
 
 from memory_profiler import profile
 
+from autosklearn.util.common import print_getrusage
+
+
 
 @profile
 def _fit_automl(automl, kwargs, load_models):
@@ -270,6 +273,7 @@ class AutoSklearnEstimator(BaseEstimator):
         # n_jobs after conversion to a number (b/c default is None)
         self._n_jobs = None
         super().__init__()
+        print_getrusage("AutoSklearnEstimator")
 
     @profile
     def build_automl(
@@ -283,6 +287,7 @@ class AutoSklearnEstimator(BaseEstimator):
         smac_scenario_args: Optional[Dict] = None,
     ):
 
+        print_getrusage("AutoSklearnEstimator->build automl()")
         if shared_mode:
             self.delete_output_folder_after_terminate = False
             self.delete_tmp_folder_after_terminate = False
@@ -333,6 +338,7 @@ class AutoSklearnEstimator(BaseEstimator):
 
     @profile
     def fit(self, **kwargs):
+        print_getrusage("AutoSklearnEstimator->fit()")
         self._automl = []
         if self.shared_mode and self.n_jobs:
             raise ValueError(
@@ -475,6 +481,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self
 
         """
+        print_getrusage("AutoSklearnEstimator->fit_ensemble()")
         if self._automl is None:
             if self.n_jobs is None or self.n_jobs == 1:
                 shared_mode = self.shared_mode

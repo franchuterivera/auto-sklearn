@@ -38,6 +38,7 @@ from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION
 
+from autosklearn.util.common import print_getrusage
 from memory_profiler import profile
 
 
@@ -47,6 +48,10 @@ def _model_predict(self, X, batch_size, identifier):
             message, category, filename, lineno, file=None, line=None):
         self._logger.debug('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
         return
+
+    print_getrusage("_model_predict() START")
+
+
     model = self.models_[identifier]
     X_ = X.copy()
     with warnings.catch_warnings():
@@ -69,6 +74,8 @@ def _model_predict(self, X, batch_size, identifier):
                              "while X_.shape is %s" %
                              (model, str(prediction.shape),
                               str(X_.shape)))
+
+    print_getrusage("_model_predict() END")
     return prediction
 
 
@@ -103,6 +110,7 @@ class AutoML(BaseEstimator):
                  logging_config=None,
                  ):
         super(AutoML, self).__init__()
+        print_getrusage("AutoML object creation")
         self._backend = backend
         # self._tmp_dir = tmp_dir
         # self._output_dir = output_dir
@@ -171,6 +179,7 @@ class AutoML(BaseEstimator):
         only_return_configuration_space: Optional[bool] = False,
         load_models: bool = True,
     ):
+        print_getrusage("AutoML->fit() START")
         if self._shared_mode:
             # If this fails, it's likely that this is the first call to get
             # the data manager
@@ -219,12 +228,14 @@ class AutoML(BaseEstimator):
             dataset_name=dataset_name,
         )
 
-        return self._fit(
+        fit_result =  self._fit(
             datamanager=loaded_data_manager,
             metric=metric,
             load_models=load_models,
             only_return_configuration_space=only_return_configuration_space,
         )
+        print_getrusage("AutoML->fit() END")
+        return fit_result
 
     # TODO this is very old code which can be dropped!
     @profile
@@ -303,6 +314,7 @@ class AutoML(BaseEstimator):
     @profile
     def _do_dummy_prediction(self, datamanager, num_run):
 
+        print_getrusage("AutoML->_do_dummy_prediction()")
         # When using partial-cv it makes no sense to do dummy predictions
         if self._resampling_strategy in ['partial-cv',
                                          'partial-cv-iterative-fit']:
@@ -347,6 +359,7 @@ class AutoML(BaseEstimator):
         load_models: bool,
         only_return_configuration_space: bool = False,
     ):
+        print_getrusage("AutoML->_fit() START")
         # Reset learnt stuff
         self.models_ = None
         self.ensemble_ = None
@@ -470,6 +483,7 @@ class AutoML(BaseEstimator):
             pass
 
         # => RUN SMAC
+        print_getrusage("AutoML->_fit() before smac call")
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
         elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
@@ -539,6 +553,7 @@ class AutoML(BaseEstimator):
         if load_models:
             self._load_models()
 
+        print_getrusage("AutoML->_fit() END")
         return self
 
     @profile
@@ -610,6 +625,7 @@ class AutoML(BaseEstimator):
             Parallelize the predictions across the models with n_jobs
             processes.
         """
+        print_getrusage("AutoML->predict() start")
         if self._keep_models is not True:
             raise ValueError(
                 "Predict can only be called if 'keep_models==True'")
@@ -651,12 +667,14 @@ class AutoML(BaseEstimator):
             # Individual models are checked in _model_predict
             predictions = np.clip(predictions, 0.0, 1.0)
 
+        print_getrusage("AutoML->predict() end")
         return predictions
 
     @profile
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
+        print_getrusage("AutoML->fit_ensemble() START")
         if self._resampling_strategy in ['partial-cv', 'partial-cv-iterative-fit']:
             raise ValueError('Cannot call fit_ensemble with resampling '
                              'strategy %s.' % self._resampling_strategy)
@@ -669,7 +687,9 @@ class AutoML(BaseEstimator):
             ensemble_nbest=ensemble_nbest, ensemble_size=ensemble_size)
         self._proc_ensemble.main()
         self._proc_ensemble = None
+        print_getrusage("AutoML-> inside call to load models")
         self._load_models()
+        print_getrusage("AutoML->fit_ensemble() END")
         return self
 
     @profile
@@ -728,6 +748,7 @@ class AutoML(BaseEstimator):
 
     @profile
     def _load_models(self):
+        print_getrusage("AutoML->_load_models()")
         if self._shared_mode:
             seed = -1
         else:
@@ -759,6 +780,7 @@ class AutoML(BaseEstimator):
     def score(self, X, y):
         # fix: Consider only index 1 of second dimension
         # Don't know if the reshaping should be done there or in calculate_score
+        print_getrusage("AutoML->score()")
         prediction = self.predict(X)
         return calculate_score(solution=y,
                                prediction=prediction,
@@ -785,6 +807,7 @@ class AutoML(BaseEstimator):
         # std_score_time - auto-sklearn does not store the score time
         # TODO: add those arguments
 
+        print_getrusage("AutoML->cv_results_()")
         # TODO remove this restriction!
         if self._resampling_strategy in ['partial-cv', 'partial-cv-iterative-fit']:
             raise ValueError('Cannot call cv_results when using partial-cv!')
@@ -895,6 +918,7 @@ class AutoML(BaseEstimator):
 
     @profile
     def get_models_with_weights(self):
+        print_getrusage("AutoML->get_models_with_weights()")
         if self.models_ is None or len(self.models_) == 0 or \
                 self.ensemble_ is None:
             self._load_models()
@@ -920,6 +944,7 @@ class AutoML(BaseEstimator):
                              include_preprocessors=None,
                              exclude_preprocessors=None):
         task_name = 'CreateConfigSpace'
+        print_getrusage("AutoML->_create_search_space()")
 
         self._stopwatch.start_task(task_name)
         configspace_path = os.path.join(tmp_dir, 'space.pcs')
@@ -1010,6 +1035,7 @@ class AutoMLClassifier(BaseAutoML):
     @profile
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        print_getrusage("AutoMLClassifier creation")
 
         self._task_mapping = {'multilabel-indicator': MULTILABEL_CLASSIFICATION,
                               'multiclass': MULTICLASS_CLASSIFICATION,
@@ -1028,6 +1054,7 @@ class AutoMLClassifier(BaseAutoML):
         only_return_configuration_space: bool = False,
         load_models: bool = True,
     ):
+        print_getrusage("AutoMLClassifier->fit() START")
         X, y = self._perform_input_checks(X, y)
         if X_test is not None:
             X_test, y_test = self._perform_input_checks(X_test, y_test)
@@ -1078,6 +1105,7 @@ class AutoMLClassifier(BaseAutoML):
     def fit_ensemble(self, y, task=None, metric=None, precision='32',
                      dataset_name=None, ensemble_nbest=None,
                      ensemble_size=None):
+        print_getrusage("AutoMLClassifier->fit_ensemble() START")
         y, _classes, _n_classes = self._process_target_classes(y)
         if not hasattr(self, '_classes'):
             self._classes = _classes
@@ -1116,6 +1144,7 @@ class AutoMLClassifier(BaseAutoML):
         predicted_probabilities = super().predict(X, batch_size=batch_size,
                                                   n_jobs=n_jobs)
 
+        print_getrusage("AutoMLClassifier->predict() START")
         if self._n_outputs == 1:
             predicted_indexes = np.argmax(predicted_probabilities, axis=1)
             predicted_classes = self._classes[0].take(predicted_indexes)
@@ -1135,6 +1164,7 @@ class AutoMLClassifier(BaseAutoML):
 
     @profile
     def predict_proba(self, X, batch_size=None, n_jobs=1):
+        print_getrusage("AutoMLClassifier->predict_proba() START")
         return super().predict(X, batch_size=batch_size, n_jobs=n_jobs)
 
 

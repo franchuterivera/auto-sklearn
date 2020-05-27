@@ -20,6 +20,7 @@ from autosklearn.metrics import calculate_score, Scorer
 from autosklearn.ensembles.ensemble_selection import EnsembleSelection
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import get_logger
+from autosklearn.util.common import print_getrusage
 
 Y_ENSEMBLE = 0
 Y_VALID = 1
@@ -101,6 +102,7 @@ class EnsembleBuilder(multiprocessing.Process):
         """
 
         super(EnsembleBuilder, self).__init__()
+        print_getrusage("Ensemble Builder Object Construction")
 
         self.backend = backend  # communication with filesystem
         self.dataset_name = dataset_name
@@ -196,6 +198,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
     @profile
     def run(self):
+        print_getrusage("EnsembleBuilder->Run()")
         buffer_time = 5  # TODO: Buffer time should also be used in main!?
         while True:
             time_left = self.time_limit - buffer_time
@@ -232,6 +235,7 @@ class EnsembleBuilder(multiprocessing.Process):
             return tuple with last valid, test predictions
         :return:
         """
+        print_getrusage("EnsembleBuilder->main()")
         self.start_time = time.time()
         iteration = 0
         valid_pred, test_pred = None, None
@@ -254,18 +258,21 @@ class EnsembleBuilder(multiprocessing.Process):
             )
 
             # populates self.read_preds
+            print_getrusage("EnsembleBuilder->main()-> call to read preds")
             if not self.read_ensemble_preds():
                 time.sleep(self.sleep_duration)
                 continue
 
             # Only the models with the n_best predictions are candidates
             # to be in the ensemble
+            print_getrusage("EnsembleBuilder->main()-> call to get preds")
             candidate_models = self.get_n_best_preds()
             if not candidate_models:  # no candidates yet
                 continue
 
             # populates predictions in self.read_preds
             # reduces selected models if file reading failed
+            print_getrusage("EnsembleBuilder->main()-> call to get valid test preds")
             n_sel_valid, n_sel_test = self. \
                 get_valid_test_preds(selected_keys=candidate_models)
 
@@ -304,6 +311,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     self._has_been_candidate.add(candidate)
 
             # train ensemble
+            print_getrusage("EnsembleBuilder->main()-> call to fit the ensemble")
             ensemble = self.fit_ensemble(selected_keys=candidate_models)
             if ensemble is not None:
                 # We can't use candidate_models here, as n_sel_* might be empty
@@ -332,6 +340,7 @@ class EnsembleBuilder(multiprocessing.Process):
         """
 
         self.logger.debug("Read ensemble data set predictions")
+        print_getrusage("EnsembleBuilder->read_ensemble_preds() START")
 
         if self.y_true_ensemble is None:
             try:
@@ -466,6 +475,7 @@ class EnsembleBuilder(multiprocessing.Process):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_preds.values()])
         )
+        print_getrusage("EnsembleBuilder->read_ensemble_preds() END")
         return True
 
     @profile
@@ -478,6 +488,7 @@ class EnsembleBuilder(multiprocessing.Process):
             Side effect: delete predictions of non-candidate models
         """
 
+        print_getrusage("EnsembleBuilder->get_n_best_preds()")
         sorted_keys = self._get_list_of_sorted_preds()
 
         # number of models available
@@ -603,6 +614,7 @@ class EnsembleBuilder(multiprocessing.Process):
             all keys in selected keys for which we could read the valid and
             test predictions
         """
+        print_getrusage("EnsembleBuilder->get_valid_test_preds()")
         success_keys_valid = []
         success_keys_test = []
 
@@ -703,6 +715,7 @@ class EnsembleBuilder(multiprocessing.Process):
             ensemble: EnsembleSelection
                 trained Ensemble
         """
+        print_getrusage("EnsembleBuilder->fit_ensemble() START")
         predictions_train = np.array([self.read_preds[k][Y_ENSEMBLE] for k in selected_keys])
         include_num_runs = [
             (
@@ -767,6 +780,7 @@ class EnsembleBuilder(multiprocessing.Process):
         if self.max_models_on_disc is not None:
             self._delete_excess_models()
 
+        print_getrusage("EnsembleBuilder->fit_ensemble() END")
         return ensemble
 
     @profile
@@ -796,6 +810,7 @@ class EnsembleBuilder(multiprocessing.Process):
             ------
             y: np.ndarray
         """
+        print_getrusage("EnsembleBuilder->predict() START")
         self.logger.debug("Predicting the %s set with the ensemble!", set_)
 
         # Save the ensemble for later use in the main auto-sklearn module!
@@ -819,6 +834,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     prefix=self.dataset_name,
                     precision=8,
                 )
+            print_getrusage("EnsembleBuilder->predict() END")
             return y
         else:
             self.logger.info(
@@ -828,6 +844,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 n_preds,
                 set_,
             )
+            print_getrusage("EnsembleBuilder->predict() END")
             return None
         # TODO: ADD saving of predictions on "ensemble data"
 
@@ -869,6 +886,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
         """
 
+        print_getrusage("EnsembleBuilder->_delete_excess_models()")
         # Obtain a list of sorted pred keys
         sorted_keys = self._get_list_of_sorted_preds()
         sorted_keys = list(map(lambda x: x[0], sorted_keys))
@@ -965,6 +983,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
     @profile
     def _read_np_fn(self, fp):
+        print_getrusage("EnsembleBuilder->_read_np_fn() START")
         if self.precision == "16":
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float16)
         elif self.precision == "32":
@@ -973,4 +992,5 @@ class EnsembleBuilder(multiprocessing.Process):
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float64)
         else:
             predictions = np.load(fp, allow_pickle=True)
+        print_getrusage("EnsembleBuilder->_read_np_fn() END")
         return predictions
