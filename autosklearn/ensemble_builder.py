@@ -453,7 +453,7 @@ class EnsembleBuilder(multiprocessing.Process):
                         )
 
                     self.read_preds[y_ens_fn]["ens_score"] = score
-                    self.read_preds[y_ens_fn][Y_ENSEMBLE] = y_ensemble
+                    #self.read_preds[y_ens_fn][Y_ENSEMBLE] = y_ensemble
                     self.read_preds[y_ens_fn]["mtime_ens"] = os.path.getmtime(
                         y_ens_fn
                     )
