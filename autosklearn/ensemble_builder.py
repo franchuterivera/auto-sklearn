@@ -984,11 +984,11 @@ class EnsembleBuilder(multiprocessing.Process):
     @profile
     def _read_np_fn(self, fp):
         print_getrusage("EnsembleBuilder->_read_np_fn() START")
-        if self.precision == "16":
+        if self.precision == 16:
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float16)
-        elif self.precision == "32":
+        elif self.precision == 32:
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float32)
-        elif self.precision == "64":
+        elif self.precision == 64:
             predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float64)
         else:
             predictions = np.load(fp, allow_pickle=True)
