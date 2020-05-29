@@ -16,32 +16,34 @@ __all__ = [
 
 def print_getrusage(message):
     print("\nLocation: {}".format(message))
-    columns = ["Index", "Field", "Resource"]
-    fields = [
-        'ru_utime',
-        'ru_stime',
-        'ru_maxrss',
-        'ru_ixrss',
-        'ru_idrss',
-        'ru_isrss',
-        'ru_minflt',
-        'ru_majflt',
-        'ru_nswap',
-        'ru_inblock',
-        'ru_oublock',
-        'ru_msgsnd',
-        'ru_msgrcv',
-        'ru_nsignals',
-        'ru_nvcsw',
-        'ru_nivcsw',
-    ]
+    for member in [RUSAGE_SELF, RUSAGE_CHILDREN, RUSAGE_BOTH, RUSAGE_THREAD]:
+        print(f"member={member}")
+        columns = ["Index", "Field", "Resource"]
+        fields = [
+            'ru_utime',
+            'ru_stime',
+            'ru_maxrss',
+            'ru_ixrss',
+            'ru_idrss',
+            'ru_isrss',
+            'ru_minflt',
+            'ru_majflt',
+            'ru_nswap',
+            'ru_inblock',
+            'ru_oublock',
+            'ru_msgsnd',
+            'ru_msgrcv',
+            'ru_nsignals',
+            'ru_nvcsw',
+            'ru_nivcsw',
+        ]
 
-    rusage = getrusage(RUSAGE_SELF)
-    rows = []
-    for i, field in enumerate(fields):
-        rows.append([i, field, getattr(rusage, field)])
-    print(tabulate(rows, columns, tablefmt="grid"))
-    print("\n")
+        rusage = getrusage(member)
+        rows = []
+        for i, field in enumerate(fields):
+            rows.append([i, field, getattr(rusage, field)])
+        print(tabulate(rows, columns, tablefmt="grid"))
+        print("\n")
 
 
 @profile
