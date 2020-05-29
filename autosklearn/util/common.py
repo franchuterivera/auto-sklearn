@@ -16,7 +16,7 @@ __all__ = [
 
 def print_getrusage(message):
     print("\nLocation: {}".format(message))
-    for member in [RUSAGE_SELF, RUSAGE_CHILDREN, RUSAGE_BOTH, RUSAGE_THREAD]:
+    for member in [RUSAGE_SELF, RUSAGE_CHILDREN]:
         print(f"member={member}")
         columns = ["Index", "Field", "Resource"]
         fields = [
