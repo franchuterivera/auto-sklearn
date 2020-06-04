@@ -9,6 +9,7 @@ from autosklearn.constants import TASK_TYPES
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.metrics import calculate_score
 from autosklearn.metrics import Scorer
+from autosklearn.util.common import print_getrusage
 
 
 class EnsembleSelection(AbstractEnsemble):
@@ -33,6 +34,7 @@ class EnsembleSelection(AbstractEnsemble):
 
     @profile
     def fit(self, predictions, labels, identifiers):
+        print_getrusage("ensemble selection fit START")
         self.ensemble_size = int(self.ensemble_size)
         if self.ensemble_size < 1:
             raise ValueError('Ensemble size cannot be less than one!')
@@ -49,14 +51,17 @@ class EnsembleSelection(AbstractEnsemble):
             self._fit(predictions, labels)
         self._calculate_weights()
         self.identifiers_ = identifiers
+        print_getrusage("ensemble selection fit END")
         return self
 
     @profile
     def _fit(self, predictions, labels):
+        print_getrusage("ensemble selection _fit START")
         if self.mode == 'fast':
             self._fast(predictions, labels)
         else:
             self._slow(predictions, labels)
+        print_getrusage("ensemble selection _fit END")
         return self
 
     @profile
@@ -177,6 +182,7 @@ class EnsembleSelection(AbstractEnsemble):
 
     @profile
     def _calculate_weights(self):
+        print_getrusage("ensemble selection _calculate_weights START")
         ensemble_members = Counter(self.indices_).most_common()
         weights = np.zeros((self.num_input_models_,), dtype=float)
         for ensemble_member in ensemble_members:
@@ -187,6 +193,7 @@ class EnsembleSelection(AbstractEnsemble):
             weights = weights / np.sum(weights)
 
         self.weights_ = weights
+        print_getrusage("ensemble selection _calculate_weights END")
 
     @profile
     def _sorted_initialization(self, predictions, labels, n_best):
@@ -197,6 +204,7 @@ class EnsembleSelection(AbstractEnsemble):
                                         self.metric, predictions.shape[1])
 
         indices = np.argsort(perf)[perf.shape[0] - n_best:]
+        print_getrusage("ensemble selection _sorted_initialization")
         return indices
 
     @profile
@@ -218,18 +226,23 @@ class EnsembleSelection(AbstractEnsemble):
 
     @profile
     def predict(self, predictions):
+        print_getrusage("ensemble selection predit start")
         predictions = np.asarray(predictions)
 
         # if predictions.shape[0] == len(self.weights_),
         # predictions include those of zero-weight models.
         if predictions.shape[0] == len(self.weights_):
-            return np.average(predictions, axis=0, weights=self.weights_)
+            value = np.average(predictions, axis=0, weights=self.weights_)
+            print_getrusage("ensemble selection _sorted_initialization")
+            return value
 
         # if prediction model.shape[0] == len(non_null_weights),
         # predictions do not include those of zero-weight models.
         elif predictions.shape[0] == np.count_nonzero(self.weights_):
             non_null_weights = [w for w in self.weights_ if w > 0]
-            return np.average(predictions, axis=0, weights=non_null_weights)
+            value = np.average(predictions, axis=0, weights=non_null_weights)
+            print_getrusage("ensemble selection _sorted_initialization")
+            return value
 
         # If none of the above applies, then something must have gone wrong.
         else:

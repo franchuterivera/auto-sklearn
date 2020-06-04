@@ -13,6 +13,7 @@ from typing import Union
 
 from memory_profiler import profile
 from autosklearn.util import logging_ as logging
+from autosklearn.util.common import print_getrusage
 
 
 __all__ = [
@@ -285,6 +286,7 @@ class Backend(object):
 
     @profile
     def save_targets_ensemble(self, targets):
+        print_getrusage("save_targets_ensemble START")
         self._make_internals_directory()
         if not isinstance(targets, np.ndarray):
             raise ValueError('Targets must be of type np.ndarray, but is %s' %
@@ -321,16 +323,19 @@ class Backend(object):
 
             os.rename(tempname, filepath)
 
+        print_getrusage("save_targets_ensemble END")
         return filepath
 
     @profile
     def load_targets_ensemble(self):
+        print_getrusage("save_targets_ensemble START")
         filepath = self._get_targets_ensemble_filename()
 
         with lockfile.LockFile(filepath):
             with open(filepath, 'rb') as fh:
                 targets = np.load(fh, allow_pickle=True)
 
+        print_getrusage("save_targets_ensemble END")
         return targets
 
     @profile
@@ -339,6 +344,7 @@ class Backend(object):
 
     @profile
     def save_datamanager(self, datamanager):
+        print_getrusage("save_datamanager START")
         self._make_internals_directory()
         filepath = self._get_datamanager_pickle_filename()
 
@@ -350,14 +356,18 @@ class Backend(object):
                     tempname = fh.name
                 os.rename(tempname, filepath)
 
+        print_getrusage("save_datamanager END")
         return filepath
 
     @profile
     def load_datamanager(self):
+        print_getrusage("load_datamanager start")
         filepath = self._get_datamanager_pickle_filename()
         with lockfile.LockFile(filepath):
             with open(filepath, 'rb') as fh:
-                return pickle.load(fh)
+                value = pickle.load(fh)
+                print_getrusage("load_datamanager END")
+                return value
 
     @profile
     def get_model_dir(self):
@@ -393,12 +403,15 @@ class Backend(object):
 
     @profile
     def load_all_models(self, seed):
+        print_getrusage("load_all_models START")
         model_files = self.list_all_models(seed)
         models = self.load_models_by_file_names(model_files)
+        print_getrusage("load_all_models END")
         return models
 
     @profile
     def load_models_by_file_names(self, model_file_names):
+        print_getrusage("load_models_by_file_names start")
         models = dict()
 
         for model_file in model_file_names:
@@ -419,10 +432,12 @@ class Backend(object):
             models[(seed, idx, budget)] = self.load_model_by_seed_and_id_and_budget(
                 seed, idx, budget)
 
+        print_getrusage("load_models_by_file_names END")
         return models
 
     @profile
     def load_models_by_identifiers(self, identifiers):
+        print_getrusage("load_models_by_identifiers START")
         models = dict()
 
         for identifier in identifiers:
@@ -430,16 +445,20 @@ class Backend(object):
             models[identifier] = self.load_model_by_seed_and_id_and_budget(
                 seed, idx, budget)
 
+        print_getrusage("load_models_by_identifiers END")
         return models
 
     @profile
     def load_model_by_seed_and_id_and_budget(self, seed, idx, budget):
+        print_getrusage("load_model_by_seed_and_id_and_budget START")
         model_directory = self.get_model_dir()
 
         model_file_name = '%s.%s.%s.model' % (seed, idx, budget)
         model_file_path = os.path.join(model_directory, model_file_name)
         with open(model_file_path, 'rb') as fh:
-            return pickle.load(fh)
+            data =  pickle.load(fh)
+            print_getrusage("load_model_by_seed_and_id_and_budget END")
+            return data
 
     @profile
     def get_ensemble_dir(self):
@@ -447,6 +466,7 @@ class Backend(object):
 
     @profile
     def load_ensemble(self, seed):
+        print_getrusage("load_ensemble START")
         ensemble_dir = self.get_ensemble_dir()
 
         if not os.path.exists(ensemble_dir):
@@ -466,6 +486,7 @@ class Backend(object):
         with open(indices_files[-1], 'rb') as fh:
             ensemble_members_run_numbers = pickle.load(fh)
 
+        print_getrusage("load_ensemble END")
         return ensemble_members_run_numbers
 
     @profile

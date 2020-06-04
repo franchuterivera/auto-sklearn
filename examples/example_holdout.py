@@ -23,11 +23,13 @@ def main():
         sklearn.model_selection.train_test_split(X, y, random_state=1)
 
     automl = autosklearn.classification.AutoSklearnClassifier(
-        time_left_for_this_task=120,
-        per_run_time_limit=30,
+        time_left_for_this_task=300,
+        ml_memory_limit=3072,
+        ensemble_memory_limit=0.000001,
         tmp_folder='/tmp/autosklearn_holdout_example_tmp',
         output_folder='/tmp/autosklearn_holdout_example_out',
-        disable_evaluator_output=False,
+        delete_output_folder_after_terminate=False,
+        delete_tmp_folder_after_terminate=False,
         # 'holdout' with 'train_size'=0.67 is the default argument setting
         # for AutoSklearnClassifier. It is explicitly specified in this example
         # for demonstrational purpose.

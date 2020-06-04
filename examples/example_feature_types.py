@@ -49,8 +49,8 @@ def main():
                  for ci in categorical_indicator]
 
     cls = autosklearn.classification.AutoSklearnClassifier(
-        time_left_for_this_task=120,
-        per_run_time_limit=30,
+        time_left_for_this_task=300,
+        ensemble_memory_limit=100,
     )
     cls.fit(X_train, y_train, feat_type=feat_type)
 

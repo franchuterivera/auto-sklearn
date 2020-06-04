@@ -329,6 +329,7 @@ class EnsembleBuilder(multiprocessing.Process):
                                          index_run=iteration)
             else:
                 time.sleep(self.sleep_duration)
+            print_getrusage("EnsembleBuilder->main()-> call AFTER fit the ensemble")
         if return_pred:
             return valid_pred, test_pred
 

@@ -46,7 +46,7 @@ def print_getrusage(message):
     for key, value in dict(psutil.virtual_memory()._asdict()).items():
         print(f"psutil {key} = {value}")
 
-    for member in [RUSAGE_SELF, RUSAGE_CHILDREN, RUSAGE_THREAD]:
+    for member in [RUSAGE_SELF, RUSAGE_CHILDREN]:
         print(f"member={member}")
         columns = ["Index", "Field", "Resource"]
         fields = [
@@ -73,7 +73,12 @@ def print_getrusage(message):
         for i, field in enumerate(fields):
             rows.append([i, field, getattr(rusage, field)])
         print(tabulate(rows, columns, tablefmt="grid"))
+        filename = '/proc/' + str(os.getpid())+'/status'
+        with open(filename, 'r') as fin:
+            print(fin.read())
         print("\n")
+
+
 
 
 @profile
