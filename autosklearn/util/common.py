@@ -73,12 +73,33 @@ def print_getrusage(message):
         for i, field in enumerate(fields):
             rows.append([i, field, getattr(rusage, field)])
         print(tabulate(rows, columns, tablefmt="grid"))
-        filename = '/proc/' + str(os.getpid())+'/status'
+
+
+    id = str(os.getpid())
+    print(f"Current Process = {id}")
+    filename = '/proc/' + str(id) +'/status'
+    with open(filename, 'r') as fin:
+        print(fin.read())
+    print("\n")
+
+    ppid = os.getppid()
+    if ppid and os.path.exists('/proc/' + str(ppid) +'/status'):
+        print(f"Parent Process = {ppid}")
+        filename = '/proc/' + str(ppid) +'/status'
         with open(filename, 'r') as fin:
             print(fin.read())
         print("\n")
 
-
+    parent = psutil.Process(os.getpid())
+    children = parent.children(recursive=True)
+    for process in children:
+        pid = process.pid
+        print(f"Children Process = {pid}")
+        if pid and os.path.exists('/proc/' + str(pid) +'/status'):
+            filename = '/proc/' + str(pid) +'/status'
+            with open(filename, 'r') as fin:
+                print(fin.read())
+            print("\n")
 
 
 @profile
