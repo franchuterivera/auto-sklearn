@@ -67,6 +67,7 @@ class EnsembleSelection(AbstractEnsemble):
     @profile
     def _fast(self, predictions, labels):
         """Fast version of Rich Caruana's ensemble selection method."""
+        print_getrusage("ensemble selection _fast START")
         self.num_input_models_ = len(predictions)
 
         ensemble = []
@@ -76,9 +77,11 @@ class EnsembleSelection(AbstractEnsemble):
         ensemble_size = self.ensemble_size
 
         if self.sorted_initialization:
+            print_getrusage("Inside sorted initializations")
             n_best = 20
             indices = self._sorted_initialization(predictions, labels, n_best)
             for idx in indices:
+                print_getrusage(f"Inside sorted initializations iter{idx}")
                 ensemble.append(predictions[idx])
                 order.append(idx)
                 ensemble_ = np.array(ensemble).mean(axis=0)
@@ -89,6 +92,7 @@ class EnsembleSelection(AbstractEnsemble):
             ensemble_size -= n_best
 
         for i in range(ensemble_size):
+            print_getrusage(f"Iteration for scoring i={i}")
             scores = np.zeros((len(predictions)))
             s = len(ensemble)
             if s == 0:
@@ -103,6 +107,7 @@ class EnsembleSelection(AbstractEnsemble):
                 weighted_ensemble_prediction = (s / float(s + 1)) * ensemble_prediction
             fant_ensemble_prediction = np.zeros(weighted_ensemble_prediction.shape)
             for j, pred in enumerate(predictions):
+                print_getrusage(f"Iteration for scoring i={i} and j={j}")
                 # TODO: this could potentially be vectorized! - let's profile
                 # the script first!
                 fant_ensemble_prediction[:, :] = \
@@ -114,8 +119,10 @@ class EnsembleSelection(AbstractEnsemble):
                     metric=self.metric,
                     all_scoring_functions=False)
 
+            print_getrusage(f"Before all best")
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
             best = self.random_state.choice(all_best)
+            print_getrusage(f"Before appending to ensemble")
             ensemble.append(predictions[best])
             trajectory.append(scores[best])
             order.append(best)
@@ -127,6 +134,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.indices_ = order
         self.trajectory_ = trajectory
         self.train_score_ = trajectory[-1]
+        print_getrusage("ensemble selection _fast END")
 
     @profile
     def _slow(self, predictions, labels):
