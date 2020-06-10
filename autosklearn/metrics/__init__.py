@@ -8,6 +8,7 @@ from sklearn.utils.multiclass import type_of_target
 
 from autosklearn.constants import REGRESSION_TASKS, TASK_TYPES
 from .util import sanitize_array
+from autosklearn.util.common import print_getrusage
 
 
 class Scorer(object, metaclass=ABCMeta):
@@ -255,6 +256,7 @@ for name, metric in [('precision', sklearn.metrics.precision_score),
 
 def calculate_score(solution, prediction, task_type, metric,
                     all_scoring_functions=False):
+    print_getrusage(f"Calculate score start")
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
 
