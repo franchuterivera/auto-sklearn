@@ -718,6 +718,7 @@ class EnsembleBuilder(multiprocessing.Process):
         """
         print_getrusage("EnsembleBuilder->fit_ensemble() START")
         predictions_train = np.array([self.read_preds[k][Y_ENSEMBLE] for k in selected_keys])
+        print_getrusage("after predictions_train creation of predictions_train={predictions_train.shape}")
         include_num_runs = [
             (
                 self.read_preds[k]["seed"],
@@ -742,6 +743,7 @@ class EnsembleBuilder(multiprocessing.Process):
             return None
         self.last_hash = current_hash
 
+        print_getrusage("Before the ensemble selection creation")
         ensemble = EnsembleSelection(
             ensemble_size=self.ensemble_size,
             task_type=self.task_type,
@@ -763,6 +765,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 end_time - start_time,
             )
             self.logger.info(ensemble)
+            print_getrusage("before validation performance")
             self.validation_performance_ = min(
                 self.validation_performance_,
                 ensemble.get_validation_performance(),
