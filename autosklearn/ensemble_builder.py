@@ -441,6 +441,14 @@ class EnsembleBuilder(multiprocessing.Process):
                                             task_type=self.task_type,
                                             metric=self.metric,
                                             all_scoring_functions=False)
+                    scores_32 = calculate_score(solution=self.y_true_ensemble,
+                                            # y_ensemble = y_true for ensemble set
+                                            prediction=np.array(y_ensemble, dtype=np.float32),
+                                            task_type=self.task_type,
+                                            metric=self.metric,
+                                            all_scoring_functions=False)
+                    #label,time,64,32
+                    print(f"PRECISIONCALCULATION,{time.time()},{score},{scores_32}")
 
                     if self.read_preds[y_ens_fn]["ens_score"] > -1:
                         self.logger.debug(

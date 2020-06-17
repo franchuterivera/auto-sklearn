@@ -782,11 +782,18 @@ class AutoML(BaseEstimator):
         # Don't know if the reshaping should be done there or in calculate_score
         print_getrusage("AutoML->score()")
         prediction = self.predict(X)
-        return calculate_score(solution=y,
+        score_64 = calculate_score(solution=y,
                                prediction=prediction,
                                task_type=self._task,
                                metric=self._metric,
                                all_scoring_functions=False)
+        score_32 = calculate_score(solution=y,
+                               prediction=np.array(prediction, dtype=np.float32),
+                               task_type=self._task,
+                               metric=self._metric,
+                               all_scoring_functions=False)
+        #label,time,64,32
+        print(f"PRECISIONCALCULATION,{time.time()},{score_64},{score_32}")
 
     @property
     @profile

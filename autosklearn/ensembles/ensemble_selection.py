@@ -1,4 +1,5 @@
 from memory_profiler import profile
+import time
 
 from collections import Counter
 import random
@@ -67,10 +68,11 @@ class EnsembleSelection(AbstractEnsemble):
     @profile
     def _fast(self, predictions, labels):
         """Fast version of Rich Caruana's ensemble selection method."""
-        print_getrusage("ensemble selection _fast START")
+        print_getrusage("ensemble selection _fast START {predictions.shape}")
         self.num_input_models_ = len(predictions)
 
         ensemble = []
+        ensemble_32 = []
         trajectory = []
         order = []
 
@@ -94,22 +96,31 @@ class EnsembleSelection(AbstractEnsemble):
         for i in range(ensemble_size):
             print_getrusage(f"Iteration for scoring i={i}")
             scores = np.zeros((len(predictions)))
+            scores_32 = np.zeros((len(predictions)), dtype=np.float32)
             print_getrusage(f"Iteration after creating scores={scores.shape}")
             s = len(ensemble)
             if s == 0:
                 weighted_ensemble_prediction = np.zeros(predictions[0].shape)
+                weighted_ensemble_prediction_32 = np.zeros(predictions[0].shape, dtype=np.float32)
                 print_getrusage(f"s==0 so created weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
             else:
                 # Memory-efficient averaging!
                 ensemble_prediction = np.zeros(ensemble[0].shape)
+                ensemble_prediction_32 = np.zeros(ensemble[0].shape, dtype=np.float32)
                 print_getrusage(f"s=={s} so created ensemble_prediction={ensemble_prediction.shape}")
                 for pred in ensemble:
                     ensemble_prediction += pred
                 ensemble_prediction /= s
 
+                for pred_32 in ensemble_32:
+                    ensemble_prediction_32 += pred_32
+                ensemble_prediction_32 /= s
+
                 weighted_ensemble_prediction = (s / float(s + 1)) * ensemble_prediction
+                weighted_ensemble_prediction_32 = (s / float(s + 1)) * ensemble_prediction_32
                 print_getrusage(f"s=={s} so created weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
             fant_ensemble_prediction = np.zeros(weighted_ensemble_prediction.shape)
+            fant_ensemble_prediction_32 = np.zeros(weighted_ensemble_prediction.shape, dtype=np.float32)
             print_getrusage(f"After created fant_ensemble_prediction={fant_ensemble_prediction.shape}")
             for j, pred in enumerate(predictions):
                 print_getrusage(f"Iteration for scoring i={i} and j={j}")
@@ -117,6 +128,8 @@ class EnsembleSelection(AbstractEnsemble):
                 # the script first!
                 fant_ensemble_prediction[:, :] = \
                     weighted_ensemble_prediction + (1. / float(s + 1)) * pred
+                fant_ensemble_prediction_32[:, :] = \
+                    weighted_ensemble_prediction_32 + (1. / float(s + 1)) * np.array(pred, dtype=np.float32)
                 print_getrusage(f"Before calculate score with solution={labels.shape} prediction={fant_ensemble_prediction.shape}")
                 scores[j] = self.metric._optimum - calculate_score(
                     solution=labels,
@@ -124,12 +137,26 @@ class EnsembleSelection(AbstractEnsemble):
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False)
+                scores_32 = self.metric._optimum - calculate_score(
+                    solution=labels,
+                    prediction=fant_ensemble_prediction_32,
+                    task_type=self.task_type,
+                    metric=self.metric,
+                    all_scoring_functions=False)
+
+                #label,time,64,32
+                print(f"PRECISIONCALCULATION,{time.time()},{scores[j]},{scores_32}")
+                print_getrusage(f"after score was calculated s={scores[j]}")
 
             print_getrusage(f"Before all best")
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
+            all_best_32 = np.argwhere(scores_32 == np.nanmin(scores_32)).flatten()
+            print(f"all_best={all_best} all_best_32={all_best_32}")
+            print_getrusage(f"after all best")
             best = self.random_state.choice(all_best)
             print_getrusage(f"Before appending to ensemble")
             ensemble.append(predictions[best])
+            ensemble_32.append(predictions[best])
             trajectory.append(scores[best])
             order.append(best)
 
