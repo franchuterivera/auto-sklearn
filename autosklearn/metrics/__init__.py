@@ -303,4 +303,5 @@ def calculate_score(solution, prediction, task_type, metric,
         else:
             score = metric(solution, prediction)
 
+    print_getrusage(f"Calculate score store")
     return score

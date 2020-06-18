@@ -91,32 +91,63 @@ class EnsembleSelection(AbstractEnsemble):
                 trajectory.append(ensemble_performance)
             ensemble_size -= n_best
 
+        print_getrusage(f"Before weighted_ensemble_prediction")
+        weighted_ensemble_prediction = np.zeros(predictions[0].shape)
+        print_getrusage(f"After weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
+        fant_ensemble_prediction = np.zeros(weighted_ensemble_prediction.shape)
         for i in range(ensemble_size):
             print_getrusage(f"Iteration for scoring i={i}")
             scores = np.zeros((len(predictions)))
             print_getrusage(f"Iteration after creating scores={scores.shape}")
             s = len(ensemble)
             if s == 0:
-                weighted_ensemble_prediction = np.zeros(predictions[0].shape)
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    0,
+                    out=weighted_ensemble_prediction,
+                )
                 print_getrusage(f"s==0 so created weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
             else:
                 # Memory-efficient averaging!
-                ensemble_prediction = np.zeros(ensemble[0].shape)
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    0,
+                    out=weighted_ensemble_prediction,
+                )
                 print_getrusage(f"s=={s} so created ensemble_prediction={ensemble_prediction.shape}")
                 for pred in ensemble:
-                    ensemble_prediction += pred
-                ensemble_prediction /= s
+                    np.add(
+                        weighted_ensemble_prediction,
+                        pred,
+                        out=weighted_ensemble_prediction,
+                    )
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    1/s,
+                    out=weighted_ensemble_prediction,
+                )
 
-                weighted_ensemble_prediction = (s / float(s + 1)) * ensemble_prediction
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    (s / float(s + 1)),
+                    out=weighted_ensemble_prediction,
+                )
                 print_getrusage(f"s=={s} so created weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
-            fant_ensemble_prediction = np.zeros(weighted_ensemble_prediction.shape)
+            np.multiply(
+                fant_ensemble_prediction,
+                0,
+                out=fant_ensemble_prediction,
+            )
             print_getrusage(f"After created fant_ensemble_prediction={fant_ensemble_prediction.shape}")
             for j, pred in enumerate(predictions):
                 print_getrusage(f"Iteration for scoring i={i} and j={j}")
                 # TODO: this could potentially be vectorized! - let's profile
                 # the script first!
-                fant_ensemble_prediction[:, :] = \
-                    weighted_ensemble_prediction + (1. / float(s + 1)) * pred
+                #fant_ensemble_prediction[:, :] = \
+                #    weighted_ensemble_prediction + (1. / float(s + 1)) * pred
+                np.add(fant_ensemble_prediction, weighted_ensemble_prediction, out=fant_ensemble_prediction)
+                print_getrusage(f"in between adds")
+                np.add(fant_ensemble_prediction, (1. / float(s + 1)) * pred, out=fant_ensemble_prediction)
                 print_getrusage(f"Before calculate score with solution={labels.shape} prediction={fant_ensemble_prediction.shape}")
                 scores[j] = self.metric._optimum - calculate_score(
                     solution=labels,
