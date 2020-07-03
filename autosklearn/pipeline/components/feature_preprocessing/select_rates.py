@@ -107,6 +107,7 @@ class SelectRates(AutoSklearnPreprocessingAlgorithm):
                 'handles_classification': (task == 'classification'),
                 'handles_multiclass': (task == 'classification'),
                 'handles_multilabel': False,
+                'handles_multioutput': False,
                 'is_deterministic': True,
                 'input': (SPARSE, DENSE, data_type),
                 'output': (INPUT,)}
