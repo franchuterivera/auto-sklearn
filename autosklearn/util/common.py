@@ -6,7 +6,6 @@ import warnings
 from resource import *
 from tabulate import tabulate
 
-from memory_profiler import profile
 from datetime import datetime
 import sys
 import os
