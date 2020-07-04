@@ -1,3 +1,4 @@
+tabulate
 setuptools
 pytest>=4.6
 Cython

@@ -17,6 +17,9 @@ from autosklearn.constants import (
 )
 
 
+
+from autosklearn.util.common import print_getrusage
+
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
            'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative']
 
@@ -102,6 +105,7 @@ def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train
             budget_type == 'iterations'
             or budget_type == 'mixed' and model.estimator_supports_iterative_fit()
     ):
+        print_getrusage('fit with budget start')
         if model.estimator_supports_iterative_fit():
             budget_factor = model.get_max_iter()
             Xt, fit_params = model.fit_transformer(X_train[train_indices],
@@ -136,6 +140,7 @@ def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train
 
     else:
         raise ValueError(budget_type)
+    print_getrusage('fit with budget end')
 
 
 class TrainEvaluator(AbstractEvaluator):
@@ -199,6 +204,7 @@ class TrainEvaluator(AbstractEvaluator):
         """Fit, predict and compute the loss for cross-validation and
         holdout (both iterative and non-iterative)"""
 
+        print_getrusage('fit predict and loss start')
         if iterative:
             if self.num_cv_folds == 1:
 
@@ -604,6 +610,7 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
+            print_getrusage('fit predict and loss end')
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,

@@ -266,6 +266,8 @@ def calculate_score(solution, prediction, task_type, metric,
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
 
+    print(f"calculate_score::solution={solution} ({solution.shape})")
+    print(f"calculate_score::prediction={prediction} ({prediction.shape})")
     if all_scoring_functions:
         score = dict()
         if task_type in REGRESSION_TASKS:

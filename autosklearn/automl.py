@@ -38,6 +38,7 @@ from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION
 
+from autosklearn.util.common import print_getrusage
 
 def _model_predict(model, X, batch_size, logger, task):
     def send_warnings_to_log(
@@ -103,6 +104,7 @@ class AutoML(BaseEstimator):
                  logging_config=None,
                  metric=None,
                  ):
+        print_getrusage('Created an AutoML Object')
         super(AutoML, self).__init__()
         self._backend = backend
         # self._tmp_dir = tmp_dir
@@ -224,6 +226,7 @@ class AutoML(BaseEstimator):
         return time_for_load_data
 
     def _do_dummy_prediction(self, datamanager, num_run):
+        print_getrusage('Do dummy prediction')
 
         # When using partial-cv it makes no sense to do dummy predictions
         if self._resampling_strategy in ['partial-cv',
@@ -278,6 +281,7 @@ class AutoML(BaseEstimator):
         only_return_configuration_space: Optional[bool] = False,
         load_models: bool = True,
     ):
+        print_getrusage('Fit in automl start')
         # Reset learnt stuff
         self.models_ = None
         self.cv_models_ = None
@@ -504,6 +508,7 @@ class AutoML(BaseEstimator):
         if load_models:
             self._load_models()
 
+        print_getrusage('Fit in automl end')
         return self
 
     def refit(self, X, y):
@@ -568,6 +573,7 @@ class AutoML(BaseEstimator):
             Parallelize the predictions across the models with n_jobs
             processes.
         """
+        print_getrusage('predict in automl start')
         if (
             self._resampling_strategy not in (
                 'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
@@ -625,6 +631,7 @@ class AutoML(BaseEstimator):
             # Individual models are checked in _model_predict
             predictions = np.clip(predictions, 0.0, 1.0)
 
+        print_getrusage('predict in automl end')
         return predictions
 
     def fit_ensemble(self, y, task=None, precision=32,
@@ -634,6 +641,7 @@ class AutoML(BaseEstimator):
             raise ValueError('Cannot call fit_ensemble with resampling '
                              'strategy %s.' % self._resampling_strategy)
 
+        print_getrusage('fit ensemble in automl start')
         if self._logger is None:
             self._logger = self._get_logger(dataset_name)
 
@@ -643,12 +651,14 @@ class AutoML(BaseEstimator):
         self._proc_ensemble.main()
         self._proc_ensemble = None
         self._load_models()
+        print_getrusage('fit ensemble in automl end')
         return self
 
     def _get_ensemble_process(self, time_left_for_ensembles,
                               task=None, precision=None,
                               dataset_name=None, max_iterations=None,
                               ensemble_nbest=None, ensemble_size=None):
+        print_getrusage('get ensemble process')
 
         if task is None:
             task = self._task
@@ -694,6 +704,7 @@ class AutoML(BaseEstimator):
         )
 
     def _load_models(self):
+        print_getrusage('load models start')
         if self._shared_mode:
             seed = -1
         else:
@@ -731,6 +742,7 @@ class AutoML(BaseEstimator):
 
         else:
             self.models_ = []
+        print_getrusage('load models end')
 
     def score(self, X, y):
         # fix: Consider only index 1 of second dimension
@@ -868,6 +880,7 @@ class AutoML(BaseEstimator):
         return sio.getvalue()
 
     def get_models_with_weights(self):
+        print_getrusage('get models with weight')
         if self.models_ is None or len(self.models_) == 0 or \
                 self.ensemble_ is None:
             self._load_models()

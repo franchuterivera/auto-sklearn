@@ -9,6 +9,10 @@ from autosklearn.metrics import calculate_score
 from autosklearn.metrics import Scorer
 
 
+from autosklearn.util.common import print_getrusage
+
+
+
 class EnsembleSelection(AbstractEnsemble):
     def __init__(
         self,
@@ -40,8 +44,11 @@ class EnsembleSelection(AbstractEnsemble):
             self.precision = np.float64
         elif precision == 16:
             self.precision = np.float16
+        print_getrusage('ensemble selection created')
 
     def fit(self, predictions, labels, identifiers):
+        print_getrusage('ensemble selection fit start')
+        print(f"Called ensemble selection with identifiers={identifiers}")
         self.ensemble_size = int(self.ensemble_size)
         if self.ensemble_size < 1:
             raise ValueError('Ensemble size cannot be less than one!')
@@ -58,6 +65,7 @@ class EnsembleSelection(AbstractEnsemble):
             self._fit(predictions, labels)
         self._calculate_weights()
         self.identifiers_ = identifiers
+        print_getrusage('ensemble selection fit end')
         return self
 
     def _fit(self, predictions, labels):
@@ -69,6 +77,7 @@ class EnsembleSelection(AbstractEnsemble):
 
     def _fast(self, predictions, labels):
         """Fast version of Rich Caruana's ensemble selection method."""
+        print_getrusage('ensemble selection _fast start')
         self.num_input_models_ = len(predictions)
 
         ensemble = []
@@ -147,6 +156,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.indices_ = order
         self.trajectory_ = trajectory
         self.train_score_ = trajectory[-1]
+        print_getrusage('ensemble selection _fast end')
 
     def _slow(self, predictions, labels):
         """Rich Caruana's ensemble selection method."""

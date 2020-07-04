@@ -22,6 +22,10 @@ from autosklearn.ensembles.ensemble_selection import EnsembleSelection
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import get_logger
 
+from autosklearn.util.common import print_getrusage
+
+
+
 Y_ENSEMBLE = 0
 Y_VALID = 1
 Y_TEST = 2
@@ -203,8 +207,10 @@ class EnsembleBuilder(multiprocessing.Process):
         self._has_been_candidate = set()
 
         self.validation_performance_ = np.inf
+        print_getrusage('craeted ensemble builder process')
 
     def run(self):
+        print_getrusage('ensemble builder run start')
         buffer_time = 5  # TODO: Buffer time should also be used in main!?
         while True:
             time_left = self.time_limit - buffer_time
@@ -232,6 +238,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     # all data structures are empty again
                     continue
             break
+        print_getrusage('ensemble builder run end')
 
     def main(self, return_pred=False):
         """
@@ -240,6 +247,7 @@ class EnsembleBuilder(multiprocessing.Process):
             return tuple with last valid, test predictions
         :return:
         """
+        print_getrusage('ensemble builder main start')
         self.start_time = time.time()
         iteration = 0
         valid_pred, test_pred = None, None
@@ -329,6 +337,7 @@ class EnsembleBuilder(multiprocessing.Process):
                                          index_run=iteration)
             else:
                 time.sleep(self.sleep_duration)
+        print_getrusage('ensemble builder main end')
         if return_pred:
             return valid_pred, test_pred
 
@@ -370,6 +379,7 @@ class EnsembleBuilder(multiprocessing.Process):
             populates self.read_preds
         """
 
+        print_getrusage('ensemble builder score start')
         self.logger.debug("Read ensemble data set predictions")
 
         if self.y_true_ensemble is None:
@@ -504,6 +514,7 @@ class EnsembleBuilder(multiprocessing.Process):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_preds.values()])
         )
+        print_getrusage('ensemble builder score end')
         return True
 
     def get_n_best_preds(self):
@@ -519,6 +530,7 @@ class EnsembleBuilder(multiprocessing.Process):
                   if max models in disc is exceeded.
         """
 
+        print_getrusage('ensemble builder get best start')
         sorted_keys = self._get_list_of_sorted_preds()
 
         # number of models available
@@ -656,6 +668,7 @@ class EnsembleBuilder(multiprocessing.Process):
             self.read_preds[k]['loaded'] = 1
 
         # return best scored keys of self.read_preds
+        print_getrusage('ensemble builder get best end')
         return sorted_keys[:ensemble_n_best]
 
     def get_valid_test_preds(self, selected_keys: list):
@@ -759,6 +772,7 @@ class EnsembleBuilder(multiprocessing.Process):
             ensemble: EnsembleSelection
                 trained Ensemble
         """
+        print_getrusage('ensemble builder fit start')
         predictions_train = np.array([self.read_preds[k][Y_ENSEMBLE] for k in selected_keys])
         include_num_runs = [
             (
@@ -823,6 +837,7 @@ class EnsembleBuilder(multiprocessing.Process):
         if self.max_resident_models is not None:
             self._delete_excess_models()
 
+        print_getrusage('ensemble builder fit end')
         return ensemble
 
     def predict(self, set_: str,
@@ -851,6 +866,7 @@ class EnsembleBuilder(multiprocessing.Process):
             ------
             y: np.ndarray
         """
+        print_getrusage('ensemble builder predict start')
         self.logger.debug("Predicting the %s set with the ensemble!", set_)
 
         # Save the ensemble for later use in the main auto-sklearn module!
@@ -874,6 +890,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     prefix=self.dataset_name,
                     precision=8,
                 )
+            print_getrusage('ensemble builder predict end')
             return y
         else:
             self.logger.info(
@@ -883,6 +900,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 n_preds,
                 set_,
             )
+            print_getrusage('ensemble builder predict end')
             return None
         # TODO: ADD saving of predictions on "ensemble data"
 
@@ -1017,6 +1035,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
     def _read_np_fn(self, path):
 
+        print_getrusage('ensemble builder read pred start')
         # Support for string precision
         if isinstance(self.precision, str):
             precision = int(self.precision)
@@ -1041,4 +1060,5 @@ class EnsembleBuilder(multiprocessing.Process):
                 predictions = np.load(fp, allow_pickle=True).astype(dtype=np.float64)
             else:
                 predictions = np.load(fp, allow_pickle=True)
+            print_getrusage('ensemble builder read pred end')
             return predictions

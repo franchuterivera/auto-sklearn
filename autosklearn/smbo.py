@@ -25,6 +25,10 @@ from autosklearn.metalearning.metalearning.meta_base import MetaBase
 from autosklearn.metalearning.metafeatures.metafeatures import \
     calculate_all_metafeatures_with_labels, calculate_all_metafeatures_encoded_labels
 
+
+from autosklearn.util.common import print_getrusage
+
+
 EXCLUDE_META_FEATURES_CLASSIFICATION = {
     'Landmark1NN',
     'LandmarkDecisionNodeLearner',
@@ -338,6 +342,7 @@ class AutoMLSMBO(object):
         return res
 
     def run_smbo(self):
+        print_getrusage('run smbo start')
 
         self.watcher.start_task('SMBO')
 
@@ -468,7 +473,9 @@ class AutoMLSMBO(object):
         else:
             smac = get_smac_object(**smac_args)
 
+        print_getrusage('before smbo optimize')
         smac.optimize()
+        print_getrusage('after smbo optimize')
 
         # Patch SMAC to read in data from parallel runs after the last
         # function evaluation
@@ -484,6 +491,7 @@ class AutoMLSMBO(object):
         self.trajectory = smac.solver.intensifier.traj_logger.trajectory
         self._budget_type = smac.solver.intensifier.tae_runner.budget_type
 
+        print_getrusage('run smbo end')
         return self.runhistory, self.trajectory, self._budget_type
 
     def get_metalearning_suggestions(self):
