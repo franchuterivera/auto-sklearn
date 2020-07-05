@@ -199,6 +199,7 @@ class TrainEvaluator(AbstractEvaluator):
         # opposite.
         self.partial = True
         self.keep_models = keep_models
+        print_getrusage('Created a train evaluator')
 
     def fit_predict_and_loss(self, iterative=False):
         """Fit, predict and compute the loss for cross-validation and
@@ -688,6 +689,8 @@ class TrainEvaluator(AbstractEvaluator):
 
     def _partial_fit_and_predict_iterative(self, fold, train_indices, test_indices,
                                            add_model_to_self):
+
+        print_getrusage('_partial_fit_and_predict_iterative start')
         model = self._get_model()
 
         self.indices[fold] = ((train_indices, test_indices))
@@ -763,6 +766,7 @@ class TrainEvaluator(AbstractEvaluator):
                 )
                 iteration += 1
 
+            print_getrusage('_partial_fit_and_predict_iterative 1 end')
             return
         else:
 
@@ -785,6 +789,7 @@ class TrainEvaluator(AbstractEvaluator):
                     status = StatusType.SUCCESS
             else:
                 status = StatusType.SUCCESS
+            print_getrusage('_partial_fit_and_predict_iterative 2 end')
             self.finish_up(
                 loss=loss,
                 train_loss=train_loss,
@@ -800,6 +805,7 @@ class TrainEvaluator(AbstractEvaluator):
 
     def _partial_fit_and_predict_standard(self, fold, train_indices, test_indices,
                                           add_model_to_self=False):
+        print_getrusage('_partial_fit_and_predict_standard start')
         model = self._get_model()
 
         self.indices[fold] = ((train_indices, test_indices))
@@ -826,6 +832,7 @@ class TrainEvaluator(AbstractEvaluator):
             test_indices=test_indices,
         )
         additional_run_info = model.get_additional_run_info()
+        print_getrusage('_partial_fit_and_predict_standard end')
         return (
             train_pred,
             opt_pred,
@@ -836,6 +843,7 @@ class TrainEvaluator(AbstractEvaluator):
 
     def _partial_fit_and_predict_budget(self, fold, train_indices, test_indices,
                                         add_model_to_self=False):
+        print_getrusage('_partial_fit_and_predict_budget start')
 
         model = self._get_model()
         self.indices[fold] = ((train_indices, test_indices))
@@ -865,6 +873,7 @@ class TrainEvaluator(AbstractEvaluator):
             self.models[fold] = model
 
         additional_run_info = model.get_additional_run_info()
+        print_getrusage('_partial_fit_and_predict_budget end')
         return (
             train_pred,
             opt_pred,
@@ -874,6 +883,7 @@ class TrainEvaluator(AbstractEvaluator):
         )
 
     def _predict(self, model, test_indices, train_indices):
+        print_getrusage('_predict start')
         train_pred = self.predict_function(self.X_train[train_indices],
                                            model, self.task_type,
                                            self.Y_train[train_indices])
@@ -898,9 +908,11 @@ class TrainEvaluator(AbstractEvaluator):
         else:
             test_pred = None
 
+        print_getrusage('_predict end')
         return train_pred, opt_pred, valid_pred, test_pred
 
     def get_splitter(self, D):
+        print_getrusage('get_splitter start')
 
         if self.resampling_strategy_args is None:
             self.resampling_strategy_args = {}
@@ -1029,6 +1041,7 @@ class TrainEvaluator(AbstractEvaluator):
                 )
             else:
                 raise ValueError(self.resampling_strategy)
+        print_getrusage('get_splitter end')
         return cv
 
 
@@ -1053,6 +1066,7 @@ def eval_holdout(
         budget=100.0,
         budget_type=None,
 ):
+    print_getrusage('eval_holdout start')
     evaluator = TrainEvaluator(
         backend=backend,
         queue=queue,
@@ -1072,6 +1086,7 @@ def eval_holdout(
         budget_type=budget_type,
     )
     evaluator.fit_predict_and_loss(iterative=iterative)
+    print_getrusage('eval_iterative_holdout end')
 
 
 def eval_iterative_holdout(
@@ -1093,7 +1108,8 @@ def eval_iterative_holdout(
         budget=100.0,
         budget_type=None,
 ):
-    return eval_holdout(
+    print_getrusage('eval_iterative_holdout start')
+    something = eval_holdout(
         queue=queue,
         config=config,
         backend=backend,
@@ -1113,6 +1129,8 @@ def eval_iterative_holdout(
         budget=budget,
         budget_type=budget_type
     )
+    print_getrusage('eval_iterative_holdout end')
+    return something
 
 
 def eval_partial_cv(
@@ -1135,6 +1153,7 @@ def eval_partial_cv(
         budget=None,
         budget_type=None,
 ):
+    print_getrusage('eval_partial_cv start')
     if budget_type is not None:
         raise NotImplementedError()
     instance = json.loads(instance) if instance is not None else {}
@@ -1160,6 +1179,7 @@ def eval_partial_cv(
     )
 
     evaluator.partial_fit_predict_and_loss(fold=fold, iterative=iterative)
+    print_getrusage('eval_partial_cv end')
 
 
 def eval_partial_cv_iterative(
@@ -1181,9 +1201,10 @@ def eval_partial_cv_iterative(
         budget=None,
         budget_type=None
 ):
+    print_getrusage('eval_partial_cv_iterative start')
     if budget_type is not None:
         raise NotImplementedError()
-    return eval_partial_cv(
+    something =  eval_partial_cv(
         queue=queue,
         config=config,
         backend=backend,
@@ -1201,6 +1222,8 @@ def eval_partial_cv_iterative(
         iterative=True,
         init_params=init_params,
     )
+    print_getrusage('eval_partial_cv_iterative end')
+    return something
 
 
 # create closure for evaluating an algorithm
@@ -1224,6 +1247,7 @@ def eval_cv(
         budget_type=None,
         iterative=False,
 ):
+    print_getrusage('eval_cv start')
     evaluator = TrainEvaluator(
         backend=backend,
         queue=queue,
@@ -1244,6 +1268,7 @@ def eval_cv(
     )
 
     evaluator.fit_predict_and_loss(iterative=iterative)
+    print_getrusage('eval_cv end')
 
 
 def eval_iterative_cv(
@@ -1266,6 +1291,7 @@ def eval_iterative_cv(
         budget_type=None,
         iterative=True,
 ):
+    print_getrusage('eval_iterative_cv start')
     eval_cv(
         backend=backend,
         queue=queue,
@@ -1286,3 +1312,4 @@ def eval_iterative_cv(
         iterative=iterative,
         instance=instance,
     )
+    print_getrusage('eval_iterative_cv end')

@@ -22,6 +22,7 @@ import autosklearn.evaluation.train_evaluator
 import autosklearn.evaluation.test_evaluator
 import autosklearn.evaluation.util
 
+from autosklearn.util.common import print_getrusage
 
 def fit_predict_try_except_decorator(ta, queue, cost_for_crash, **kwargs):
 
@@ -144,6 +145,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             self._get_test_loss = True
         else:
             self._get_test_loss = False
+        print_getrusage('Created a ta function for optimization')
 
     def start(self, config: Configuration,
               instance: Optional[str],
@@ -185,6 +187,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             additional_info: dict
                 all further additional run information
         """
+        print_getrusage('ta function tart start')
         if self.budget_type is None:
             if budget != 0:
                 raise ValueError('If budget_type is None, budget must be.0, but is %f' % budget)
@@ -217,6 +220,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             seed=12345,
             budget=0.0,
             instance_specific=None):
+        print_getrusage('ta function run start')
 
         queue = multiprocessing.Queue()
 
@@ -379,5 +383,6 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
         self.num_run += 1
 
         autosklearn.evaluation.util.empty_queue(queue)
+        print_getrusage('ta function run end')
 
         return status, cost, runtime, additional_run_info

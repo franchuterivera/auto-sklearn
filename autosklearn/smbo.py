@@ -284,6 +284,7 @@ class AutoMLSMBO(object):
         return metalearning_configurations
 
     def _calculate_metafeatures(self):
+        print_getrusage('calculate metafeatures start')
         with warnings.catch_warnings():
             warnings.showwarning = self._send_warnings_to_log
 
@@ -295,6 +296,7 @@ class AutoMLSMBO(object):
                 basename=self.dataset_name,
                 watcher=self.watcher,
                 logger=self.logger)
+            print_getrusage('calculate metafeatures end')
             return meta_features
 
     def _calculate_metafeatures_with_limits(self, time_limit):
@@ -359,6 +361,7 @@ class AutoMLSMBO(object):
         # Initialize some SMAC dependencies
 
         metalearning_configurations = self.get_metalearning_suggestions()
+        print_getrusage('after get metalearning suggestions')
 
         if self.resampling_strategy in ['partial-cv',
                                         'partial-cv-iterative-fit']:
