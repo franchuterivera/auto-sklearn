@@ -4,6 +4,7 @@ from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorit
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
 
 import sklearn.feature_selection
+from autosklearn.util.common import print_getrusage
 
 
 class VarianceThreshold(AutoSklearnPreprocessingAlgorithm):
@@ -12,10 +13,12 @@ class VarianceThreshold(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, y=None):
+        print_getrusage(f"variance threshold fit start")
         self.preprocessor = sklearn.feature_selection.VarianceThreshold(
             threshold=0.0
         )
         self.preprocessor = self.preprocessor.fit(X)
+        print_getrusage(f"variance threshold fit end")
         return self
 
     def transform(self, X):

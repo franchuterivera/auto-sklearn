@@ -9,6 +9,7 @@ from autosklearn.pipeline.components.base import (
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.pipeline.implementations.util import convert_multioutput_multiclass_to_multilabel
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class RandomForest(
@@ -43,6 +44,7 @@ class RandomForest(
         return self.estimator.n_estimators
 
     def iterative_fit(self, X, y, sample_weight=None, n_iter=1, refit=False):
+        print_getrusage(f"random forest  fit start")
         from sklearn.ensemble import RandomForestClassifier
 
         if refit:
@@ -95,6 +97,7 @@ class RandomForest(
                                               self.n_estimators)
 
         self.estimator.fit(X, y, sample_weight=sample_weight)
+        print_getrusage(f"random forest  fit end")
         return self
 
     def configuration_fully_fitted(self):

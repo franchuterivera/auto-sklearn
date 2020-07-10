@@ -6,6 +6,7 @@ import sys
 
 from sklearn.base import BaseEstimator
 from sklearn.utils import check_random_state
+from autosklearn.util.common import print_getrusage
 
 
 def find_components(package, directory, base_class):
@@ -411,11 +412,17 @@ class AutoSklearnChoice(object):
         raise NotImplementedError()
 
     def fit(self, X, y, **kwargs):
+        print_getrusage(f"base component choice fit start")
         # Allows to use check_is_fitted on the choice object
         self.fitted_ = True
         if kwargs is None:
             kwargs = {}
-        return self.choice.fit(X, y, **kwargs)
+        new =  self.choice.fit(X, y, **kwargs)
+        print_getrusage(f"base component choice fit end")
+        return new
 
     def predict(self, X):
-        return self.choice.predict(X)
+        print_getrusage(f"base component choice predict start")
+        new = self.choice.predict(X)
+        print_getrusage(f"base component choice predict end")
+        return new

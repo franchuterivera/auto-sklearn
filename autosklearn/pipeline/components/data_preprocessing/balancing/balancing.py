@@ -6,6 +6,7 @@ from ConfigSpace.hyperparameters import CategoricalHyperparameter
 from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, SIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class Balancing(AutoSklearnPreprocessingAlgorithm):
@@ -20,6 +21,7 @@ class Balancing(AutoSklearnPreprocessingAlgorithm):
         return X
 
     def get_weights(self, Y, classifier, preprocessor, init_params, fit_params):
+        print_getrusage("In balancing during get weights start")
         if init_params is None:
             init_params = {}
 
@@ -83,6 +85,7 @@ class Balancing(AutoSklearnPreprocessingAlgorithm):
             if classifier in clf_:
                 init_params['classifier:class_weight'] = class_weights
 
+        print_getrusage("In balancing during get weights end")
         return init_params, fit_params
 
     @staticmethod

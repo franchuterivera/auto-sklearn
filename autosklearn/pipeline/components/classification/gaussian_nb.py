@@ -6,6 +6,7 @@ from autosklearn.pipeline.components.base import (
     AutoSklearnClassificationAlgorithm,
 )
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS
+from autosklearn.util.common import print_getrusage
 
 
 class GaussianNB(AutoSklearnClassificationAlgorithm):
@@ -17,6 +18,7 @@ class GaussianNB(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, y):
+        print_getrusage(f"gausian fit   start")
         import sklearn.naive_bayes
 
         self.estimator = sklearn.naive_bayes.GaussianNB()
@@ -29,6 +31,7 @@ class GaussianNB(AutoSklearnClassificationAlgorithm):
                 self.estimator, n_jobs=1)
         self.estimator.fit(X, y)
 
+        print_getrusage(f"gausian fit   end")
         return self
 
     def predict(self, X):

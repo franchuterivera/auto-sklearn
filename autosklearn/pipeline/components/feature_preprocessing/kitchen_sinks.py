@@ -4,6 +4,7 @@ from ConfigSpace.hyperparameters import UniformFloatHyperparameter, \
 
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class RandomKitchenSinks(AutoSklearnPreprocessingAlgorithm):
@@ -21,6 +22,7 @@ class RandomKitchenSinks(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y=None):
+        print_getrusage(f"kitchen sink start")
         import sklearn.kernel_approximation
 
         self.n_components = int(self.n_components)
@@ -29,6 +31,7 @@ class RandomKitchenSinks(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = sklearn.kernel_approximation.RBFSampler(
             self.gamma, self.n_components, self.random_state)
         self.preprocessor.fit(X)
+        print_getrusage(f"kitchen sink end")
         return self
 
     def transform(self, X):

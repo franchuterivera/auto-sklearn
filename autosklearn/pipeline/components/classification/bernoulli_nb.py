@@ -9,6 +9,7 @@ from autosklearn.pipeline.components.base import (
 )
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.util.common import check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class BernoulliNB(AutoSklearnClassificationAlgorithm):
@@ -20,6 +21,7 @@ class BernoulliNB(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, y):
+        print_getrusage(f"bernoulli fit  start")
         import sklearn.naive_bayes
 
         self.fit_prior = check_for_bool(self.fit_prior)
@@ -33,6 +35,7 @@ class BernoulliNB(AutoSklearnClassificationAlgorithm):
                 self.estimator, n_jobs=1)
         self.estimator.fit(X, y)
 
+        print_getrusage(f"bernoulli fit  end")
         return self
 
     def predict(self, X):

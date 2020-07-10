@@ -13,6 +13,7 @@ from autosklearn.pipeline.components.data_preprocessing.data_preprocessing_numer
     import NumericalPreprocessingPipeline
 from autosklearn.pipeline.components.base import AutoSklearnComponent, AutoSklearnChoice
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class DataPreprocessor(AutoSklearnComponent):
@@ -58,6 +59,7 @@ class DataPreprocessor(AutoSklearnComponent):
         ]
 
     def fit(self, X, y=None):
+        print_getrusage(f"data preprocessing start ")
         n_feats = X.shape[1]
         # If categorical_features is none or an array made just of False booleans, then
         # only the numerical transformer is used
@@ -85,7 +87,9 @@ class DataPreprocessor(AutoSklearnComponent):
             transformers=sklearn_transf_spec,
             sparse_threshold=float(self.sparse_),
             )
+        print_getrusage(f"before columns transformer fit ")
         self.column_transformer.fit(X)
+        print_getrusage(f"after columns transformer fit ")
         return self
 
     def transform(self, X):

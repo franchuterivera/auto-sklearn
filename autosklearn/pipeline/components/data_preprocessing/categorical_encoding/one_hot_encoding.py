@@ -7,6 +7,7 @@ from ConfigSpace.configuration_space import ConfigurationSpace
 from autosklearn.pipeline.implementations.SparseOneHotEncoder import SparseOneHotEncoder
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class OneHotEncoder(AutoSklearnPreprocessingAlgorithm):
@@ -14,18 +15,23 @@ class OneHotEncoder(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, y=None):
+        print_getrusage(f"In one hot encoder with {scipy.sparse.issparse(X)} start ")
         if scipy.sparse.issparse(X):
             self.preprocessor = SparseOneHotEncoder()
         else:
             self.preprocessor = DenseOneHotEncoder(
                 sparse=False, categories='auto', handle_unknown='ignore')
         self.preprocessor.fit(X, y)
+        print_getrusage(f"In one hot encoder after {scipy.sparse.issparse(X)} end ")
         return self
 
     def transform(self, X):
         if self.preprocessor is None:
             raise NotImplementedError()
-        return self.preprocessor.transform(X)
+        print_getrusage(f"In one hot encoder transform start ")
+        new =  self.preprocessor.transform(X)
+        print_getrusage(f"In one hot encoder transform end ")
+        return new
 
     def fit_transform(self, X, y=None):
         return self.fit(X, y).transform(X)

@@ -8,6 +8,7 @@ from autosklearn.pipeline.components.base import AutoSklearnClassificationAlgori
 from autosklearn.pipeline.implementations.util import softmax
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class LibLinear_SVC(AutoSklearnClassificationAlgorithm):
@@ -28,6 +29,7 @@ class LibLinear_SVC(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, Y):
+        print_getrusage(f"liblinear fit start")
         import sklearn.svm
         import sklearn.multiclass
 
@@ -60,6 +62,7 @@ class LibLinear_SVC(AutoSklearnClassificationAlgorithm):
             self.estimator = estimator
 
         self.estimator.fit(X, Y)
+        print_getrusage(f"liblinear fit end")
         return self
 
     def predict(self, X):

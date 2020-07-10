@@ -3,6 +3,7 @@ from ConfigSpace.hyperparameters import CategoricalHyperparameter, UniformIntege
 
 from autosklearn.pipeline.components.base import AutoSklearnClassificationAlgorithm
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
+from autosklearn.util.common import print_getrusage
 
 
 class KNearestNeighborsClassifier(AutoSklearnClassificationAlgorithm):
@@ -14,6 +15,7 @@ class KNearestNeighborsClassifier(AutoSklearnClassificationAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y):
+        print_getrusage(f"KNN fit   start")
         import sklearn.neighbors
         import sklearn.multiclass
 
@@ -28,6 +30,7 @@ class KNearestNeighborsClassifier(AutoSklearnClassificationAlgorithm):
             self.estimator = estimator
 
         self.estimator.fit(X, Y)
+        print_getrusage(f"KNN fit   end")
         return self
 
     def predict(self, X):

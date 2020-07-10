@@ -7,6 +7,7 @@ from ConfigSpace.hyperparameters import UniformFloatHyperparameter, \
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA
 from autosklearn.util.common import check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class PCA(AutoSklearnPreprocessingAlgorithm):
@@ -17,6 +18,7 @@ class PCA(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y=None):
+        print_getrusage(f"pca start")
         import sklearn.decomposition
         n_components = float(self.keep_variance)
         self.whiten = check_for_bool(self.whiten)
@@ -29,6 +31,7 @@ class PCA(AutoSklearnPreprocessingAlgorithm):
         if not np.isfinite(self.preprocessor.components_).all():
             raise ValueError("PCA found non-finite components.")
 
+        print_getrusage(f"pca end")
         return self
 
     def transform(self, X):

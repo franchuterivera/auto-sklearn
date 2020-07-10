@@ -7,6 +7,7 @@ from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class ExtraTreesPreprocessorClassification(AutoSklearnPreprocessingAlgorithm):
@@ -40,6 +41,7 @@ class ExtraTreesPreprocessorClassification(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = None
 
     def fit(self, X, Y, sample_weight=None):
+        print_getrusage(f"extra trees class prepro fit  start")
         from sklearn.ensemble import ExtraTreesClassifier
         from sklearn.feature_selection import SelectFromModel
 
@@ -83,6 +85,7 @@ class ExtraTreesPreprocessorClassification(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = SelectFromModel(estimator=estimator,
                                             threshold='mean',
                                             prefit=True)
+        print_getrusage(f"extra trees class prepro fit  end")
         return self
 
     def transform(self, X):

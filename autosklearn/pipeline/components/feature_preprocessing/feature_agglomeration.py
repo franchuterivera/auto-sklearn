@@ -9,6 +9,7 @@ from ConfigSpace.forbidden import ForbiddenInClause, \
 from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class FeatureAgglomeration(AutoSklearnPreprocessingAlgorithm):
@@ -25,6 +26,7 @@ class FeatureAgglomeration(AutoSklearnPreprocessingAlgorithm):
                                          max=np.max)
 
     def fit(self, X, Y=None):
+        print_getrusage(f"feature agglo fit start")
         import sklearn.cluster
 
         self.n_clusters = int(self.n_clusters)
@@ -37,6 +39,7 @@ class FeatureAgglomeration(AutoSklearnPreprocessingAlgorithm):
             n_clusters=n_clusters, affinity=self.affinity,
             linkage=self.linkage, pooling_func=self.pooling_func)
         self.preprocessor.fit(X)
+        print_getrusage(f"feature agglo fit start")
         return self
 
     def transform(self, X):

@@ -10,6 +10,7 @@ from autosklearn.pipeline.components.base import (
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.pipeline.implementations.util import softmax
 from autosklearn.util.common import check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class SGD(
@@ -44,6 +45,7 @@ class SGD(
         return self.n_iter_
 
     def iterative_fit(self, X, y, n_iter=2, refit=False, sample_weight=None):
+        print_getrusage(f"sgd  fit start")
         from sklearn.linear_model import SGDClassifier
 
         # Need to fit at least two iterations, otherwise early stopping will not
@@ -110,6 +112,7 @@ class SGD(
         if self.estimator.max_iter >= self.max_iter or self.estimator.max_iter > self.n_iter_:
             self.fully_fit_ = True
 
+        print_getrusage(f"sgd  fit end")
         return self
 
     def configuration_fully_fitted(self):

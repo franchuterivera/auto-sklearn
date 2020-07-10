@@ -11,6 +11,7 @@ from autosklearn.pipeline.components.base import (
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, PREDICTIONS
 from autosklearn.pipeline.implementations.util import softmax
 from autosklearn.util.common import check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class PassiveAggressive(
@@ -44,6 +45,7 @@ class PassiveAggressive(
         # iterations than max_iter. If max_iter == 1, it has to spend at least
         # one iteration and will always spend at least one iteration, so we
         # cannot know about convergence.
+        print_getrusage(f"passive aggressive fit start")
 
         if refit:
             self.estimator = None
@@ -109,6 +111,7 @@ class PassiveAggressive(
                 ):
                     self.fully_fit_ = True
 
+        print_getrusage(f"passive aggressive fit end")
         return self
 
     def configuration_fully_fitted(self):

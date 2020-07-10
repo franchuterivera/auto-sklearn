@@ -5,6 +5,7 @@ from ConfigSpace.hyperparameters import UniformIntegerHyperparameter, \
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, SIGNED_DATA
 from autosklearn.util.common import check_none, check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class RandomTreesEmbedding(AutoSklearnPreprocessingAlgorithm):
@@ -24,6 +25,7 @@ class RandomTreesEmbedding(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def _fit(self, X, Y=None):
+        print_getrusage(f"random trees embedding start")
         import sklearn.ensemble
 
         self.n_estimators = int(self.n_estimators)
@@ -51,6 +53,7 @@ class RandomTreesEmbedding(AutoSklearnPreprocessingAlgorithm):
             random_state=self.random_state
         )
         self.preprocessor.fit(X, Y)
+        print_getrusage(f"random trees embedding end")
         return self
 
     def fit(self, X, y):

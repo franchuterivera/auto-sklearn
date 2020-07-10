@@ -3,6 +3,7 @@ from ConfigSpace.hyperparameters import UniformIntegerHyperparameter
 
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import SPARSE, UNSIGNED_DATA, DENSE, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class TruncatedSVD(AutoSklearnPreprocessingAlgorithm):
@@ -12,6 +13,7 @@ class TruncatedSVD(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = None
 
     def fit(self, X, Y):
+        print_getrusage(f"svd start")
         import sklearn.decomposition
 
         self.target_dim = int(self.target_dim)
@@ -24,6 +26,7 @@ class TruncatedSVD(AutoSklearnPreprocessingAlgorithm):
         # X = X.astype(np.float64)
         self.preprocessor.fit(X, Y)
 
+        print_getrusage(f"svd end")
         return self
 
     def transform(self, X):

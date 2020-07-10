@@ -5,6 +5,7 @@ from ConfigSpace.hyperparameters import UniformFloatHyperparameter
 
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class MinorityCoalescer(AutoSklearnPreprocessingAlgorithm):
@@ -15,11 +16,13 @@ class MinorityCoalescer(AutoSklearnPreprocessingAlgorithm):
         self.minimum_fraction = minimum_fraction
 
     def fit(self, X, y=None):
+        print_getrusage(f"Minority coalescer fit start")
         self.minimum_fraction = float(self.minimum_fraction)
 
         self.preprocessor = autosklearn.pipeline.implementations.MinorityCoalescer\
             .MinorityCoalescer(minimum_fraction=self.minimum_fraction)
         self.preprocessor.fit(X, y)
+        print_getrusage(f"Minority coalescer fit end")
         return self
 
     def transform(self, X):

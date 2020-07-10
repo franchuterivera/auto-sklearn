@@ -11,6 +11,7 @@ from autosklearn.pipeline.components.base import AutoSklearnClassificationAlgori
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.pipeline.implementations.util import softmax
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class LibSVM_SVC(AutoSklearnClassificationAlgorithm):
@@ -29,6 +30,7 @@ class LibSVM_SVC(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, Y):
+        print_getrusage(f"liblinear svm fit start")
         import sklearn.svm
 
         # Calculate the size of the kernel cache (in MB) for sklearn's LibSVM. The cache size is
@@ -93,6 +95,7 @@ class LibSVM_SVC(AutoSklearnClassificationAlgorithm):
                                          cache_size=cache_size,
                                          decision_function_shape='ovr')
         self.estimator.fit(X, Y)
+        print_getrusage(f"liblinear svm fit end")
         return self
 
     def predict(self, X):

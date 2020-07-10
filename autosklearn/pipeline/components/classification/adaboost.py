@@ -4,6 +4,8 @@ from ConfigSpace.hyperparameters import UniformFloatHyperparameter, \
 
 from autosklearn.pipeline.components.base import AutoSklearnClassificationAlgorithm
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
+from autosklearn.util.common import print_getrusage
+from autosklearn.util.common import print_getrusage
 
 
 class AdaboostClassifier(AutoSklearnClassificationAlgorithm):
@@ -18,6 +20,7 @@ class AdaboostClassifier(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, Y, sample_weight=None):
+        print_getrusage(f"adaboost fit start")
         import sklearn.ensemble
         import sklearn.tree
 
@@ -37,12 +40,17 @@ class AdaboostClassifier(AutoSklearnClassificationAlgorithm):
         estimator.fit(X, Y, sample_weight=sample_weight)
 
         self.estimator = estimator
+        print_getrusage(f"adaboost fit end")
         return self
 
     def predict(self, X):
+        print_getrusage(f"adaboost predict start")
         if self.estimator is None:
             raise NotImplementedError
-        return self.estimator.predict(X)
+        new =  self.estimator.predict(X)
+        print_getrusage(f"adaboost predict end")
+
+        return new
 
     def predict_proba(self, X):
         if self.estimator is None:

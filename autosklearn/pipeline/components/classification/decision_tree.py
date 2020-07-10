@@ -10,6 +10,7 @@ from autosklearn.pipeline.components.base import \
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS, SPARSE
 from autosklearn.pipeline.implementations.util import convert_multioutput_multiclass_to_multilabel
 from autosklearn.util.common import check_none
+from autosklearn.util.common import print_getrusage
 
 
 class DecisionTree(AutoSklearnClassificationAlgorithm):
@@ -30,6 +31,7 @@ class DecisionTree(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, y, sample_weight=None):
+        print_getrusage(f"decision tree fit  start")
         from sklearn.tree import DecisionTreeClassifier
 
         self.max_features = float(self.max_features)
@@ -62,6 +64,7 @@ class DecisionTree(AutoSklearnClassificationAlgorithm):
             class_weight=self.class_weight,
             random_state=self.random_state)
         self.estimator.fit(X, y, sample_weight=sample_weight)
+        print_getrusage(f"decision tree fit  end")
         return self
 
     def predict(self, X):

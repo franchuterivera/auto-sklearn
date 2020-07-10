@@ -9,6 +9,7 @@ from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import INPUT, UNSIGNED_DATA, DENSE
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class FastICA(AutoSklearnPreprocessingAlgorithm):
@@ -22,6 +23,7 @@ class FastICA(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y=None):
+        print_getrusage(f"fast ica fit")
         import sklearn.decomposition
 
         self.whiten = check_for_bool(self.whiten)
@@ -44,6 +46,7 @@ class FastICA(AutoSklearnPreprocessingAlgorithm):
                     raise ValueError("Bug in scikit-learn: "
                                      "https://github.com/scikit-learn/scikit-learn/pull/2738")
 
+        print_getrusage(f"fast ica end")
         return self
 
     def transform(self, X):

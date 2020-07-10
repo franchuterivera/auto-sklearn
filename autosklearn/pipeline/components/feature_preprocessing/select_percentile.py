@@ -1,6 +1,8 @@
+from autosklearn.util.common import print_getrusage
 class SelectPercentileBase(object):
 
     def fit(self, X, y):
+        print_getrusage(f"select percentile start")
         import sklearn.feature_selection
 
         self.preprocessor = sklearn.feature_selection.SelectPercentile(
@@ -8,6 +10,7 @@ class SelectPercentileBase(object):
             percentile=self.percentile)
 
         self.preprocessor.fit(X, y)
+        print_getrusage(f"select percentile end")
         return self
 
     def transform(self, X):

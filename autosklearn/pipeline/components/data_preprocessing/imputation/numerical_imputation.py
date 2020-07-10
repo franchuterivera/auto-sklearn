@@ -4,6 +4,8 @@ from ConfigSpace.hyperparameters import CategoricalHyperparameter
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
 
+from autosklearn.util.common import print_getrusage
+
 
 class NumericalImputation(AutoSklearnPreprocessingAlgorithm):
 
@@ -16,13 +18,18 @@ class NumericalImputation(AutoSklearnPreprocessingAlgorithm):
 
         self.preprocessor = sklearn.impute.SimpleImputer(
             strategy=self.strategy, copy=False)
+        print_getrusage("In Numerical inputation before fit")
         self.preprocessor.fit(X)
+        print_getrusage("In Numerical inputation after fit")
         return self
 
     def transform(self, X):
         if self.preprocessor is None:
             raise NotImplementedError()
-        return self.preprocessor.transform(X)
+        print_getrusage("In Numerical inputation before transform")
+        new = self.preprocessor.transform(X)
+        print_getrusage("In Numerical inputation after transform")
+        return new
 
     @staticmethod
     def get_properties(dataset_properties=None):

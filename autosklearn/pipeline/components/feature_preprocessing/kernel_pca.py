@@ -10,6 +10,7 @@ from ConfigSpace.conditions import EqualsCondition, InCondition
 from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA
+from autosklearn.util.common import print_getrusage
 
 
 class KernelPCA(AutoSklearnPreprocessingAlgorithm):
@@ -23,6 +24,7 @@ class KernelPCA(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y=None):
+        print_getrusage(f"kernel pca fit start")
         import scipy.sparse
         import sklearn.decomposition
 
@@ -44,6 +46,7 @@ class KernelPCA(AutoSklearnPreprocessingAlgorithm):
         # kernel_pca.py in scikit-learn
         if len(self.preprocessor.alphas_ / self.preprocessor.lambdas_) == 0:
             raise ValueError('KernelPCA removed all features!')
+        print_getrusage(f"kernel pca fit end")
         return self
 
     def transform(self, X):

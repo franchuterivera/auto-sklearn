@@ -6,6 +6,7 @@ from autosklearn.pipeline.components.base import \
     AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
 from autosklearn.util.common import check_for_bool
+from autosklearn.util.common import print_getrusage
 
 
 class PolynomialFeatures(AutoSklearnPreprocessingAlgorithm):
@@ -18,6 +19,7 @@ class PolynomialFeatures(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = None
 
     def fit(self, X, Y):
+        print_getrusage(f"poly start")
         import sklearn.preprocessing
 
         self.degree = int(self.degree)
@@ -28,6 +30,7 @@ class PolynomialFeatures(AutoSklearnPreprocessingAlgorithm):
             degree=self.degree, interaction_only=self.interaction_only,
             include_bias=self.include_bias)
         self.preprocessor.fit(X, Y)
+        print_getrusage(f"poly end")
         return self
 
     def transform(self, X):

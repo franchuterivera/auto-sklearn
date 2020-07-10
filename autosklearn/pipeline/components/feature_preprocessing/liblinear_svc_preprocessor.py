@@ -7,6 +7,7 @@ from ConfigSpace.forbidden import ForbiddenEqualsClause, \
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA, INPUT
 from autosklearn.util.common import check_for_bool, check_none
+from autosklearn.util.common import print_getrusage
 
 
 class LibLinear_Preprocessor(AutoSklearnPreprocessingAlgorithm):
@@ -27,6 +28,7 @@ class LibLinear_Preprocessor(AutoSklearnPreprocessingAlgorithm):
         self.preprocessor = None
 
     def fit(self, X, Y):
+        print_getrusage(f"liblinear sv prepro start")
         import sklearn.svm
         from sklearn.feature_selection import SelectFromModel
 
@@ -55,6 +57,7 @@ class LibLinear_Preprocessor(AutoSklearnPreprocessingAlgorithm):
                                             threshold='mean',
                                             prefit=True)
 
+        print_getrusage(f"liblinear sv prepro end")
         return self
 
     def transform(self, X):

@@ -7,6 +7,7 @@ from ConfigSpace.conditions import InCondition, EqualsCondition
 
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import SPARSE, DENSE, UNSIGNED_DATA, INPUT, SIGNED_DATA
+from autosklearn.util.common import print_getrusage
 
 
 class Nystroem(AutoSklearnPreprocessingAlgorithm):
@@ -20,6 +21,8 @@ class Nystroem(AutoSklearnPreprocessingAlgorithm):
         self.random_state = random_state
 
     def fit(self, X, Y=None):
+
+        print_getrusage(f"nystroen start")
         import scipy.sparse
         import sklearn.kernel_approximation
 
@@ -42,6 +45,7 @@ class Nystroem(AutoSklearnPreprocessingAlgorithm):
                 X[X < 0] = 0.0
 
         self.preprocessor.fit(X.astype(np.float64))
+        print_getrusage(f"nystroen end")
         return self
 
     def transform(self, X):

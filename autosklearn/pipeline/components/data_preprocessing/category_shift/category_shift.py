@@ -3,6 +3,7 @@ import autosklearn.pipeline.implementations.CategoryShift
 from ConfigSpace.configuration_space import ConfigurationSpace
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class CategoryShift(AutoSklearnPreprocessingAlgorithm):
@@ -16,9 +17,11 @@ class CategoryShift(AutoSklearnPreprocessingAlgorithm):
         pass
 
     def fit(self, X, y=None):
+        print_getrusage(f"category shift fit start ")
         self.preprocessor = autosklearn.pipeline.implementations.CategoryShift\
             .CategoryShift()
         self.preprocessor.fit(X, y)
+        print_getrusage(f"category shift fit end ")
         return self
 
     def transform(self, X):

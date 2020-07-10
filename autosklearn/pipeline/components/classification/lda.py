@@ -8,6 +8,7 @@ from autosklearn.pipeline.components.base import \
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS
 from autosklearn.pipeline.implementations.util import softmax
 from autosklearn.util.common import check_none
+from autosklearn.util.common import print_getrusage
 
 
 class LDA(AutoSklearnClassificationAlgorithm):
@@ -20,6 +21,8 @@ class LDA(AutoSklearnClassificationAlgorithm):
         self.estimator = None
 
     def fit(self, X, Y):
+
+        print_getrusage(f"lda fit start")
         import sklearn.discriminant_analysis
         import sklearn.multiclass
 
@@ -48,6 +51,7 @@ class LDA(AutoSklearnClassificationAlgorithm):
             self.estimator = estimator
 
         self.estimator.fit(X, Y)
+        print_getrusage(f"lda fit end")
         return self
 
     def predict(self, X):

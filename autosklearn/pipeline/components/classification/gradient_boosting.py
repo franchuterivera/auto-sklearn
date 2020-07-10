@@ -12,6 +12,7 @@ from autosklearn.pipeline.components.base import (
 )
 from autosklearn.pipeline.constants import DENSE, UNSIGNED_DATA, PREDICTIONS
 from autosklearn.util.common import check_none
+from autosklearn.util.common import print_getrusage
 
 
 class GradientBoostingClassifier(
@@ -52,6 +53,7 @@ class GradientBoostingClassifier(
         """
         Set n_iter=2 for the same reason as for SGD
         """
+        print_getrusage(f"gradient boosting fit   start")
         import sklearn.ensemble
         from sklearn.experimental import enable_hist_gradient_boosting  # noqa
 
@@ -126,6 +128,7 @@ class GradientBoostingClassifier(
 
             self.fully_fit_ = True
 
+        print_getrusage(f"gradient boosting fit end")
         return self
 
     def configuration_fully_fitted(self):

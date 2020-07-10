@@ -1,6 +1,7 @@
 from ConfigSpace.configuration_space import ConfigurationSpace
 from autosklearn.pipeline.components.base import AutoSklearnPreprocessingAlgorithm
 from autosklearn.pipeline.constants import DENSE, SPARSE, UNSIGNED_DATA, INPUT
+from autosklearn.util.common import print_getrusage
 
 
 class CategoricalImputation(AutoSklearnPreprocessingAlgorithm):
@@ -13,16 +14,19 @@ class CategoricalImputation(AutoSklearnPreprocessingAlgorithm):
 
     def fit(self, X, y=None):
         import sklearn.impute
-
+        print_getrusage("In categorical inputation before fit")
         self.preprocessor = sklearn.impute.SimpleImputer(
             strategy='constant', fill_value=2, copy=False)
         self.preprocessor.fit(X)
+        print_getrusage("In categorical inputation after fit")
         return self
 
     def transform(self, X):
         if self.preprocessor is None:
             raise NotImplementedError()
+        print_getrusage("In categorical inputation before transform")
         X = self.preprocessor.transform(X).astype(int)
+        print_getrusage("In categorical inputation after transform")
         return X
 
     def fit_transform(self, X, y=None):
