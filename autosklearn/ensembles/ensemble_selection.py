@@ -41,7 +41,7 @@ class EnsembleSelection(AbstractEnsemble):
         if precision == 128:
             self.precision = np.float128
         elif precision == 32:
-            self.precision = np.float64
+            self.precision = np.float32
         elif precision == 16:
             self.precision = np.float16
         print_getrusage('ensemble selection created')
@@ -86,19 +86,23 @@ class EnsembleSelection(AbstractEnsemble):
 
         ensemble_size = self.ensemble_size
 
+        print_getrusage('ensemble selection _fast predictions={predictions[0].shape} len={len(predictions)}')
         weighted_ensemble_prediction = np.zeros(
             predictions[0].shape,
             dtype=self.precision,
         )
+        print_getrusage('ensemble selection _fast weighted_ensemble_prediction={weighted_ensemble_prediction.shape}')
         fant_ensemble_prediction = np.zeros(
             weighted_ensemble_prediction.shape,
             dtype=self.precision,
         )
+        print_getrusage('ensemble selection _fast fant_ensemble_prediction={fant_ensemble_prediction.shape}')
         for i in range(ensemble_size):
             scores = np.zeros(
                 (len(predictions)),
                 dtype=self.precision,
             )
+            print_getrusage('ensemble selection _fast scores={score.shape}')
             s = len(ensemble)
             if s == 0:
                 weighted_ensemble_prediction.fill(0.0)
@@ -121,6 +125,7 @@ class EnsembleSelection(AbstractEnsemble):
                     out=weighted_ensemble_prediction,
                 )
 
+            print_getrusage('ensemble selection _fast before prediction for')
             # Memory-efficient averaging!
             for j, pred in enumerate(predictions):
                 # TODO: this could potentially be vectorized! - let's profile
@@ -136,6 +141,7 @@ class EnsembleSelection(AbstractEnsemble):
                     (1. / float(s + 1)) * pred,
                     out=fant_ensemble_prediction
                 )
+                print_getrusage('ensemble selection _fast before calculate score {j}')
                 scores[j] = self.metric._optimum - calculate_score(
                     solution=labels,
                     prediction=fant_ensemble_prediction,
@@ -143,6 +149,7 @@ class EnsembleSelection(AbstractEnsemble):
                     metric=self.metric,
                     all_scoring_functions=False)
 
+            print_getrusage('ensemble selection _fast before all best')
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
             best = self.random_state.choice(all_best)
             ensemble.append(predictions[best])

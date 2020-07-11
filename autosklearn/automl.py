@@ -43,7 +43,7 @@ from autosklearn.util.common import print_getrusage
 def _model_predict(model, X, batch_size, logger, task):
     def send_warnings_to_log(
             message, category, filename, lineno, file=None, line=None):
-        logger.debug('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
+        print('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
         return
     X_ = X.copy()
     with warnings.catch_warnings():
@@ -221,7 +221,7 @@ class AutoML(BaseEstimator):
 
         time_left_after_reading = max(
             0, time_left_for_this_task - time_for_load_data)
-        logger.info('Remaining time after reading %s %5.2f sec' %
+        print('Remaining time after reading %s %5.2f sec' %
                     (basename, time_left_after_reading))
         return time_for_load_data
 
@@ -233,7 +233,7 @@ class AutoML(BaseEstimator):
                                          'partial-cv-iterative-fit']:
             return num_run
 
-        self._logger.info("Starting to create dummy predictions.")
+        print("Starting to create dummy predictions.")
 
         memory_limit = self._ml_memory_limit
         if memory_limit is not None:
@@ -259,7 +259,7 @@ class AutoML(BaseEstimator):
         status, cost, runtime, additional_info = \
             ta.run(1, cutoff=self._time_for_task)
         if status == StatusType.SUCCESS:
-            self._logger.info("Finished creating dummy predictions.")
+            print("Finished creating dummy predictions.")
         else:
             self._logger.error('Error creating dummy predictions: %s ',
                                str(additional_info))
@@ -404,10 +404,10 @@ class AutoML(BaseEstimator):
                                  "of time_left_for_this_task.")
         elif self._ensemble_size <= 0:
             self._proc_ensemble = None
-            self._logger.info('Not starting ensemble builder because '
+            print('Not starting ensemble builder because '
                               'ensemble size is <= 0.')
         else:
-            self._logger.info(
+            print(
                 'Start Ensemble with %5.2fsec time left' % time_left_for_ensembles)
             self._proc_ensemble = self._get_ensemble_process(time_left_for_ensembles)
             self._proc_ensemble.start()
@@ -427,17 +427,17 @@ class AutoML(BaseEstimator):
         time_left_for_smac = max(0, self._time_for_task - elapsed_time)
 
         if self._logger:
-            self._logger.info(
+            print(
                 'Start SMAC with %5.2fsec time left' % time_left_for_smac)
         if time_left_for_smac <= 0:
-            self._logger.warning("Not starting SMAC because there is no time "
+            print("Not starting SMAC because there is no time "
                                  "left.")
             _proc_smac = None
             self._budget_type = None
         else:
             if self._per_run_time_limit is None or \
                     self._per_run_time_limit > time_left_for_smac:
-                self._logger.warning(
+                print(
                     'Time limit for a single run is higher than total time '
                     'limit. Capping the limit for a single run to the total '
                     'time given to SMAC (%f)' % time_left_for_smac
@@ -450,7 +450,7 @@ class AutoML(BaseEstimator):
             num_models = time_left_for_smac // per_run_time_limit
             if num_models < 2:
                 per_run_time_limit = time_left_for_smac//2
-                self._logger.warning(
+                print(
                     "Capping the per_run_time_limit to {} to have "
                     "time for a least 2 models in each process.".format(
                         per_run_time_limit

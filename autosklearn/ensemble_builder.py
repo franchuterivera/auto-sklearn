@@ -176,7 +176,7 @@ class EnsembleBuilder(multiprocessing.Process):
         logger_name = 'EnsembleBuilder(%d):%s' % (self.seed, self.dataset_name)
         self.logger = get_logger(logger_name)
         if ensemble_nbest == 1:
-            self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
+            print("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
                               (ensemble_nbest, type(ensemble_nbest)))
 
         self.start_time = 0
@@ -232,7 +232,7 @@ class EnsembleBuilder(multiprocessing.Process):
                         self.ensemble_nbest = int(self.ensemble_nbest / 2)
                     else:
                         self.ensemble_nbest = self.ensemble_nbest / 2
-                    self.logger.warning("Memory Exception -- restart with "
+                    print("Memory Exception -- restart with "
                                         "less ensemble_nbest: %d" % self.ensemble_nbest)
                     # ATTENTION: main will start from scratch;
                     # all data structures are empty again
@@ -256,14 +256,14 @@ class EnsembleBuilder(multiprocessing.Process):
             # maximal number of iterations
             if (self.max_iterations is not None
                     and 0 < self.max_iterations <= iteration):
-                self.logger.info("Terminate ensemble building because of max iterations: %d of %d",
+                print("Terminate ensemble building because of max iterations: %d of %d",
                                  self.max_iterations,
                                  iteration)
                 break
             iteration += 1
 
             used_time = time.time() - self.start_time
-            self.logger.debug(
+            print(
                 'Starting iteration %d, time left: %f',
                 iteration,
                 self.time_limit - used_time,
@@ -289,7 +289,7 @@ class EnsembleBuilder(multiprocessing.Process):
             if len(n_sel_test) != 0 and len(n_sel_valid) != 0 \
                     and len(set(n_sel_valid).intersection(set(n_sel_test))) == 0:
                 # Both n_sel_* have entries, but there is no overlap, this is critical
-                self.logger.error("n_sel_valid and n_sel_test are not empty, but do "
+                print("n_sel_valid and n_sel_test are not empty, but do "
                                   "not overlap")
                 time.sleep(self.sleep_duration)
                 continue
@@ -380,13 +380,13 @@ class EnsembleBuilder(multiprocessing.Process):
         """
 
         print_getrusage('ensemble builder score start')
-        self.logger.debug("Read ensemble data set predictions")
+        print("Read ensemble data set predictions")
 
         if self.y_true_ensemble is None:
             try:
                 self.y_true_ensemble = self.backend.load_targets_ensemble()
             except FileNotFoundError:
-                self.logger.debug(
+                print(
                     "Could not find true targets on ensemble data set: %s",
                     traceback.format_exc(),
                 )
@@ -394,7 +394,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
         # no validation predictions so far -- no dir
         if not os.path.isdir(self.dir_ensemble):
-            self.logger.debug("No ensemble dataset prediction directory found")
+            print("No ensemble dataset prediction directory found")
             return False
 
         if self.shared_mode is False:
@@ -415,7 +415,7 @@ class EnsembleBuilder(multiprocessing.Process):
         self.y_ens_files = y_ens_files
         # no validation predictions so far -- no files
         if len(self.y_ens_files) == 0:
-            self.logger.debug("Found no prediction files on ensemble data set:"
+            print("Found no prediction files on ensemble data set:"
                               " %s" % pred_path)
             return False
 
@@ -438,7 +438,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 break
 
             if not y_ens_fn.endswith(".npy") and not y_ens_fn.endswith(".npy.gz"):
-                self.logger.info('Error loading file (not .npy or .npy.gz): %s', y_ens_fn)
+                print('Error loading file (not .npy or .npy.gz): %s', y_ens_fn)
                 continue
 
             if not self.read_preds.get(y_ens_fn):
@@ -473,9 +473,10 @@ class EnsembleBuilder(multiprocessing.Process):
                                         task_type=self.task_type,
                                         metric=self.metric,
                                         all_scoring_functions=False)
+                print(f"ensemble y_ens_fn={y_ens_fn} with score={score} ")
 
                 if self.read_preds[y_ens_fn]["ens_score"] > -1:
-                    self.logger.debug(
+                    print(
                         'Changing ensemble score for file %s from %f to %f '
                         'because file modification time changed? %f - %f',
                         y_ens_fn,
@@ -501,14 +502,14 @@ class EnsembleBuilder(multiprocessing.Process):
                 n_read_files += 1
 
             except Exception:
-                self.logger.warning(
+                print(
                     'Error loading %s: %s',
                     y_ens_fn,
                     traceback.format_exc(),
                 )
                 self.read_preds[y_ens_fn]["ens_score"] = -1
 
-        self.logger.debug(
+        print(
             'Done reading %d new prediction files. Loaded %d predictions in '
             'total.',
             n_read_files,
@@ -541,7 +542,7 @@ class EnsembleBuilder(multiprocessing.Process):
         # number of dummy models
         num_dummy = len(dummy_scores)
         dummy_score = dummy_scores[0]
-        self.logger.debug("Use %f as dummy score" % dummy_score[1])
+        print("Use %f as dummy score" % dummy_score[1])
         sorted_keys = filter(lambda x: x[1] > dummy_score[1], sorted_keys)
         # remove Dummy Classifier
         sorted_keys = list(filter(lambda x: x[2] > 1, sorted_keys))
@@ -549,7 +550,7 @@ class EnsembleBuilder(multiprocessing.Process):
             # no model left; try to use dummy score (num_run==0)
             # log warning when there are other models but not better than dummy model
             if num_keys > num_dummy:
-                self.logger.warning("No models better than random - using Dummy Score!"
+                print("No models better than random - using Dummy Score!"
                                     "Number of models besides current dummy model: %d. "
                                     "Number of dummy models: %d",
                                     num_keys - 1,
@@ -564,7 +565,7 @@ class EnsembleBuilder(multiprocessing.Process):
             # Transform to number of models to keep. Keep at least one
             keep_nbest = max(1, min(len(sorted_keys),
                                     int(len(sorted_keys) * self.ensemble_nbest)))
-            self.logger.debug(
+            print(
                 "Library pruning: using only top %f percent of the models for ensemble "
                 "(%d out of %d)",
                 self.ensemble_nbest * 100, keep_nbest, len(sorted_keys)
@@ -572,7 +573,7 @@ class EnsembleBuilder(multiprocessing.Process):
         else:
             # Keep only at most ensemble_nbest
             keep_nbest = min(self.ensemble_nbest, len(sorted_keys))
-            self.logger.debug("Library Pruning: using for ensemble only "
+            print("Library Pruning: using for ensemble only "
                               " %d (out of %d) models" % (keep_nbest, len(sorted_keys)))
 
         # If max_models_on_disc is None, do nothing
@@ -601,7 +602,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
                     # Make sure that at least 1 model survives
                     self.max_resident_models = max(1, max_models)
-                    self.logger.warning(
+                    print(
                         "Limiting num of models via float max_models_on_disc={}"
                         " as accumulated={} worst={} num_models={}".format(
                             self.max_models_on_disc,
@@ -614,7 +615,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 self.max_resident_models = self.max_models_on_disc
 
         if self.max_resident_models is not None and keep_nbest > self.max_resident_models:
-            self.logger.debug(
+            print(
                 "Restricting the number of models to %d instead of %d due to argument "
                 "max_models_on_disc",
                 self.max_resident_models, keep_nbest,
@@ -634,7 +635,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     # but always keep at least one model
                     current_score = sorted_keys[i][1]
                     if current_score <= min_score:
-                        self.logger.debug("Dynamic Performance range: "
+                        print("Dynamic Performance range: "
                                           "Further reduce from %d to %d models",
                                           keep_nbest, max(1, i))
                         keep_nbest = max(1, i)
@@ -650,7 +651,7 @@ class EnsembleBuilder(multiprocessing.Process):
             self.read_preds[k][Y_VALID] = None
             self.read_preds[k][Y_TEST] = None
             if self.read_preds[k]['loaded'] == 1:
-                self.logger.debug(
+                print(
                     'Dropping model %s (%d,%d) with score %f.',
                     k,
                     self.read_preds[k]['seed'],
@@ -716,7 +717,7 @@ class EnsembleBuilder(multiprocessing.Process):
 
             # TODO don't read valid and test if not changed
             if len(valid_fn) == 0:
-                # self.logger.debug("Not found validation prediction file "
+                # print("Not found validation prediction file "
                 #                   "(although ensemble predictions available): "
                 #                   "%s" % valid_fn)
                 pass
@@ -732,11 +733,11 @@ class EnsembleBuilder(multiprocessing.Process):
                     success_keys_valid.append(k)
                     self.read_preds[k]["mtime_valid"] = os.path.getmtime(valid_fn)
                 except Exception:
-                    self.logger.warning('Error loading %s: %s',
+                    print('Error loading %s: %s',
                                         valid_fn, traceback.format_exc())
 
             if len(test_fn) == 0:
-                # self.logger.debug("Not found test prediction file (although "
+                # print("Not found test prediction file (although "
                 #                   "ensemble predictions available):%s" %
                 #                   test_fn)
                 pass
@@ -753,7 +754,7 @@ class EnsembleBuilder(multiprocessing.Process):
                     success_keys_test.append(k)
                     self.read_preds[k]["mtime_test"] = os.path.getmtime(test_fn)
                 except Exception:
-                    self.logger.warning('Error loading %s: %s',
+                    print('Error loading %s: %s',
                                         test_fn, traceback.format_exc())
 
         return success_keys_valid, success_keys_test
@@ -785,7 +786,7 @@ class EnsembleBuilder(multiprocessing.Process):
         # check hash if ensemble training data changed
         current_hash = hash(predictions_train.data.tobytes())
         if self.last_hash == current_hash:
-            self.logger.debug(
+            print(
                 "No new model predictions selected -- skip ensemble building "
                 "-- current performance: %f",
                 self.validation_performance_,
@@ -806,7 +807,7 @@ class EnsembleBuilder(multiprocessing.Process):
         )
 
         try:
-            self.logger.debug(
+            print(
                 "Fitting the ensemble on %d models.",
                 len(predictions_train),
             )
@@ -814,22 +815,22 @@ class EnsembleBuilder(multiprocessing.Process):
             ensemble.fit(predictions_train, self.y_true_ensemble,
                          include_num_runs)
             end_time = time.time()
-            self.logger.debug(
+            print(
                 "Fitting the ensemble took %.2f seconds.",
                 end_time - start_time,
             )
-            self.logger.info(ensemble)
+            print(ensemble)
             self.validation_performance_ = min(
                 self.validation_performance_,
                 ensemble.get_validation_performance(),
             )
 
         except ValueError:
-            self.logger.error('Caught ValueError: %s', traceback.format_exc())
+            print('Caught ValueError: %s', traceback.format_exc())
             time.sleep(self.sleep_duration)
             return None
         except IndexError:
-            self.logger.error('Caught IndexError: %s' + traceback.format_exc())
+            print('Caught IndexError: %s' + traceback.format_exc())
             time.sleep(self.sleep_duration)
             return None
 
@@ -867,7 +868,7 @@ class EnsembleBuilder(multiprocessing.Process):
             y: np.ndarray
         """
         print_getrusage('ensemble builder predict start')
-        self.logger.debug("Predicting the %s set with the ensemble!", set_)
+        print("Predicting the %s set with the ensemble!", set_)
 
         # Save the ensemble for later use in the main auto-sklearn module!
         if self.SAVE2DISC:
@@ -893,7 +894,7 @@ class EnsembleBuilder(multiprocessing.Process):
             print_getrusage('ensemble builder predict end')
             return y
         else:
-            self.logger.info(
+            print(
                 "Found inconsistent number of predictions and models (%d vs "
                 "%d) for subset %s",
                 predictions.shape[0],
@@ -998,12 +999,12 @@ class EnsembleBuilder(multiprocessing.Process):
             except Exception as e:
                 if isinstance(e, lockfile.AlreadyLocked):
                     # If the file is already locked, we deal with it later. Not a big deal
-                    self.logger.info(
+                    print(
                         'Model %s is already locked. Skipping it for now.', model_name)
                 else:
                     # Other exceptions, however, should not occur.
                     # The message bellow is asserted in test_delete_excess_models()
-                    self.logger.error(
+                    print(
                         'Failed to lock model %s files due to error %s', model_name, e)
                 for lock in locks:
                     if lock.i_am_locking():
@@ -1021,10 +1022,10 @@ class EnsembleBuilder(multiprocessing.Process):
                 try:
                     for path in paths:
                         os.remove(path)
-                    self.logger.info(
+                    print(
                         "Deleted files of non-candidate model %s", model_name)
                 except Exception as e:
-                    self.logger.error(
+                    print(
                         "Failed to delete files of non-candidate model %s due"
                         " to error %s", model_name, e)
 
@@ -1039,7 +1040,7 @@ class EnsembleBuilder(multiprocessing.Process):
         # Support for string precision
         if isinstance(self.precision, str):
             precision = int(self.precision)
-            self.logger.warning("Interpreted str-precision as {}".format(
+            print("Interpreted str-precision as {}".format(
                 precision
             ))
         else:
