@@ -76,7 +76,7 @@ class _PredictScorer(Scorer):
         else:
             return_value =  self._sign * self._score_func(y_true, y_pred,
                                                  **self._kwargs)
-        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape} score={score}")
+        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape} score={return_value}")
         return return_value
 
 
