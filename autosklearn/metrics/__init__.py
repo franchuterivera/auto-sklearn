@@ -64,6 +64,8 @@ class _PredictScorer(Scorer):
         else:
             raise ValueError(type_true)
 
+        y_pred = y_pred.astype(y_true.dtype)
+
         type_true = type_of_target(y_true)
         type_pred = type_of_target(y_pred)
         print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} [{type_pred}] y_true={y_true}{y_true.shape} [{type_true}]")
@@ -100,6 +102,7 @@ class _ProbaScorer(Scorer):
         score : float
             Score function applied to prediction of estimator on X.
         """
+        y_pred = y_pred.astype(y_true.dtype)
         print_getrusage(f"ProbaScorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape}")
         if sample_weight is not None:
             return self._sign * self._score_func(y_true, y_pred,
@@ -129,6 +132,7 @@ class _ThresholdScorer(Scorer):
         score : float
             Score function applied to prediction of estimator on X.
         """
+        y_pred = y_pred.astype(y_true.dtype)
         y_type = type_of_target(y_true)
         if y_type not in ("binary", "multilabel-indicator"):
             raise ValueError("{0} format is not supported".format(y_type))

@@ -86,12 +86,12 @@ class EnsembleSelection(AbstractEnsemble):
 
         ensemble_size = self.ensemble_size
 
-        print_getrusage('ensemble selection _fast predictions={predictions[0].shape} len={len(predictions)}')
+        print_getrusage(f"ensemble selection _fast predictions={predictions[0].shape} len={len(predictions)}")
         weighted_ensemble_prediction = np.zeros(
             predictions[0].shape,
             dtype=self.precision,
         )
-        print_getrusage('ensemble selection _fast weighted_ensemble_prediction={weighted_ensemble_prediction.shape}')
+        print_getrusage(f"ensemble selection _fast weighted_ensemble_prediction={weighted_ensemble_prediction.shape}")
         fant_ensemble_prediction = np.zeros(
             weighted_ensemble_prediction.shape,
             dtype=self.precision,
