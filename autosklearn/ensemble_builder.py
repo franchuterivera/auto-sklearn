@@ -666,6 +666,7 @@ class EnsembleBuilder(multiprocessing.Process):
                 self.read_preds[k][Y_ENSEMBLE] = self._read_np_fn(k)
                 # No need to load valid and test here because they are loaded
                 #  only if the model ends up in the ensemble
+            print(f"ENSEMBLING LIKELY {k} self.read_preds[k]={self.read_preds[k]['ens_score']}")
             self.read_preds[k]['loaded'] = 1
 
         # return best scored keys of self.read_preds

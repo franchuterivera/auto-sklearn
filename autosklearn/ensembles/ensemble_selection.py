@@ -148,7 +148,7 @@ class EnsembleSelection(AbstractEnsemble):
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False)
-                print_getrusage(f"ensemble selection _fast before calculate score {j}")
+                print_getrusage(f"ensemble selection _fast after calculate score {j}= {scores[j]}")
 
             print_getrusage('ensemble selection _fast before all best')
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()

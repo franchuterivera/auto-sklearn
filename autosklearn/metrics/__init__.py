@@ -64,14 +64,20 @@ class _PredictScorer(Scorer):
         else:
             raise ValueError(type_true)
 
-        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape}")
+        type_true = type_of_target(y_true)
+        type_pred = type_of_target(y_pred)
+        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} [{type_pred}] y_true={y_true}{y_true.shape} [{type_true}]")
+        for pred, true in zip(y_pred, y_true):
+            print(f"{pred}({type(pred)}) {true}({type(true)})")
         if sample_weight is not None:
-            return self._sign * self._score_func(y_true, y_pred,
+            return_value =  self._sign * self._score_func(y_true, y_pred,
                                                  sample_weight=sample_weight,
                                                  **self._kwargs)
         else:
-            return self._sign * self._score_func(y_true, y_pred,
+            return_value =  self._sign * self._score_func(y_true, y_pred,
                                                  **self._kwargs)
+        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape} score={score}")
+        return return_value
 
 
 class _ProbaScorer(Scorer):
