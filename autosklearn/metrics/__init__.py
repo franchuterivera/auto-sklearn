@@ -11,7 +11,6 @@ from .util import sanitize_array
 
 from smac.utils.constants import MAXINT
 
-from autosklearn.util.common import print_getrusage
 
 class Scorer(object, metaclass=ABCMeta):
     def __init__(self, name, score_func, optimum, worst_possible_result, sign, kwargs):
@@ -64,7 +63,6 @@ class _PredictScorer(Scorer):
         else:
             raise ValueError(type_true)
 
-        print_getrusage(f"predict scorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape}")
         if sample_weight is not None:
             return self._sign * self._score_func(y_true, y_pred,
                                                  sample_weight=sample_weight,
@@ -94,7 +92,6 @@ class _ProbaScorer(Scorer):
         score : float
             Score function applied to prediction of estimator on X.
         """
-        print_getrusage(f"ProbaScorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape}")
         if sample_weight is not None:
             return self._sign * self._score_func(y_true, y_pred,
                                                  sample_weight=sample_weight,
@@ -133,7 +130,6 @@ class _ThresholdScorer(Scorer):
         elif isinstance(y_pred, list):
             y_pred = np.vstack([p[:, -1] for p in y_pred]).T
 
-        print_getrusage(f"_ThresholdScorer start with y_pred={y_pred}{y_pred.shape} y_true={y_true}{y_true.shape}")
         if sample_weight is not None:
             return self._sign * self._score_func(y_true, y_pred,
                                                  sample_weight=sample_weight,
@@ -270,7 +266,6 @@ def calculate_score(solution, prediction, task_type, metric,
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
 
-    print_getrusage(f"On calculate score for metric={metric} task_type={task_type} prediction={prediction} solution={solution} all_scoring_functions={all_scoring_functions}")
     print(f"calculate_score::solution={solution} ({solution.shape})")
     print(f"calculate_score::prediction={prediction} ({prediction.shape})")
     if all_scoring_functions:
@@ -315,7 +310,5 @@ def calculate_score(solution, prediction, task_type, metric,
             score = metric(solution, cprediction)
         else:
             score = metric(solution, prediction)
-
-    print(f"The score to return is {score}")
 
     return score
