@@ -24,6 +24,8 @@ from autosklearn.util.logging_ import get_logger
 
 from ConfigSpace import Configuration
 
+from autosklearn.util.common import print_getrusage
+
 
 __all__ = [
     'AbstractEvaluator'
@@ -106,7 +108,9 @@ def _fit_and_suppress_warnings(logger, model, X, y):
 
     with warnings.catch_warnings():
         warnings.showwarning = send_warnings_to_log
+        print_getrusage(f"Fitting the model={model} start")
         model.fit(X, y)
+        print_getrusage(f"Fitting the model={model} end")
 
     return model
 

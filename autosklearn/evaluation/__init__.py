@@ -1,3 +1,4 @@
+import os
 # -*- encoding: utf-8 -*-
 import functools
 import logging
@@ -99,6 +100,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
                              resampling_strategy)
 
         self.worst_possible_result = get_cost_of_crash(metric)
+        print_getrusage(f"eval_function={eval_function}")
 
         eval_function = functools.partial(
             fit_predict_try_except_decorator,
@@ -187,7 +189,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             additional_info: dict
                 all further additional run information
         """
-        print_getrusage('ta function tart start')
+        print_getrusage('ta function start() start')
         if self.budget_type is None:
             if budget != 0:
                 raise ValueError('If budget_type is None, budget must be.0, but is %f' % budget)
@@ -220,11 +222,11 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             seed=12345,
             budget=0.0,
             instance_specific=None):
-        print_getrusage('ta function run start')
 
         queue = multiprocessing.Queue()
 
         if not (instance_specific is None or instance_specific == '0'):
+            print(f"No instance specific")
             raise ValueError(instance_specific)
         init_params = {'instance': instance}
         if self.init_params is not None:
@@ -252,6 +254,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             budget=budget,
             budget_type=self.budget_type,
         )
+        print_getrusage(f"TAE: The main run start with pid={os.getpid()} obj_kwargs={obj_kwargs}")
 
         if self.resampling_strategy != 'test':
             obj_kwargs['resampling_strategy'] = self.resampling_strategy
@@ -383,6 +386,6 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
         self.num_run += 1
 
         autosklearn.evaluation.util.empty_queue(queue)
-        print_getrusage('ta function run end')
+        print_getrusage(f"TAE: The main run ended with pid={os.getpid()} and status={status}")
 
         return status, cost, runtime, additional_run_info

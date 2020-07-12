@@ -96,13 +96,13 @@ class EnsembleSelection(AbstractEnsemble):
             weighted_ensemble_prediction.shape,
             dtype=self.precision,
         )
-        print_getrusage('ensemble selection _fast fant_ensemble_prediction={fant_ensemble_prediction.shape}')
+        print_getrusage(f"ensemble selection _fast fant_ensemble_prediction={fant_ensemble_prediction.shape}")
         for i in range(ensemble_size):
             scores = np.zeros(
                 (len(predictions)),
                 dtype=self.precision,
             )
-            print_getrusage('ensemble selection _fast scores={score.shape}')
+            print_getrusage(f"ensemble selection _fast scores={scores.shape}")
             s = len(ensemble)
             if s == 0:
                 weighted_ensemble_prediction.fill(0.0)
@@ -141,13 +141,14 @@ class EnsembleSelection(AbstractEnsemble):
                     (1. / float(s + 1)) * pred,
                     out=fant_ensemble_prediction
                 )
-                print_getrusage('ensemble selection _fast before calculate score {j}')
+                print_getrusage(f"ensemble selection _fast before calculate score {j}")
                 scores[j] = self.metric._optimum - calculate_score(
                     solution=labels,
                     prediction=fant_ensemble_prediction,
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False)
+                print_getrusage(f"ensemble selection _fast before calculate score {j}")
 
             print_getrusage('ensemble selection _fast before all best')
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()

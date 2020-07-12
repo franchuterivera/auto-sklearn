@@ -1,5 +1,6 @@
 # -*- encoding: utf-8 -*-
 import numpy as np
+from autosklearn.util.common import print_getrusage
 
 
 def sanitize_array(array):
@@ -8,6 +9,7 @@ def sanitize_array(array):
     :param array:
     :return:
     """
+    print_getrusage(f"Sanitize array start")
     a = np.ravel(array)
     maxi = np.nanmax(a[np.isfinite(a)])
     mini = np.nanmin(a[np.isfinite(a)])
@@ -15,4 +17,5 @@ def sanitize_array(array):
     array[array == float('-inf')] = mini
     mid = (maxi + mini) / 2
     array[np.isnan(array)] = mid
+    print_getrusage(f"Sanitize array end")
     return array

@@ -101,11 +101,11 @@ def subsample_indices(train_indices, subsample, task_type, Y_train):
 
 def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train_indices,
                      task_type):
+    print_getrusage('fit with budget start')
     if (
             budget_type == 'iterations'
             or budget_type == 'mixed' and model.estimator_supports_iterative_fit()
     ):
-        print_getrusage('fit with budget start')
         if model.estimator_supports_iterative_fit():
             budget_factor = model.get_max_iter()
             Xt, fit_params = model.fit_transformer(X_train[train_indices],
@@ -517,6 +517,7 @@ class TrainEvaluator(AbstractEvaluator):
                     self.Y_targets[i],
                     opt_pred,
                 )
+                print_getrusage(f"The loss for this training is {train_loss} and val {optimization_loss}")
                 opt_losses.append(optimization_loss)
                 # number of optimization data points for this fold. Used for weighting
                 # the average.
@@ -611,7 +612,7 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
-            print_getrusage('fit predict and loss end')
+            print_getrusage(f"fit predict and loss end with loss={opt_loss}")
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -850,6 +851,7 @@ class TrainEvaluator(AbstractEvaluator):
         self.Y_targets[fold] = self.Y_train[test_indices]
         self.Y_train_targets[train_indices] = self.Y_train[train_indices]
 
+        print_getrusage(f"Calling fit with budget on model={model}")
         _fit_with_budget(
             X_train=self.X_train,
             Y_train=self.Y_train,
