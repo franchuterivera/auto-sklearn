@@ -1,7 +1,7 @@
 FROM ubuntu
 
 # Copy the checkout autosklearn version for installation
-ADD ./* /auto-sklearn
+ADD ./* /auto-sklearn/
 
 # System requirements
 RUN apt-get update && apt-get install -y \
