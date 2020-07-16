@@ -37,10 +37,10 @@ jobs:
         env:
             BRANCH: ${{ steps.extract_branch.outputs.branch }}
       - name: Run image
-        run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:$BRANCH
+        run: docker run -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:$BRANCH
         env:
             BRANCH: ${{ steps.extract_branch.outputs.branch }}
       - name: Auto-Sklearn loaded
-        run: docker exec  -it unittester python -c 'import autosklearn; print(f"Auto-sklearn imported from{autosklearn.__file__}")'
+        run: docker exec unittester python -c 'import autosklearn; print(f"Auto-sklearn imported from{autosklearn.__file__}")'
       - name: Run unit testing
-        run: docker exec  -it unittester python -m pytest -v test
+        run: docker exec unittester python -m pytest -v test
