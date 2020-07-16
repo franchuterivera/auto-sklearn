@@ -31,5 +31,5 @@ jobs:
         run: docker pull "docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:latest"
       - name: Run image
         run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:latest
-        -name: Run unit testing
+      - name: Run unit testing
         run: python -m pytest -v test
