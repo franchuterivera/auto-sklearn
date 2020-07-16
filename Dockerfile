@@ -6,15 +6,15 @@ WORKDIR /auto-sklearn
 ADD . /auto-sklearn/
 
 
-RUN apt install -y python-dev python-pip
-RUN pip3 install --upgrade setuptools
-
 # install linux packages
 RUN apt-get update
 # https://github.com/automl/auto-sklearn/issues/314
 RUN apt-get remove swig
 RUN apt-get install swig3.0
 RUN ln -s /usr/bin/swig3.0 /usr/bin/swig
+
+RUN apt install -y python-dev python-pip
+RUN pip3 install --upgrade setuptools
 
 # System requirements
 RUN apt-get update && apt-get install -y \
