@@ -23,14 +23,16 @@ jobs:
           registry: docker.pkg.github.com
           #repository: automl/auto-sklearn/auto-sklearn
           repository: franchuterivera/auto-sklearn/auto-sklearn
-          tag_with_ref: true
+          tags: ${GITHUB_REF##*/}
       - name: Docker Login
         run: docker login docker.pkg.github.com -u $GITHUB_ACTOR -p $GITHUB_TOKEN
         env:
             GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       - name: Pull Docker image
-        run: docker pull "docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:latest"
+        run: docker pull "docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:${GITHUB_REF##*/}"
+        env:
+            GITHUB_TOKEN: ${{ github.head_ref }}
       - name: Run image
-        run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:latest
+        run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:${GITHUB_REF##*/}
       - name: Run unit testing
         run: python -m pytest -v test
