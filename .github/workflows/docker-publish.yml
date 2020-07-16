@@ -41,6 +41,6 @@ jobs:
         env:
             BRANCH: ${{ steps.extract_branch.outputs.branch }}
       - name: Auto-Sklearn loaded
-        run: python -c 'import autosklearn; print("Auto-sklearn imported from: %s" % autosklearn.__file__)'
+        run: python -c 'import autosklearn; print(f"Auto-sklearn imported from{autosklearn.__file__}")'
       - name: Run unit testing
         run: python -m pytest -v test
