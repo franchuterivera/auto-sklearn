@@ -1,7 +1,7 @@
 FROM ubuntu
 
 # Copy the checkout autosklearn version for installation
-ADD ./* $HOME/auto-sklearn/
+COPY . $HOME/auto-sklearn/
 
 # System requirements
 RUN apt-get update && apt-get install -y \
@@ -19,6 +19,6 @@ RUN curl https://raw.githubusercontent.com/automl/auto-sklearn/master/requiremen
 RUN pip3 install jupyter
 
 # Install
-RUN ls $HOME/auto-sklearn/
 RUN ls $HOME/
+RUN ls $HOME/auto-sklearn/
 RUN pip3 install -e $HOME/auto-sklearn/
