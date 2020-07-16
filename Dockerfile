@@ -19,5 +19,6 @@ RUN curl https://raw.githubusercontent.com/automl/auto-sklearn/master/requiremen
 RUN pip3 install jupyter
 
 # Install
-RUN ls $HOME/auto-sklearn
-RUN pip3 install -e $HOME/auto-sklearn
+RUN ls $HOME/auto-sklearn/
+RUN ls $HOME/
+RUN pip3 install -e $HOME/auto-sklearn/
