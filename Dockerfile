@@ -5,12 +5,22 @@ WORKDIR /auto-sklearn
 # Copy the checkout autosklearn version for installation
 ADD . /auto-sklearn/
 
+
+RUN apt install -y python-dev python-pip
+RUN pip3 install --upgrade setuptools
+
+# install linux packages
+RUN apt-get update
+# https://github.com/automl/auto-sklearn/issues/314
+RUN apt-get remove swig
+RUN apt-get install swig3.0
+RUN ln -s /usr/bin/swig3.0 /usr/bin/swig
+
 # System requirements
 RUN apt-get update && apt-get install -y \
   build-essential \
   curl \
   python3-pip \
-  swig \
   && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip then install dependencies
