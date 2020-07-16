@@ -15,6 +15,10 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v2
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_branch
       - name: Push to GitHub Packages
         uses: docker/build-push-action@v1
         with:
@@ -23,14 +27,18 @@ jobs:
           registry: docker.pkg.github.com
           #repository: automl/auto-sklearn/auto-sklearn
           repository: franchuterivera/auto-sklearn/auto-sklearn
-          tags: ${{ GITHUB_REF##*/ }}
+          tags: ${{ steps.extract_branch.outputs.branch }}
       - name: Docker Login
         run: docker login docker.pkg.github.com -u $GITHUB_ACTOR -p $GITHUB_TOKEN
         env:
             GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       - name: Pull Docker image
-        run: docker pull docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:${GITHUB_REF##*/}
+        run: docker pull docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:$BRANCH
+        env:
+            BRANCH: ${{ steps.extract_branch.outputs.branch }}
       - name: Run image
-        run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:${GITHUB_REF##*/}
+        run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:$BRANCH
+        env:
+            BRANCH: ${{ steps.extract_branch.outputs.branch }}
       - name: Run unit testing
         run: python -m pytest -v test
