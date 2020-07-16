@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Upgrade pip then install dependencies
 RUN pip3 install --upgrade pip
+RUN pip3 install pytest==4.6.* pep8 codecov pytest-cov flake8 flaky
 RUN curl https://raw.githubusercontent.com/automl/auto-sklearn/master/requirements.txt \
   | xargs -n 1 -L 1 pip3 install
 

@@ -40,5 +40,7 @@ jobs:
         run: docker run -it -d --name unittester -v $GITHUB_WORKSPACE:/workspace -w /workspace docker.pkg.github.com/$GITHUB_REPOSITORY/auto-sklearn:$BRANCH
         env:
             BRANCH: ${{ steps.extract_branch.outputs.branch }}
+      - name: Auto-Sklearn loaded
+        run: python -c 'import autosklearn; print("Auto-sklearn imported from: %s" % autosklearn.__file__)'
       - name: Run unit testing
         run: python -m pytest -v test
