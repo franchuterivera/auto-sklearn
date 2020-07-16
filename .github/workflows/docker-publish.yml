@@ -21,7 +21,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
           registry: docker.pkg.github.com
-          repository: automl/auto-sklearn/auto-sklearn
+          #repository: automl/auto-sklearn/auto-sklearn
+          repository: franchuterivera/auto-sklearn/auto-sklearn
           tag_with_ref: true
       - name: Docker Login
         run: docker login docker.pkg.github.com -u $GITHUB_ACTOR -p $GITHUB_TOKEN
