@@ -184,10 +184,7 @@ def _test_preprocessing(Preprocessor, dataset='iris', make_sparse=False,
     default = configuration_space.get_default_configuration()
 
     kwargs = {hp_name: default[hp_name] for hp_name in
-                                   default if default[hp_name] is not None}
-
-    if task is not None:
-        kwargs['task'] = task
+              default if default[hp_name] is not None}
 
     preprocessor = Preprocessor(random_state=np.random.RandomState(1),
                                 **kwargs)
