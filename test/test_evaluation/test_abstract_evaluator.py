@@ -8,7 +8,7 @@ import numpy as np
 
 from autosklearn.evaluation.abstract_evaluator import AbstractEvaluator
 from autosklearn.metrics import accuracy
-from smac.tae.execute_ta_run import StatusType
+from smac.tae import StatusType
 
 this_directory = os.path.dirname(__file__)
 sys.path.append(this_directory)

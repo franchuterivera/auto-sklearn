@@ -2,20 +2,26 @@
 import io
 import json
 import multiprocessing
+import platform
 import os
+import sys
+import time
 from typing import Optional, List, Union
 import unittest.mock
 import warnings
+import uuid
 
-from ConfigSpace.read_and_write import pcs
+from ConfigSpace.read_and_write import json as cs_json
+import dask.distributed
 import numpy as np
 import numpy.ma as ma
 import pandas as pd
+import pkg_resources
 import scipy.stats
 from sklearn.base import BaseEstimator
 from sklearn.model_selection._split import _RepeatedSplits, \
     BaseShuffleSplit, BaseCrossValidator
-from smac.tae.execute_ta_run import StatusType
+from smac.tae import StatusType
 from smac.stats.stats import Stats
 import joblib
 import sklearn.utils
@@ -33,14 +39,22 @@ from autosklearn.evaluation.train_evaluator import _fit_with_budget
 from autosklearn.metrics import calculate_score
 from autosklearn.util.stopwatch import StopWatch
 from autosklearn.util.logging_ import get_logger, setup_logger
-from autosklearn.util import pipeline
-from autosklearn.ensemble_builder import EnsembleBuilder
+from autosklearn.util import pipeline, RE_PATTERN
+from autosklearn.ensemble_builder import EnsembleBuilder, ensemble_builder_process
 from autosklearn.ensembles.singlebest_ensemble import SingleBest
 from autosklearn.smbo import AutoMLSMBO
 from autosklearn.util.hash import hash_array_or_matrix
 from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION, MULTIOUTPUT_REGRESSION
+from autosklearn.pipeline.components.classification import ClassifierChoice
+from autosklearn.pipeline.components.regression import RegressorChoice
+from autosklearn.pipeline.components.feature_preprocessing import FeaturePreprocessorChoice
+from autosklearn.pipeline.components.data_preprocessing.categorical_encoding import OHEChoice
+from autosklearn.pipeline.components.data_preprocessing.minority_coalescense import (
+    CoalescenseChoice
+)
+from autosklearn.pipeline.components.data_preprocessing.rescaling import RescalingChoice
 
 
 def _model_predict(model, X, batch_size, logger, task):
@@ -99,7 +113,8 @@ class AutoML(BaseEstimator):
                  exclude_preprocessors=None,
                  resampling_strategy='holdout-iterative-fit',
                  resampling_strategy_arguments=None,
-                 shared_mode=False,
+                 n_jobs=None,
+                 dask_client: Optional[dask.distributed.Client] = None,
                  precision=32,
                  disable_evaluator_output=False,
                  get_smac_object_callback=None,
@@ -156,7 +171,30 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
-        self._shared_mode = shared_mode
+        self._n_jobs = n_jobs
+        self._dask_client = dask_client
+
+        # If no dask client was provided, we create one, so that we can
+        # start a ensemble process in parallel to smbo optimize
+        # local_directory=output_directory)
+        if self._dask_client is None:
+            processes = False
+            if self._n_jobs > 1:
+                processes = True
+                dask.config.set({'distributed.worker.daemon': False})
+            self._dask_client = dask.distributed.Client(
+                n_workers=self._n_jobs,
+                processes=processes,
+                threads_per_worker=1,
+            )
+            print(self._dask_client)
+
+        # For the ensemble building process
+
+        # How much patience to wait for the ensemble building process to finish by itself
+        self.ensemble_timeout_patience = 10
+        self.ensemble_event_killer = 'EnsembleBuilderKiller' + str(uuid.uuid4().hex.upper())
+
         self.precision = precision
         self._disable_evaluator_output = disable_evaluator_output
         # Check arguments prior to doing anything!
@@ -193,8 +231,13 @@ class AutoML(BaseEstimator):
 
         self.InputValidator = InputValidator()
 
-        # Place holder for the run history of the
-        # Ensemble building process
+        # Ensemble building process attributes
+
+        # How much time to wait between retries of
+        # ensemble building process
+        self.ensemble_sleep_duration = 2
+
+        # The ensemble performance history through time
         self.ensemble_performance_history = []
 
         if not isinstance(self._time_for_task, int):
@@ -276,8 +319,6 @@ class AutoML(BaseEstimator):
             raise ValueError("Dummy prediction failed with run state %s and additional output: %s."
                              % (str(status), str(additional_info)))
 
-        return ta.num_run
-
     def fit(
         self,
         X: np.ndarray,
@@ -314,14 +355,6 @@ class AutoML(BaseEstimator):
         if not isinstance(self._metric, Scorer):
             raise ValueError('Metric must be instance of '
                              'autosklearn.metrics.Scorer.')
-        if self._shared_mode:
-            # If this fails, it's likely that this is the first call to get
-            # the data manager
-            try:
-                D = self._backend.load_datamanager()
-                dataset_name = D.name
-            except IOError:
-                pass
 
         if dataset_name is None:
             dataset_name = hash_array_or_matrix(X)
@@ -356,6 +389,81 @@ class AutoML(BaseEstimator):
         elif feat_type is None and self.InputValidator.feature_types:
             feat_type = self.InputValidator.feature_types
 
+        # Produce debug information to the logfile
+        self._logger.debug('Starting to print environment information')
+        self._logger.debug('  Python version: %s', sys.version.split('\n'))
+        try:
+            self._logger.debug('  Distribution: %s', platform.linux_distribution())
+        except AttributeError:
+            # platform.linux_distribution() was removed in Python3.8
+            # We should move to the distro package as soon as it supports Windows and OSX
+            pass
+        self._logger.debug('  System: %s', platform.system())
+        self._logger.debug('  Machine: %s', platform.machine())
+        self._logger.debug('  Platform: %s', platform.platform())
+        # UNAME appears to leak sensible information
+        # self._logger.debug('  uname: %s', platform.uname())
+        self._logger.debug('  Version: %s', platform.version())
+        self._logger.debug('  Mac version: %s', platform.mac_ver())
+        requirements = pkg_resources.resource_string('autosklearn', 'requirements.txt')
+        requirements = requirements.decode('utf-8')
+        requirements = [requirement for requirement in requirements.split('\n')]
+        # for requirement in requirements:
+        #     if not requirement:
+        #         continue
+        #     match = RE_PATTERN.match(requirement)
+        #     if match:
+        #         name = match.group('name')
+        #         module_dist = pkg_resources.get_distribution(name)
+        #         self._logger.debug('  %s', module_dist)
+        #     else:
+        #         raise ValueError('Unable to read requirement: %s' % requirement)
+        self._logger.debug('Done printing environment information')
+        self._logger.debug('Starting to print arguments to auto-sklearn')
+        self._logger.debug('  output_folder: %s', self._backend.context._output_directory)
+        self._logger.debug('  tmp_folder: %s', self._backend.context._temporary_directory)
+        self._logger.debug('  time_left_for_this_task: %f', self._time_for_task)
+        self._logger.debug('  per_run_time_limit: %f', self._per_run_time_limit)
+        self._logger.debug(
+            '  initial_configurations_via_metalearning: %d',
+            self._initial_configurations_via_metalearning,
+        )
+        self._logger.debug('  ensemble_size: %d', self._ensemble_size)
+        self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
+        self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
+        self._logger.debug('  ensemble_memory_limit: %d', self._ensemble_memory_limit)
+        self._logger.debug('  seed: %d', self._seed)
+        self._logger.debug('  ml_memory_limit: %s', str(self._ml_memory_limit))
+        self._logger.debug('  metadata_directory: %s', self._metadata_directory)
+        self._logger.debug('  debug_mode: %s', self._debug_mode)
+        self._logger.debug('  include_estimators: %s', str(self._include_estimators))
+        self._logger.debug('  exclude_estimators: %s', str(self._exclude_estimators))
+        self._logger.debug('  include_preprocessors: %s', str(self._include_preprocessors))
+        self._logger.debug('  exclude_preprocessors: %s', str(self._exclude_preprocessors))
+        self._logger.debug('  resampling_strategy: %s', str(self._resampling_strategy))
+        self._logger.debug('  resampling_strategy_arguments: %s',
+                           str(self._resampling_strategy_arguments))
+        self._logger.debug('  n_jobs: %s', str(self._n_jobs))
+        self._logger.debug('  dask_client: %s', str(self._dask_client))
+        self._logger.debug('  precision: %s', str(self.precision))
+        self._logger.debug('  disable_evaluator_output: %s', str(self._disable_evaluator_output))
+        self._logger.debug('  get_smac_objective_callback: %s', str(self._get_smac_object_callback))
+        self._logger.debug('  smac_scenario_args: %s', str(self._smac_scenario_args))
+        self._logger.debug('  logging_config: %s', str(self.logging_config))
+        self._logger.debug('  metric: %s', str(self._metric))
+        self._logger.debug('Done printing arguments to auto-sklearn')
+        self._logger.debug('Starting to print available components')
+        for choice in (
+            ClassifierChoice, RegressorChoice, FeaturePreprocessorChoice,
+            OHEChoice, RescalingChoice, CoalescenseChoice,
+        ):
+            self._logger.debug(
+                '%s: %s',
+                choice.__name__,
+                choice.get_components(),
+            )
+        self._logger.debug('Done printing available components')
+
         datamanager = XYDataManager(
             X, y,
             X_test=X_test,
@@ -369,13 +477,11 @@ class AutoML(BaseEstimator):
         try:
             os.makedirs(self._backend.get_model_dir())
         except (OSError, FileExistsError):
-            if not self._shared_mode:
-                raise
+            raise
         try:
             os.makedirs(self._backend.get_cv_model_dir())
         except (OSError, FileExistsError):
-            if not self._shared_mode:
-                raise
+            raise
 
         self._task = datamanager.info['task']
         self._label_num = datamanager.info['label_num']
@@ -394,8 +500,7 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         num_run = 1
-        # if self._resampling_strategy in ['holdout', 'holdout-iterative-fit']:
-        num_run = self._do_dummy_prediction(datamanager, num_run)
+        self._do_dummy_prediction(datamanager, num_run)
 
         # = Create a searchspace
         # Do this before One Hot Encoding to make sure that it creates a
@@ -423,8 +528,8 @@ class AutoML(BaseEstimator):
         self._stopwatch.start_task(ensemble_task_name)
         elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
         time_left_for_ensembles = max(0, self._time_for_task - elapsed_time)
+        proc_ensemble = None
         if time_left_for_ensembles <= 0:
-            self._proc_ensemble = None
             # Fit only raises error when ensemble_size is not zero but
             # time_left_for_ensembles is zero.
             if self._ensemble_size > 0:
@@ -432,26 +537,40 @@ class AutoML(BaseEstimator):
                                  "is no time left. Try increasing the value "
                                  "of time_left_for_this_task.")
         elif self._ensemble_size <= 0:
-            self._proc_ensemble = None
             self._logger.info('Not starting ensemble builder because '
                               'ensemble size is <= 0.')
         else:
             self._logger.info(
                 'Start Ensemble with %5.2fsec time left' % time_left_for_ensembles)
 
-            # Create a queue to communicate with the ensemble process
-            # And get the run history
-            # Use a Manager as a workaround to memory errors cause
-            # by three subprocesses (Automl-ensemble_builder-pynisher)
-            mgr = multiprocessing.Manager()
-            mgr.Namespace()
-            queue = mgr.Queue()
+            # TODO: remove max iterations as well as random seed?
 
-            self._proc_ensemble = self._get_ensemble_process(
-                time_left_for_ensembles,
-                queue=queue,
+            proc_ensemble = self._dask_client.submit(
+                ensemble_builder_process,
+                time.time(),  # Track when the ensemble builder processes was started
+                time_left_for_ensembles,  # This is the max time the process can take
+                self.ensemble_sleep_duration,  # How much time to wait between iterations
+                self.ensemble_event_killer,  # Setting this event forces termination
+                self._backend,  # A backend object to access shared directories
+                dataset_name,  # Name of the dataset to load
+                task,  # type of the task
+                self._metric,  # metric to evaluate the ensemble performance
+                self._ensemble_size,  # Maximum number of models allowed
+                self._ensemble_nbest,  # How many n best models to use
+                self._max_models_on_disc,  # maximum number of models allowed in disc
+                self._seed,  # Seed the ensemble creation and allow to retrieve files
+                self.precision,  # The precision of the np arrays
+                None,  # Maximum number of iterations for the ensemble
+                np.inf,  # read_at_most -- maximum number of files to read for memory
+                self._ensemble_memory_limit,  # pynisher memory limit
+                self._seed,  # random state
             )
-            self._proc_ensemble.start()
+
+            # We expect the ensemble process to be time driven, and honor the maximum
+            # time provided via time_left_for_ensemble. As a safety measure, we also
+            # provide an event signal that stops the process before the next iteration
+            # of ensemble builder process
+            self.ensemble_event_killer = dask.distributed.Event(self.ensemble_event_killer)
 
         self._stopwatch.stop_task(ensemble_task_name)
 
@@ -507,6 +626,8 @@ class AutoML(BaseEstimator):
                 memory_limit=self._ml_memory_limit,
                 data_memory_limit=self._data_memory_limit,
                 watcher=self._stopwatch,
+                n_jobs=self._n_jobs,
+                dask_client=self._dask_client,
                 start_num_run=num_run,
                 num_metalearning_cfgs=self._initial_configurations_via_metalearning,
                 config_file=configspace_path,
@@ -515,7 +636,6 @@ class AutoML(BaseEstimator):
                 metric=self._metric,
                 resampling_strategy=self._resampling_strategy,
                 resampling_strategy_args=self._resampling_strategy_arguments,
-                shared_mode=self._shared_mode,
                 include_estimators=self._include_estimators,
                 exclude_estimators=self._exclude_estimators,
                 include_preprocessors=self._include_preprocessors,
@@ -542,11 +662,24 @@ class AutoML(BaseEstimator):
 
         # Wait until the ensemble process is finished to avoid shutting down
         # while the ensemble builder tries to access the data
-        if self._proc_ensemble is not None and self._ensemble_size > 0:
-            self._proc_ensemble.join()
-            self.ensemble_performance_history = self._proc_ensemble.get_ensemble_history()
+        if proc_ensemble is not None:
 
-        self._proc_ensemble = None
+            # Here we signal the ensemble process to finish
+            # That is, no more iterations are allowed
+            self.ensemble_event_killer.set()
+
+
+            # We wait for self.ensemble_timeout_patience seconds for a job to finish
+            # Notice we provided a kill signal and also the maximum allowed time, so
+            # it is likely that the TimeoutError won't happen. In case it does, we notify
+            # the user
+            try:
+                dask.distributed.wait(proc_ensemble, timeout=self.ensemble_timeout_patience)
+                self.ensemble_performance_history = proc_ensemble.result()
+            except dask.distributed.TimeoutError:
+                self._logger.error("The ensemble process unexpectedly hanged..."
+                                   "Please check the log file for errors.")
+                self.client.cancel(proc_ensemble)
 
         if load_models:
             self._load_models()
@@ -747,7 +880,6 @@ class AutoML(BaseEstimator):
             ensemble_nbest=ensemble_nbest,
             max_models_on_disc=self._max_models_on_disc,
             seed=self._seed,
-            shared_mode=self._shared_mode,
             precision=precision,
             max_iterations=max_iterations,
             read_at_most=np.inf,
@@ -757,12 +889,7 @@ class AutoML(BaseEstimator):
         )
 
     def _load_models(self):
-        if self._shared_mode:
-            seed = -1
-        else:
-            seed = self._seed
-
-        self.ensemble_ = self._backend.load_ensemble(seed)
+        self.ensemble_ = self._backend.load_ensemble(self._seed)
 
         # If no ensemble is loaded, try to get the best performing model
         if not self.ensemble_:
@@ -789,7 +916,7 @@ class AutoML(BaseEstimator):
         elif self._disable_evaluator_output is False or \
                 (isinstance(self._disable_evaluator_output, list) and
                  'model' not in self._disable_evaluator_output):
-            model_names = self._backend.list_all_models(seed)
+            model_names = self._backend.list_all_models(self._seed)
 
             if len(model_names) == 0 and self._resampling_strategy not in \
                     ['partial-cv', 'partial-cv-iterative-fit']:
@@ -900,12 +1027,6 @@ class AutoML(BaseEstimator):
             config_id = run_key.config_id
             config = self.runhistory_.ids_config[config_id]
 
-            param_dict = config.get_dictionary()
-            params.append(param_dict)
-            mean_test_score.append(self._metric._optimum - (self._metric._sign * run_value.cost))
-            mean_fit_time.append(run_value.time)
-            budgets.append(run_key.budget)
-
             s = run_value.status
             if s == StatusType.SUCCESS:
                 status.append('Success')
@@ -919,8 +1040,18 @@ class AutoML(BaseEstimator):
                 status.append('Abort')
             elif s == StatusType.MEMOUT:
                 status.append('Memout')
+            elif s == StatusType.RUNNING:
+                continue
+            elif s == StatusType.BUDGETEXHAUSTED:
+                continue
             else:
                 raise NotImplementedError(s)
+
+            param_dict = config.get_dictionary()
+            params.append(param_dict)
+            mean_test_score.append(self._metric._optimum - (self._metric._sign * run_value.cost))
+            mean_fit_time.append(run_value.time)
+            budgets.append(run_key.budget)
 
             for hp_name in hp_names:
                 if hp_name in param_dict:
@@ -1008,7 +1139,7 @@ class AutoML(BaseEstimator):
         task_name = 'CreateConfigSpace'
 
         self._stopwatch.start_task(task_name)
-        configspace_path = os.path.join(tmp_dir, 'space.pcs')
+        configspace_path = os.path.join(tmp_dir, 'space.json')
         configuration_space = pipeline.get_configuration_space(
             datamanager.info,
             include_estimators=include_estimators,
@@ -1017,15 +1148,29 @@ class AutoML(BaseEstimator):
             exclude_preprocessors=exclude_preprocessors)
         configuration_space = self.configuration_space_created_hook(
             datamanager, configuration_space)
-        sp_string = pcs.write(configuration_space)
-        backend.write_txt_file(configspace_path, sp_string,
-                               'Configuration space')
+        backend.write_txt_file(
+            configspace_path,
+            cs_json.write(configuration_space),
+            'Configuration space'
+        )
         self._stopwatch.stop_task(task_name)
 
         return configuration_space, configspace_path
 
     def configuration_space_created_hook(self, datamanager, configuration_space):
         return configuration_space
+
+    def __del__(self):
+
+        # Make sure the client closes, so we don't leave
+        # the tcp connection open
+        if self._dask_client:
+            self._dask_client.close()
+
+        # When a multiprocessing work is done, the
+        # objects are deleted. We don't want to delete run areas
+        # until the estimator is deleted
+        self._backend.delete_directories(force=False)
 
 
 class AutoMLClassifier(AutoML):
