@@ -16,4 +16,4 @@ liac-arff
 ConfigSpace>=0.4.14,<0.5
 pynisher>=0.4.2
 pyrfr>=0.7,<0.9
-smac>=0.13,<0.14
+git+git://github.com/franchuterivera/SMAC3.git@logging_enhancements
