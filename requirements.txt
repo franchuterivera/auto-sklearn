@@ -1,3 +1,4 @@
+git+git://github.com/franchuterivera/ConfigSpace.git@fix_forbidden
 setuptools
 
 numpy>=1.9.0
@@ -13,7 +14,7 @@ pyyaml
 pandas<1.0
 liac-arff
 
-ConfigSpace>=0.4.14,<0.5
 pynisher>=0.4.2
 pyrfr>=0.7,<0.9
 git+git://github.com/franchuterivera/SMAC3.git@more_debug
+git+git://github.com/franchuterivera/ConfigSpace.git@fix_forbidden
