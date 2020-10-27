@@ -31,6 +31,9 @@ class AutoSklearnEstimator(BaseEstimator):
         exclude_preprocessors=None,
         resampling_strategy='holdout',
         resampling_strategy_arguments=None,
+        bbc_cv_strategy=None,
+        bbc_cv_sample_size=0.20,
+        bbc_cv_n_bootstrap=100,
         tmp_folder=None,
         output_folder=None,
         delete_tmp_folder_after_terminate=True,
@@ -153,6 +156,18 @@ class AutoSklearnEstimator(BaseEstimator):
                 If no defaults are available, an exception is raised.
                 Refer to the 'n_splits' argument as 'folds'.
 
+        bbc_cv_strategy: string, optional (None)
+            Whether we perform bootstrap bias correction or not. Valid options are:
+            * model_based: applies BBC to the model score perceived by the ensemble_builder
+            * ensemble_based: applies BBC to the ensemble selection
+
+        bbc_cv_sample_size: float
+            The percentage of the total number of sample points from the training set,
+            that is going to be bootstrapped.
+
+        bbc_cv_n_bootstrap: int
+            How many times does to sampling with replacement happens
+
         tmp_folder : string, optional (None)
             folder to store configuration output and log files, if ``None``
             automatically use ``/tmp/autosklearn_tmp_$pid_$random_number``
@@ -170,17 +185,17 @@ class AutoSklearnEstimator(BaseEstimator):
             output_dir will always be deleted
 
         n_jobs : int, optional, experimental
-            The number of jobs to run in parallel for ``fit()``. ``-1`` means 
-            using all processors. By default, Auto-sklearn uses a single core 
+            The number of jobs to run in parallel for ``fit()``. ``-1`` means
+            using all processors. By default, Auto-sklearn uses a single core
             for fitting the machine learning model and a single core for fitting
             an ensemble. Ensemble building is not affected by ``n_jobs`` but
             can be controlled by the number of models in the ensemble. In
             contrast to most scikit-learn models, ``n_jobs`` given in the
-            constructor is not applied to the ``predict()`` method. If 
+            constructor is not applied to the ``predict()`` method. If
             ``dask_client`` is None, a new dask client is created.
-            
+
         dask_client : dask.distributed.Client, optional
-            User-created dask client, can be used to start a dask cluster and then 
+            User-created dask client, can be used to start a dask cluster and then
             attach auto-sklearn to it.
 
         disable_evaluator_output: bool or list, optional (False)
@@ -252,6 +267,9 @@ class AutoSklearnEstimator(BaseEstimator):
         self.exclude_preprocessors = exclude_preprocessors
         self.resampling_strategy = resampling_strategy
         self.resampling_strategy_arguments = resampling_strategy_arguments
+        self.bbc_cv_strategy = bbc_cv_strategy
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
         self.tmp_folder = tmp_folder
         self.output_folder = output_folder
         self.delete_tmp_folder_after_terminate = delete_tmp_folder_after_terminate
@@ -307,6 +325,9 @@ class AutoSklearnEstimator(BaseEstimator):
             exclude_preprocessors=self.exclude_preprocessors,
             resampling_strategy=self.resampling_strategy,
             resampling_strategy_arguments=self.resampling_strategy_arguments,
+            bbc_cv_strategy=self.bbc_cv_strategy,
+            bbc_cv_sample_size=self.bbc_cv_sample_size,
+            bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
             n_jobs=self._n_jobs,
             dask_client=self.dask_client,
             get_smac_object_callback=self.get_smac_object_callback,
