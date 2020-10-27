@@ -23,6 +23,7 @@ from sklearn.utils.validation import check_random_state
 from smac.callbacks import IncorporateRunResultCallback
 from smac.optimizer.smbo import SMBO
 from smac.runhistory.runhistory import RunInfo, RunValue
+from sklearn.utils import resample
 
 from autosklearn.util.backend import Backend
 from autosklearn.constants import BINARY_CLASSIFICATION
@@ -367,7 +368,7 @@ class EnsembleBuilder(object):
             random_state: Optional[Union[int, np.random.RandomState]] = None,
             logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
             bbc_cv_strategy: Optional[str] = None,
-            bbc_cv_sample_size: float = 0.10,
+            bbc_cv_sample_size: float = 0.20,
             bbc_cv_n_bootstrap: float = 100,
     ):
         """
@@ -952,11 +953,12 @@ class EnsembleBuilder(object):
             # Following github.com/mensxmachina/BBC-CV/ we sample from a uniform distribution
             for i in range(self.bbc_cv_n_bootstrap):
                 self.prediction_indices.append(
-                    np.random.randint(
-                        low=0,
-                        high=int(number_of_samples),
-                        size=int(self.bbc_cv_sample_size*number_of_samples),
-                    )
+                    resample(
+                        list(range(number_of_samples)),
+                        stratify=self.y_true_ensemble,
+                        n_samples=int(self.bbc_cv_sample_size*number_of_samples),
+                        replace=True,
+                    ),
                 )
 
         return self.prediction_indices
