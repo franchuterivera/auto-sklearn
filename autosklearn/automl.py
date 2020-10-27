@@ -119,6 +119,9 @@ class AutoML(BaseEstimator):
                  include_preprocessors=None,
                  exclude_preprocessors=None,
                  resampling_strategy='holdout-iterative-fit',
+                 bbc_cv_strategy=None,
+                 bbc_cv_sample_size=0.10,
+                 bbc_cv_n_bootstrap=100,
                  resampling_strategy_arguments=None,
                  n_jobs=None,
                  dask_client: Optional[dask.distributed.Client] = None,
@@ -177,6 +180,12 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
+        self.bbc_cv_strategy = bbc_cv_strategy
+        if self.bbc_cv_strategy not in [None,  'model_based', 'ensemble_based']:
+            raise ValueError('Unsupported BBC-CV strategy. Supported values are None, '
+                             'model_based and ensemble_based')
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 
@@ -929,6 +938,9 @@ class AutoML(BaseEstimator):
             ensemble_memory_limit=self._memory_limit,
             random_state=self._seed,
             logger_port=self._logger_port,
+            bbc_cv_strategy=self.bbc_cv_strategy,
+            bbc_cv_sample_size=self.bbc_cv_sample_size,
+            bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()
