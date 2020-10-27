@@ -30,6 +30,9 @@ class AutoSklearnEstimator(BaseEstimator):
         exclude_preprocessors=None,
         resampling_strategy='holdout',
         resampling_strategy_arguments=None,
+        bbc_cv_strategy=None,
+        bbc_cv_sample_size=0.20,
+        bbc_cv_n_bootstrap=100,
         tmp_folder=None,
         output_folder=None,
         delete_tmp_folder_after_terminate=True,
@@ -148,6 +151,18 @@ class AutoSklearnEstimator(BaseEstimator):
                 If no defaults are available, an exception is raised.
                 Refer to the 'n_splits' argument as 'folds'.
 
+        bbc_cv_strategy: string, optional (None)
+            Whether we perform bootstrap bias correction or not. Valid options are:
+            * model_based: applies BBC to the model score perceived by the ensemble_builder
+            * ensemble_based: applies BBC to the ensemble selection
+
+        bbc_cv_sample_size: float
+            The percentage of the total number of sample points from the training set,
+            that is going to be bootstrapped.
+
+        bbc_cv_n_bootstrap: int
+            How many times does to sampling with replacement happens
+
         tmp_folder : string, optional (None)
             folder to store configuration output and log files, if ``None``
             automatically use ``/tmp/autosklearn_tmp_$pid_$random_number``
@@ -249,6 +264,9 @@ class AutoSklearnEstimator(BaseEstimator):
         self.exclude_preprocessors = exclude_preprocessors
         self.resampling_strategy = resampling_strategy
         self.resampling_strategy_arguments = resampling_strategy_arguments
+        self.bbc_cv_strategy = bbc_cv_strategy
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
         self.tmp_folder = tmp_folder
         self.output_folder = output_folder
         self.delete_tmp_folder_after_terminate = delete_tmp_folder_after_terminate
@@ -309,6 +327,9 @@ class AutoSklearnEstimator(BaseEstimator):
             exclude_preprocessors=self.exclude_preprocessors,
             resampling_strategy=self.resampling_strategy,
             resampling_strategy_arguments=self.resampling_strategy_arguments,
+            bbc_cv_strategy=self.bbc_cv_strategy,
+            bbc_cv_sample_size=self.bbc_cv_sample_size,
+            bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
             n_jobs=self._n_jobs,
             dask_client=self.dask_client,
             get_smac_object_callback=self.get_smac_object_callback,
