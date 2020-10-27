@@ -366,6 +366,9 @@ class EnsembleBuilder(object):
             read_at_most: int = 5,
             random_state: Optional[Union[int, np.random.RandomState]] = None,
             logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+            bbc_cv_strategy: Optional[str] = None,
+            bbc_cv_sample_size: float = 0.10,
+            bbc_cv_n_bootstrap: float = 100,
     ):
         """
             Constructor
@@ -544,6 +547,11 @@ class EnsembleBuilder(object):
         self.y_test = datamanager.data.get('Y_test')
         del datamanager
         self.ensemble_history = []
+        # Parameters to correct bias before ensemble selection calculation
+        self.bbc_cv_strategy = bbc_cv_strategy
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
+        self.prediction_indices = []
 
     def run(
         self,
@@ -870,11 +878,18 @@ class EnsembleBuilder(object):
             # actually read the predictions and score them
             try:
                 y_ensemble = self._read_np_fn(y_ens_fn)
-                score = calculate_score(solution=self.y_true_ensemble,
-                                        prediction=y_ensemble,
-                                        task_type=self.task_type,
-                                        metric=self.metric,
-                                        all_scoring_functions=False)
+                scores = []
+                for indices in self.prediction_indices_generator():
+                    scores.append(
+                        calculate_score(
+                            solution=np.take(self.y_true_ensemble, indices, axis=0),
+                            prediction=np.take(y_ensemble,indices, axis=0),
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False
+                        )
+                    )
+                score = np.mean(scores)
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
                     self.logger.debug(
@@ -914,6 +929,37 @@ class EnsembleBuilder(object):
             np.sum([pred["loaded"] > 0 for pred in self.read_scores.values()])
         )
         return True
+
+    def prediction_indices_generator(self):
+        """
+        Generates indices that indicate how we should yield predictions to a consumer. For
+        example, in the case of bootstrap bias correction, we sample with replacement
+        what predictions indices to use.
+
+        We enable a subsample of the data, so that the effective data size use for ensemble
+        builder is small as well as it might have duplicates which introduce some noise
+        as a form of regularization. This should help in canceling the bias of the performance
+        estimate.
+        """
+        number_of_samples = self.y_true_ensemble.shape[0]
+        if self.bbc_cv_strategy is None:
+            # No bootstrap, so use the whole data
+            return [list(range(number_of_samples))]
+
+        # We only calculate the indices once
+        if len(self.prediction_indices) <= 0:
+
+            # Following github.com/mensxmachina/BBC-CV/ we sample from a uniform distribution
+            for i in range(self.bbc_cv_n_bootstrap):
+                self.prediction_indices.append(
+                    np.random.randint(
+                        low=0,
+                        high=int(number_of_samples),
+                        size=int(self.bbc_cv_sample_size*number_of_samples),
+                    )
+                )
+
+        return self.prediction_indices
 
     def get_n_best_preds(self):
         """
@@ -1229,18 +1275,30 @@ class EnsembleBuilder(object):
                 len(predictions_train),
             )
             start_time = time.time()
-            ensemble.fit(predictions_train, self.y_true_ensemble,
-                         include_num_runs)
-            end_time = time.time()
-            self.logger.debug(
-                "Fitting the ensemble took %.2f seconds.",
-                end_time - start_time,
-            )
-            self.logger.info(ensemble)
-            self.validation_performance_ = min(
-                self.validation_performance_,
-                ensemble.get_validation_performance(),
-            )
+            if self.bbc_cv_strategy == 'ensemble_based':
+                weights = []
+                for indices in self.prediction_indices_generator():
+                    ensemble.fit(np.take(predictions_train, indices, axis=1),
+                                 np.take(self.y_true_ensemble, indices, axis=0),
+                                 include_num_runs)
+                    weights.append(ensemble.weights_)
+
+                ensemble.weights_ = np.mean(weights, axis=0)
+                # Normalize the weight
+                ensemble.weights_ /= np.linalg.norm(ensemble.weights_)
+            else:
+                ensemble.fit(predictions_train, self.y_true_ensemble,
+                             include_num_runs)
+                end_time = time.time()
+                self.logger.debug(
+                    "Fitting the ensemble took %.2f seconds.",
+                    end_time - start_time,
+                )
+                self.logger.info(ensemble)
+                self.validation_performance_ = min(
+                    self.validation_performance_,
+                    ensemble.get_validation_performance(),
+                )
 
         except ValueError:
             self.logger.error('Caught ValueError: %s', traceback.format_exc())
