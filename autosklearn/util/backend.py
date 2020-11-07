@@ -11,6 +11,7 @@ import lockfile
 
 import numpy as np
 
+from sklearn.utils import resample
 from sklearn.pipeline import Pipeline
 
 from autosklearn.data.abstract_data_manager import AbstractDataManager
@@ -161,6 +162,11 @@ class Backend(object):
         self.logger = logging.get_logger(__name__)
         self.context = context
 
+        # Lazy Coding! Find a better place for this
+        self.bbc_cv_n_bootstrap = None
+        self.bbc_cv_sample_size = None
+        self.memmap = False
+
         # Create the temporary directory if it does not yet exist
         try:
             os.makedirs(self.temporary_directory)
@@ -274,6 +280,13 @@ class Backend(object):
 
             os.rename(tempname, filepath)
 
+            # When and if there is a new targets, we need to re-take the
+            # bootstrap, because this means, that somehow the prediction shape
+            # changed. Under the lockfile, we are certain that only one entity
+            # has access to the file, so it is safe to save the bootstrap here
+            if self.bbc_cv_n_bootstrap is not None:
+                self.save_bootstrap(targets)
+
         return filepath
 
     def load_targets_ensemble(self) -> np.ndarray:
@@ -284,6 +297,54 @@ class Backend(object):
                 targets = np.load(fh, allow_pickle=True)
 
         return targets
+
+    def set_bbc_constraints(self, bbc_cv_n_bootstrap: int, bbc_cv_sample_size: int) -> None:
+        """
+        This is lazy coding :). Right now, for easy of coding, the backend
+        is creating the bootstrap. I think The abstract ensemble should be a good
+        place for creating the bootstrap, but for experimental purposes this should work.
+        """
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+
+    def _get_bootstrap_inb_filename(self) -> str:
+        return os.path.join(self.internals_directory, 'bootstrap_inb.npy')
+
+    def save_bootstrap(self, Y: np.ndarray) -> None:
+        """
+        Save the bootstrap indices for SMAC and ensemble builder.
+        We need this to be done, aware of the optimization targets, or
+        in other words, the OOF predictions of CV.
+
+        We resample with replacement on a stratified fashion indices,
+        and store them to disk, so SMAC and ensemble builder have the
+        same notion of OOB
+        """
+        number_of_samples = Y.shape[0]
+        # let us try not using memmap yet!
+        # self.bootstrap_shape = (bbc_cv_n_bootstrap, bbc_cv_sample_size*number_of_samples)
+        # Following github.com/mensxmachina/BBC-CV/ we sample from a uniform distribution
+        prediction_indices_inb = []
+        for i in range(self.bbc_cv_n_bootstrap):
+            indices_inb = resample(
+                list(range(number_of_samples)),
+                stratify=Y,
+                n_samples=int(self.bbc_cv_sample_size*number_of_samples),
+                replace=True,
+            )
+            # numpy is tooo memory greedy?
+            # indices_oob = np.setdiff1d(list(range(number_of_samples)), indices_inb)
+            prediction_indices_inb.append(indices_inb)
+        prediction_indices_inb = np.array(prediction_indices_inb, dtype='uint32')
+        np.save(self._get_bootstrap_inb_filename(), prediction_indices_inb)
+
+    def load_bootstrap(self) -> np.ndarray:
+        if self.memmap:
+            indices_inb = np.memmap(self._get_bootstrap_inb_filename(), dtype='uint32',
+                                    mode='r', shape=self._get_bootstrap_shape())
+            return indices_inb
+        else:
+            return np.load(self._get_bootstrap_inb_filename())
 
     def _get_datamanager_pickle_filename(self) -> str:
         return os.path.join(self.internals_directory, 'datamanager.pkl')
