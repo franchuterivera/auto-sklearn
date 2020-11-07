@@ -971,7 +971,9 @@ class EnsembleBuilder(object):
                     n_samples=int(self.bbc_cv_sample_size*number_of_samples),
                     replace=True,
                 )
-                indices_oob = np.setdiff1d(list(range(number_of_samples)), indices_inb)
+                # numpy is tooo memory greedy?
+                #indices_oob = np.setdiff1d(list(range(number_of_samples)), indices_inb)
+                indices_oob = list(set(list(range(number_of_samples))) - set(indices_inb))
                 self.prediction_indices_inb.append(indices_inb)
                 self.prediction_indices_oob.append(indices_oob)
 
