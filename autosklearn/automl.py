@@ -181,9 +181,11 @@ class AutoML(BaseEstimator):
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
         self.bbc_cv_strategy = bbc_cv_strategy
-        if self.bbc_cv_strategy not in [None,  'model_based', 'ensemble_based']:
+        if self.bbc_cv_strategy not in [None,  'autosklearnBBCScoreEnsemble', 'autosklearnBBCEnsembleSelection', 'autosklearnBBCSMBOAndEnsembleSelection']:
             raise ValueError('Unsupported BBC-CV strategy. Supported values are None, '
                              'model_based and ensemble_based')
+        if self.bbc_cv_strategy is not None and self._resampling_strategy != 'cv':
+            raise NotImplementedError('BBC is only supported for CV')
         self.bbc_cv_sample_size = bbc_cv_sample_size
         self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
         self._n_jobs = n_jobs
