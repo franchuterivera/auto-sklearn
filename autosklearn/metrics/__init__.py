@@ -343,6 +343,7 @@ def calculate_score(
     metric: Scorer,
     all_scoring_functions: bool = False,
     bootstrap_indices: Optional[List[List[int]]] = None,
+    oob=False,
 ) -> Union[float, Dict[str, float]]:
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
@@ -394,6 +395,10 @@ def calculate_score(
         return score_dict
 
     else:
+        # regarding OOB, it is sad that we have to compute it every time we need it
+        # This is because of memory constrains, that we cannot afford to have two lists
+        # When the dataset is too big
+        number_of_samples = solution.shape[0]
 
         if task_type in REGRESSION_TASKS:
             # TODO put this into the regression metric itself
@@ -401,6 +406,8 @@ def calculate_score(
             if bootstrap_indices is not None:
                 scores = []
                 for indices in bootstrap_indices:
+                    if oob:
+                        indices = np.setdiff1d(list(range(number_of_samples)), indices)
                     solution_b = np.take(solution, indices, axis=0)
                     cprediction_b = np.take(cprediction, indices, axis=0)
                     scores.append(metric(solution_b, cprediction_b))
@@ -411,6 +418,8 @@ def calculate_score(
             if bootstrap_indices is not None:
                 scores = []
                 for indices in bootstrap_indices:
+                    if oob:
+                        indices = np.setdiff1d(list(range(number_of_samples)), indices)
                     solution_b = np.take(solution, indices, axis=0)
                     prediction_b = np.take(prediction, indices, axis=0)
                     scores.append(metric(solution_b, prediction_b))

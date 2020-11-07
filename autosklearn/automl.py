@@ -172,14 +172,30 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
+
+        # ---------------------------------------------------------------------
+        # Bias Bootstrap correction Support. We can reuse cross validation OOF
+        # predictions to try to remove the bias of the model created in CV
         self.bbc_cv_strategy = bbc_cv_strategy
-        if self.bbc_cv_strategy not in [None,  'autosklearnBBCScoreEnsemble', 'autosklearnBBCEnsembleSelection', 'autosklearnBBCSMBOAndEnsembleSelection']:
-            raise ValueError('Unsupported BBC-CV strategy. Supported values are None, '
-                             'model_based and ensemble_based')
+        if self.bbc_cv_strategy not in [
+                None,
+                'autosklearnBBCScoreEnsemble',
+                'autosklearnBBCEnsembleSelection',
+                'autosklearnBBCSMBOAndEnsembleSelection'
+        ]:
+            raise NotImplementedError(self.bbc_cv_strategy)
         if self.bbc_cv_strategy is not None and self._resampling_strategy != 'cv':
             raise NotImplementedError('BBC is only supported for CV')
         self.bbc_cv_sample_size = bbc_cv_sample_size
         self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
+        if self.bbc_cv_strategy is not None:
+            # Lazy coding -- The bootstrapping is happening in the backend
+            # as there might be a posibility of the OOF predictions changing shape
+            # The best place for this to happen is in the abstract evaluator, but for
+            # testing purposes this should be ok
+            self._backend.set_bbc_constraints(self.bbc_cv_n_bootstrap, self.bbc_cv_sample_size)
+        # ---------------------------------------------------------------------
+
         self._n_jobs = n_jobs
         self._dask_client = dask_client
         self.precision = precision
