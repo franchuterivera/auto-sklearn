@@ -1,6 +1,6 @@
 import random
 from collections import Counter
-from typing import Any, Dict, List, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 
@@ -19,6 +19,7 @@ class EnsembleSelection(AbstractEnsemble):
         random_state: np.random.RandomState,
         bagging: bool = False,
         mode: str = 'fast',
+        bootstrap_indices: Optional[List[List[int]]] = None,
     ) -> None:
         self.ensemble_size = ensemble_size
         self.task_type = task_type
@@ -26,6 +27,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.bagging = bagging
         self.mode = mode
         self.random_state = random_state
+        self.bootstrap_indices = bootstrap_indices
 
     def __getstate__(self) -> Dict[str, Any]:
         # Cannot serialize a metric if
@@ -151,7 +153,8 @@ class EnsembleSelection(AbstractEnsemble):
                         prediction=fant_ensemble_prediction,
                         task_type=self.task_type,
                         metric=self.metric,
-                        all_scoring_functions=False
+                        all_scoring_functions=False,
+                        bootstrap_indices=self.bootstrap_indices,
                     )
                 )
                 scores[j] = self.metric._optimum - calculated_score
@@ -201,7 +204,8 @@ class EnsembleSelection(AbstractEnsemble):
                         prediction=ensemble_prediction,
                         task_type=self.task_type,
                         metric=self.metric,
-                        all_scoring_functions=False
+                        all_scoring_functions=False,
+                        bootstrap_indices=self.bootstrap_indices,
                     )
                 )
                 scores[j] = self.metric._optimum - calculated_score
