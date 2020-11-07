@@ -341,12 +341,15 @@ def calculate_score(
     prediction: np.ndarray,
     task_type: int,
     metric: Scorer,
-    all_scoring_functions: bool = False
+    all_scoring_functions: bool = False,
+    bootstrap_indices: Optional[List[List[int]]] = None,
 ) -> Union[float, Dict[str, float]]:
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
 
     if all_scoring_functions:
+        if bootstrap_indices is not None:
+            raise NotImplementedError()
         score_dict = dict()
         if task_type in REGRESSION_TASKS:
             # TODO put this into the regression metric itself
@@ -391,11 +394,28 @@ def calculate_score(
         return score_dict
 
     else:
+
         if task_type in REGRESSION_TASKS:
             # TODO put this into the regression metric itself
             cprediction = sanitize_array(prediction)
-            score = metric(solution, cprediction)
+            if bootstrap_indices is not None:
+                scores = []
+                for indices in bootstrap_indices:
+                    solution_b = np.take(solution, indices, axis=0)
+                    cprediction_b = np.take(cprediction, indices, axis=0)
+                    scores.append(metric(solution_b, cprediction_b))
+                score = np.mean(scores)
+            else:
+                score = metric(solution, cprediction)
         else:
-            score = metric(solution, prediction)
+            if bootstrap_indices is not None:
+                scores = []
+                for indices in bootstrap_indices:
+                    solution_b = np.take(solution, indices, axis=0)
+                    prediction_b = np.take(prediction, indices, axis=0)
+                    scores.append(metric(solution_b, prediction_b))
+                score = np.mean(scores)
+            else:
+                score = metric(solution, prediction)
 
         return score
