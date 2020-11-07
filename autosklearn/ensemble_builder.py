@@ -552,7 +552,8 @@ class EnsembleBuilder(object):
         self.bbc_cv_strategy = bbc_cv_strategy
         self.bbc_cv_sample_size = bbc_cv_sample_size
         self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
-        self.prediction_indices = []
+        self.prediction_indices_inb = []
+        self.prediction_indices_oob = []
 
     def run(
         self,
@@ -879,18 +880,14 @@ class EnsembleBuilder(object):
             # actually read the predictions and score them
             try:
                 y_ensemble = self._read_np_fn(y_ens_fn)
-                scores = []
-                for indices in self.prediction_indices_generator():
-                    scores.append(
-                        calculate_score(
-                            solution=np.take(self.y_true_ensemble, indices, axis=0),
-                            prediction=np.take(y_ensemble,indices, axis=0),
-                            task_type=self.task_type,
-                            metric=self.metric,
-                            all_scoring_functions=False
-                        )
-                    )
-                score = np.mean(scores)
+                score = calculate_score(
+                    solution=self.y_true_ensemble,
+                    prediction=y_ensemble,
+                    task_type=self.task_type,
+                    metric=self.metric,
+                    all_scoring_functions=False,
+                    bootstrap_indices=self.bootstrap_indices_generator(),
+                )
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
                     self.logger.debug(
@@ -931,7 +928,7 @@ class EnsembleBuilder(object):
         )
         return True
 
-    def prediction_indices_generator(self):
+    def bootstrap_indices_generator(self, oob: Optional[bool] = False) -> List[List[int]]:
         """
         Generates indices that indicate how we should yield predictions to a consumer. For
         example, in the case of bootstrap bias correction, we sample with replacement
@@ -941,27 +938,47 @@ class EnsembleBuilder(object):
         builder is small as well as it might have duplicates which introduce some noise
         as a form of regularization. This should help in canceling the bias of the performance
         estimate.
+
+        Parameters:
+            oob (bool): Whether or not to return the out of bootstrap indices
+
+        Returns:
+            List[List[int]]: For every bootstrap b=[1...B], sample indices from the predictions
+
         """
         number_of_samples = self.y_true_ensemble.shape[0]
-        if self.bbc_cv_strategy is None:
-            # No bootstrap, so use the whole data
-            return [list(range(number_of_samples))]
+        if self.bbc_cv_strategy not in ['autosklearnBBCScoreEnsemble', 'autosklearnBBCEnsembleSelection', 'autosklearnBBCSMBOAndEnsembleSelection']:
+            return None
 
         # We only calculate the indices once
-        if len(self.prediction_indices) <= 0:
+        self.prediction_indices_inb = []
+        self.prediction_indices_oob = []
+        if len(self.prediction_indices_inb) <= 0:
+            self.logger.info(
+                "Using strategy {} with B={} and n_bootstrap={} (really a total of {} samples)".format(
+                    self.bbc_cv_strategy,
+                    self.bbc_cv_n_bootstrap,
+                    self.bbc_cv_sample_size,
+                    int(self.bbc_cv_sample_size*number_of_samples),
+                )
+            )
 
             # Following github.com/mensxmachina/BBC-CV/ we sample from a uniform distribution
             for i in range(self.bbc_cv_n_bootstrap):
-                self.prediction_indices.append(
-                    resample(
-                        list(range(number_of_samples)),
-                        stratify=self.y_true_ensemble,
-                        n_samples=int(self.bbc_cv_sample_size*number_of_samples),
-                        replace=True,
-                    ),
+                indices_inb = resample(
+                    list(range(number_of_samples)),
+                    stratify=self.y_true_ensemble,
+                    n_samples=int(self.bbc_cv_sample_size*number_of_samples),
+                    replace=True,
                 )
+                indices_oob = np.setdiff1d(list(range(number_of_samples)), indices_inb)
+                self.prediction_indices_inb.append(indices_inb)
+                self.prediction_indices_oob.append(indices_oob)
 
-        return self.prediction_indices
+        if oob:
+            return self.prediction_indices_oob
+        else:
+            return self.prediction_indices_inb
 
     def get_n_best_preds(self):
         """
@@ -1269,6 +1286,9 @@ class EnsembleBuilder(object):
             task_type=self.task_type,
             metric=self.metric,
             random_state=self.random_state,
+            # In case the strategy is 'autosklearnBBCEnsembleSelection', we directly modify the data to train
+            # so we should not provide the run indices
+            bootstrap_indices=self.bootstrap_indices_generator(oob=True) if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsemble' else None,
         )
 
         try:
@@ -1277,9 +1297,9 @@ class EnsembleBuilder(object):
                 len(predictions_train),
             )
             start_time = time.time()
-            if self.bbc_cv_strategy == 'ensemble_based':
+            if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelection':
                 weights = []
-                for indices in self.prediction_indices_generator():
+                for indices in self.bootstrap_indices_generator(oob=True):
                     ensemble.fit(np.take(predictions_train, indices, axis=1),
                                  np.take(self.y_true_ensemble, indices, axis=0),
                                  include_num_runs)
