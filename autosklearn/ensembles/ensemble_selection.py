@@ -155,6 +155,11 @@ class EnsembleSelection(AbstractEnsemble):
                         metric=self.metric,
                         all_scoring_functions=False,
                         bootstrap_indices=self.bootstrap_indices,
+                        # The construction of the ensemble should use the bootstrap prediction
+                        # That is because there is noise there which act as a regularization,
+                        # Noise coming from repetition in the indices, which is not there in the
+                        # OOB
+                        oob=False,
                     )
                 )
                 scores[j] = self.metric._optimum - calculated_score
@@ -206,6 +211,11 @@ class EnsembleSelection(AbstractEnsemble):
                         metric=self.metric,
                         all_scoring_functions=False,
                         bootstrap_indices=self.bootstrap_indices,
+                        # The construction of the ensemble should use the bootstrap prediction
+                        # That is because there is noise there which act as a regularization,
+                        # Noise coming from repetition in the indices, which is not there in the
+                        # OOB
+                        oob=False,
                     )
                 )
                 scores[j] = self.metric._optimum - calculated_score
