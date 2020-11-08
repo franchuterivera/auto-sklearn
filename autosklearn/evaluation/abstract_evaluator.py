@@ -221,7 +221,7 @@ class AbstractEvaluator(object):
                                      init_params=self._init_params)
         return model
 
-    def _loss(self, y_true, y_hat, all_scoring_functions=None):
+    def _loss(self, y_true, y_hat, all_scoring_functions=None, bootstrap_indices=None):
         """Auto-sklearn follows a minimization goal, so the make_scorer
         sign is used as a guide to obtain the value to reduce.
 
@@ -246,7 +246,10 @@ class AbstractEvaluator(object):
 
         score = calculate_score(
             y_true, y_hat, self.task_type, self.metric,
-            all_scoring_functions=all_scoring_functions)
+            all_scoring_functions=all_scoring_functions,
+            bootstrap_indices=bootstrap_indices,
+            oob=False,
+        )
 
         if hasattr(score, '__len__'):
             # TODO: instead of using self.metric, it should use all metrics given by key.
@@ -286,7 +289,20 @@ class AbstractEvaluator(object):
             valid_pred, test_pred,
         )
 
+        # -----------------------------------------------------------------------
+        # BBC correction for SMAC!
+
+        # First save original loss as validation_loss. Validation loss here
+        # is always empty, like a legacy I think
+        if os.path.exists(self.backend._get_bootstrap_inb_filename()):
+            validation_loss = loss
+            bootstrap_indices = self.backend.load_bootstrap()
+            loss = self._loss(self.Y_optimization, opt_pred, bootstrap_indices=bootstrap_indices)
+        # -----------------------------------------------------------------------
+
         if loss_ is not None:
+            # This case happens on error
+            # Like we return here ONLY if there was a problem
             return self.duration, loss_, self.seed, additional_run_info_
 
         if isinstance(loss, dict):
