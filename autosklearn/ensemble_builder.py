@@ -1295,7 +1295,7 @@ class EnsembleBuilder(object):
                 len(predictions_train),
             )
             start_time = time.time()
-            if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelection':
+            if self.bbc_cv_strategy in ['autosklearnBBCEnsembleSelection', 'autosklearnBBCSMBOAndEnsembleSelection']:
                 weights = []
                 for indices in self.bootstrap_indices_generator():
                     ensemble.fit(np.take(predictions_train, indices, axis=1),
