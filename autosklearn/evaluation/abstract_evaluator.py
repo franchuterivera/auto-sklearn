@@ -253,7 +253,7 @@ class AbstractEvaluator(object):
             y_true, y_hat, self.task_type, self.metric,
             all_scoring_functions=all_scoring_functions,
             bootstrap_indices=bootstrap_indices,
-            oob=False,
+            oob=True,
         )
 
         if hasattr(score, '__len__'):
@@ -299,9 +299,10 @@ class AbstractEvaluator(object):
 
         # First save original loss as validation_loss. Validation loss here
         # is always empty, like a legacy I think
-        if os.path.exists(self.backend._get_bootstrap_inb_filename()):
+        if os.path.exists(self.backend._get_bootstrap_inb_filename()) and self.model_class not in [MyDummyRegressor, MyDummyClassifier]:
             validation_loss = loss
             bootstrap_indices = self.backend.load_bootstrap()
+            old_loss = loss
             loss = self._loss(self.Y_optimization, opt_pred, bootstrap_indices=bootstrap_indices)
         # -----------------------------------------------------------------------
 
