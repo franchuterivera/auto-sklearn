@@ -21,6 +21,7 @@ class TestEvaluator(AbstractEvaluator):
                  port,
                  configuration=None,
                  scoring_functions=None,
+                 level=1,
                  seed=1,
                  include=None,
                  exclude=None,
@@ -33,6 +34,7 @@ class TestEvaluator(AbstractEvaluator):
             configuration=configuration,
             metric=metric,
             scoring_functions=scoring_functions,
+            level=1,
             seed=seed,
             output_y_hat_optimization=False,
             num_run=-1,
@@ -102,12 +104,12 @@ class TestEvaluator(AbstractEvaluator):
 
 # create closure for evaluating an algorithm
 # Has a stupid name so pytest doesn't regard it as a test
-def eval_t(queue, config, backend, metric, seed, num_run, instance,
+def eval_t(queue, config, backend, metric, level, seed, num_run, instance,
            scoring_functions, output_y_hat_optimization, include,
            exclude, disable_file_output, port, init_params=None, budget_type=None,
            budget=None):
     evaluator = TestEvaluator(configuration=config,
-                              backend=backend, metric=metric, seed=seed,
+                              backend=backend, metric=metric, level=level, seed=seed,
                               port=port,
                               queue=queue,
                               scoring_functions=scoring_functions,

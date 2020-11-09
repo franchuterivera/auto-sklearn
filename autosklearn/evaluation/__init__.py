@@ -96,7 +96,7 @@ def _encode_exit_status(exit_status):
 # easier debugging of potential crashes
 class ExecuteTaFuncWithQueue(AbstractTAFunc):
 
-    def __init__(self, backend, autosklearn_seed, resampling_strategy, metric,
+    def __init__(self, backend, level, autosklearn_seed, resampling_strategy, metric,
                  cost_for_crash, abort_on_first_run_crash, port,
                  initial_num_run=1, stats=None,
                  run_obj='quality', par_factor=1, scoring_functions=None,
@@ -147,6 +147,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
         )
 
         self.backend = backend
+        self.level = level
         self.autosklearn_seed = autosklearn_seed
         self.resampling_strategy = resampling_strategy
         self.initial_num_run = initial_num_run
@@ -166,7 +167,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             memory_limit = int(math.ceil(memory_limit))
         self.memory_limit = memory_limit
 
-        dm = self.backend.load_datamanager()
+        dm = self.backend.load_datamanager(self.level)
         if 'X_valid' in dm.data and 'Y_valid' in dm.data:
             self._get_validation_loss = True
         else:
@@ -295,6 +296,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             backend=self.backend,
             port=self.port,
             metric=self.metric,
+            level=self.level,
             seed=self.autosklearn_seed,
             num_run=num_run,
             scoring_functions=self.scoring_functions,

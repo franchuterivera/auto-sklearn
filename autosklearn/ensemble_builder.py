@@ -36,7 +36,8 @@ Y_ENSEMBLE = 0
 Y_VALID = 1
 Y_TEST = 2
 
-MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)\.npy'
+# _level_seed_idx_budget.budget
+MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)\.npy'
 
 
 class EnsembleBuilderManager(IncorporateRunResultCallback):
@@ -52,6 +53,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         ensemble_nbest: int,
         max_models_on_disc: Union[float, int],
         seed: int,
+        max_stacking_levels: int,
         precision: int,
         max_iterations: Optional[int],
         read_at_most: int,
@@ -122,6 +124,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_nbest = ensemble_nbest
         self.max_models_on_disc = max_models_on_disc
         self.seed = seed
+        self.max_stacking_levels = max_stacking_levels
         self.precision = precision
         self.max_iterations = max_iterations
         self.read_at_most = read_at_most
@@ -221,6 +224,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     ensemble_nbest=self.ensemble_nbest,
                     max_models_on_disc=self.max_models_on_disc,
                     seed=self.seed,
+                    max_stacking_levels=self.max_stacking_levels,
                     precision=self.precision,
                     memory_limit=self.ensemble_memory_limit,
                     read_at_most=self.read_at_most,
@@ -261,6 +265,7 @@ def fit_and_return_ensemble(
     ensemble_nbest: int,
     max_models_on_disc: Union[float, int],
     seed: int,
+    max_stacking_levels: int,
     precision: int,
     memory_limit: Optional[int],
     read_at_most: int,
@@ -349,6 +354,7 @@ def fit_and_return_ensemble(
         ensemble_nbest=ensemble_nbest,
         max_models_on_disc=max_models_on_disc,
         seed=seed,
+        max_stacking_levels=max_stacking_levels,
         precision=precision,
         memory_limit=memory_limit,
         read_at_most=read_at_most,
@@ -366,22 +372,25 @@ def fit_and_return_ensemble(
 
 class EnsembleBuilder(object):
     def __init__(
-        self,
-        backend: Backend,
-        dataset_name: str,
-        task_type: int,
-        metric: Scorer,
-        ensemble_size: int = 10,
-        ensemble_nbest: int = 100,
-        max_models_on_disc: int = 100,
-        performance_range_threshold: float = 0,
-        seed: int = 1,
-        precision: int = 32,
-        memory_limit: Optional[int] = 1024,
-        read_at_most: int = 5,
-        random_state: Optional[Union[int, np.random.RandomState]] = None,
-        logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
-        unit_test: bool = False,
+            self,
+            backend: Backend,
+            dataset_name: str,
+            task_type: int,
+            metric: Scorer,
+            limit: int,
+            ensemble_size: int = 10,
+            ensemble_nbest: int = 100,
+            max_models_on_disc: int = 100,
+            performance_range_threshold: float = 0,
+            max_stacking_levels: int =1,
+            seed: int = 1,
+            max_iterations: int = None,
+            precision: int = 32,
+            sleep_duration: int = 2,
+            memory_limit: Optional[int] = 1024,
+            read_at_most: int = 5,
+            random_state: Optional[Union[int, np.random.RandomState]] = None,
+            queue: multiprocessing.Queue = None
     ):
         """
             Constructor
@@ -419,6 +428,8 @@ class EnsembleBuilder(object):
                 E.g dummy=2, best=4, thresh=0.5 --> only consider models with score > 3
                 Will at most return the minimum between ensemble_nbest models,
                 and max_models_on_disc. Might return less
+            max_stacking_levels: int
+                the maximum number of stacking levels
             seed: int
                 random seed
             precision: [16,32,64,128]
@@ -467,6 +478,7 @@ class EnsembleBuilder(object):
         self.max_models_on_disc = max_models_on_disc
         self.max_resident_models = None
 
+        self.max_stacking_levels = max_stacking_levels
         self.seed = seed
         self.precision = precision
         self.memory_limit = memory_limit
@@ -560,7 +572,7 @@ class EnsembleBuilder(object):
         self.validation_performance_ = np.inf
 
         # Track the ensemble performance
-        datamanager = self.backend.load_datamanager()
+        datamanager = self.backend.load_datamanager(self.max_stacking_levels)
         self.y_valid = datamanager.data.get('Y_valid')
         self.y_test = datamanager.data.get('Y_test')
         del datamanager
@@ -789,14 +801,15 @@ class EnsembleBuilder(object):
         match = self.model_fn_re.search(pred_path)
         if not match:
             raise ValueError("Invalid path format %s" % pred_path)
-        _seed = int(match.group(1))
-        _num_run = int(match.group(2))
-        _budget = float(match.group(3))
+        _level = int(match.group(1))
+        _seed = int(match.group(2))
+        _num_run = int(match.group(3))
+        _budget = float(match.group(4))
 
         stored_files_for_run = os.listdir(
-            self.backend.get_numrun_directory(_seed, _num_run, _budget))
+            self.backend.get_numrun_directory(_level, _seed, _num_run, _budget))
         stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(_seed, _num_run, _budget), file_name)
+            os.path.join(self.backend.get_numrun_directory(_level, _seed, _num_run, _budget), file_name)
             for file_name in stored_files_for_run]
         this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
@@ -823,8 +836,8 @@ class EnsembleBuilder(object):
 
         pred_path = os.path.join(
             glob.escape(self.backend.get_runs_directory()),
-            '%d_*_*' % self.seed,
-            'predictions_ensemble_%s_*_*.npy*' % self.seed,
+            '*_%d_*_*' % self.seed,
+            'predictions_ensemble_*_%s_*_*.npy*' % self.seed,
         )
         y_ens_files = glob.glob(pred_path)
         y_ens_files = [y_ens_file for y_ens_file in y_ens_files
@@ -840,16 +853,17 @@ class EnsembleBuilder(object):
         to_read = []
         for y_ens_fn in self.y_ens_files:
             match = self.model_fn_re.search(y_ens_fn)
-            _seed = int(match.group(1))
-            _num_run = int(match.group(2))
-            _budget = float(match.group(3))
+            _level = int(match.group(1))
+            _seed = int(match.group(2))
+            _num_run = int(match.group(3))
+            _budget = float(match.group(4))
             mtime = os.path.getmtime(y_ens_fn)
 
-            to_read.append([y_ens_fn, match, _seed, _num_run, _budget, mtime])
+            to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, mtime])
 
         n_read_files = 0
         # Now read file wrt to num_run
-        for y_ens_fn, match, _seed, _num_run, _budget, mtime in \
+        for y_ens_fn, match, _level, _seed, _num_run, _budget, mtime in \
                 sorted(to_read, key=lambda x: x[5]):
             if self.read_at_most and n_read_files >= self.read_at_most:
                 # limit the number of files that will be read
@@ -866,6 +880,7 @@ class EnsembleBuilder(object):
                     "mtime_ens": 0,
                     "mtime_valid": 0,
                     "mtime_test": 0,
+                    "level": _level,
                     "seed": _seed,
                     "num_run": _num_run,
                     "budget": _budget,
@@ -1072,8 +1087,9 @@ class EnsembleBuilder(object):
                 self.read_preds[k][Y_TEST] = None
             if self.read_scores[k]['loaded'] == 1:
                 self.logger.debug(
-                    'Dropping model %s (%d,%d) with score %f.',
+                    'Dropping model %s (%d, %d, %d) with score %f.',
                     k,
+                    self.read_scores[k]['level'],
                     self.read_scores[k]['seed'],
                     self.read_scores[k]['num_run'],
                     self.read_scores[k]['ens_score'],
@@ -1120,12 +1136,14 @@ class EnsembleBuilder(object):
             valid_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s' % (
+                    '%d_%d_%d_%s' % (
+                        self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"],
                     ),
-                    'predictions_valid_%d_%d_%s.npy*' % (
+                    'predictions_valid_%d_%d_%d_%s.npy*' % (
+                        self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"],
@@ -1136,12 +1154,14 @@ class EnsembleBuilder(object):
             test_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s' % (
+                    '%d_%d_%d_%s' % (
+                        self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"],
                     ),
-                    'predictions_test_%d_%d_%s.npy*' % (
+                    'predictions_test_%d_%d_%d_%s.npy*' % (
+                        self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"]
@@ -1219,6 +1239,7 @@ class EnsembleBuilder(object):
         predictions_train = [self.read_preds[k][Y_ENSEMBLE] for k in selected_keys]
         include_num_runs = [
             (
+                self.read_scores[k]["level"],
                 self.read_scores[k]["seed"],
                 self.read_scores[k]["num_run"],
                 self.read_scores[k]["budget"],
@@ -1445,15 +1466,19 @@ class EnsembleBuilder(object):
                 continue
 
             match = self.model_fn_re.search(pred_path)
-            _seed = int(match.group(1))
-            _num_run = int(match.group(2))
-            _budget = float(match.group(3))
+            _level = int(match.group(1))
+            _seed = int(match.group(2))
+            _num_run = int(match.group(3))
+            _budget = float(match.group(4))
 
             # Do not delete the dummy prediction
             if _num_run == 1:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(_seed, _num_run, _budget)
+            numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget)
+            # Only delete the last stack level predictions
+            if _level != self.max_stacking_levels:
+                continue
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
                 shutil.rmtree(numrun_dir + '.old')

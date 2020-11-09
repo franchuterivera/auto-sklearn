@@ -118,6 +118,7 @@ class AbstractEvaluator(object):
                  port: typing.Optional[int],
                  configuration=None,
                  scoring_functions=None,
+                 level=1,
                  seed=1,
                  output_y_hat_optimization=True,
                  num_run=None,
@@ -135,7 +136,7 @@ class AbstractEvaluator(object):
         self.port = port
         self.queue = queue
 
-        self.datamanager = self.backend.load_datamanager()
+        self.datamanager = self.backend.load_datamanager(level)
         self.include = include
         self.exclude = exclude
 
@@ -146,6 +147,7 @@ class AbstractEvaluator(object):
 
         self.metric = metric
         self.task_type = self.datamanager.info['task']
+        self.level = level
         self.seed = seed
 
         self.output_y_hat_optimization = output_y_hat_optimization
@@ -278,7 +280,7 @@ class AbstractEvaluator(object):
         return err
 
     def finish_up(self, loss, train_loss,  opt_pred, valid_pred, test_pred,
-                  additional_run_info, file_output, final_call, status):
+                  additional_run_info, file_output, final_call, status, opt_indices=None):
         """This function does everything necessary after the fitting is done:
 
         * predicting
@@ -291,7 +293,7 @@ class AbstractEvaluator(object):
 
         if file_output:
             loss_, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                opt_pred, valid_pred, test_pred, opt_indices,
             )
         else:
             loss_ = None
@@ -316,6 +318,7 @@ class AbstractEvaluator(object):
         for metric_name, value in loss_.items():
             additional_run_info[metric_name] = value
         additional_run_info['duration'] = self.duration
+        additional_run_info['level'] = self.level
         additional_run_info['num_run'] = self.num_run
         if train_loss is not None:
             additional_run_info['train_loss'] = train_loss
@@ -363,7 +366,8 @@ class AbstractEvaluator(object):
             self,
             Y_optimization_pred,
             Y_valid_pred,
-            Y_test_pred
+            Y_test_pred,
+            opt_indices,
     ):
         # Abort if self.Y_optimization is None
         # self.Y_optimization can be None if we use partial-cv, then,
@@ -428,7 +432,20 @@ class AbstractEvaluator(object):
         else:
             models = None
 
+        # The reason I am generating the prediction is that I believe a voting classifier
+        # can change the output
+        original_test_predictions = None
+        if self.X_test is not None:
+            model = models if models is not None else self.model
+            original_test_predictions = self.predict_function(
+                self.X_test,
+                model,
+                self.task_type,
+                self.y_test,
+            )
+
         self.backend.save_numrun_to_dir(
+            level=self.level,
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,
@@ -443,6 +460,8 @@ class AbstractEvaluator(object):
             test_predictions=(
                 Y_test_pred if 'y_test' not in self.disable_file_output else None
             ),
+            opt_indices=opt_indices,
+            original_test_predictions=original_test_predictions,
         )
 
         return None, {}
@@ -456,7 +475,11 @@ class AbstractEvaluator(object):
 
         with warnings.catch_warnings():
             warnings.showwarning = send_warnings_to_log
-            Y_pred = model.predict_proba(X, batch_size=1000)
+            if isinstance(model,
+                          (VotingClassifier, VotingRegressor, DummyClassifier, DummyRegressor)):
+                Y_pred = model.predict_proba(X)
+            else:
+                Y_pred = model.predict_proba(X, batch_size=1000)
 
         Y_pred = self._ensure_prediction_array_sizes(Y_pred, Y_train)
         return Y_pred

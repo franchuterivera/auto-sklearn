@@ -111,6 +111,7 @@ class AutoML(BaseEstimator):
                  ensemble_size=1,
                  ensemble_nbest=1,
                  max_models_on_disc=1,
+                 max_stacking_levels=2,
                  seed=1,
                  memory_limit=3072,
                  metadata_directory=None,
@@ -142,6 +143,7 @@ class AutoML(BaseEstimator):
         self._ensemble_size = ensemble_size
         self._ensemble_nbest = ensemble_nbest
         self._max_models_on_disc = max_models_on_disc
+        self._max_stacking_levels = max_stacking_levels
         self._seed = seed
         self._memory_limit = memory_limit
         self._data_memory_limit = None
@@ -359,7 +361,7 @@ class AutoML(BaseEstimator):
                     (basename, time_left_after_reading))
         return time_for_load_data
 
-    def _do_dummy_prediction(self, datamanager, num_run):
+    def _do_dummy_prediction(self, datamanager, num_run, level=1):
 
         # When using partial-cv it makes no sense to do dummy predictions
         if self._resampling_strategy in ['partial-cv',
@@ -379,6 +381,7 @@ class AutoML(BaseEstimator):
         stats = Stats(scenario_mock)
         stats.start_timing()
         ta = ExecuteTaFuncWithQueue(backend=self._backend,
+                                    level=level,
                                     autosklearn_seed=self._seed,
                                     resampling_strategy=self._resampling_strategy,
                                     initial_num_run=num_run,
@@ -541,6 +544,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  ensemble_size: %d', self._ensemble_size)
         self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
+        self._logger.debug('  max_stacking_levels: %d', self._max_stacking_levels)
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
         self._logger.debug('  metadata_directory: %s', self._metadata_directory)
@@ -582,26 +586,11 @@ class AutoML(BaseEstimator):
             dataset_name=dataset_name,
         )
 
+        # handle some logistics with IO
         self._backend._make_internals_directory()
 
         self._task = datamanager.info['task']
         self._label_num = datamanager.info['label_num']
-
-        # == Pickle the data manager to speed up loading
-        self._backend.save_datamanager(datamanager)
-
-        time_for_load_data = self._stopwatch.wall_elapsed(self._dataset_name)
-
-        if self._debug_mode:
-            self._print_load_time(
-                self._dataset_name,
-                self._time_for_task,
-                time_for_load_data,
-                self._logger)
-
-        # == Perform dummy predictions
-        num_run = 1
-        self._do_dummy_prediction(datamanager, num_run)
 
         # = Create a searchspace
         # Do this before One Hot Encoding to make sure that it creates a
@@ -621,6 +610,27 @@ class AutoML(BaseEstimator):
         if only_return_configuration_space:
             self._close_dask_client()
             return self.configuration_space
+
+        # Here is where the stacking magic happens. We augment the features with the predictions
+        # of a pre-SMBO task
+        # datamanager = self.feature_enrichment(datamanager)
+
+        # == Pickle the data manager to speed up loading
+        # This correspond to the top most datamanager
+        self._backend.save_datamanager(datamanager, self._max_stacking_levels)
+
+        time_for_load_data = self._stopwatch.wall_elapsed(self._dataset_name)
+
+        if self._debug_mode:
+            self._print_load_time(
+                self._dataset_name,
+                self._time_for_task,
+                time_for_load_data,
+                self._logger)
+
+        # == Perform dummy predictions
+        num_run = 1
+        self._do_dummy_prediction(datamanager, num_run, level=self._max_stacking_levels)
 
         # == RUN ensemble builder
         # Do this before calculating the meta-features to make sure that the
@@ -665,6 +675,23 @@ class AutoML(BaseEstimator):
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
+
+        self.setup_and_run_smac_job(datamanager=datamanager, num_run=num_run, level=self._max_stacking_levels)
+
+        # Wait until the ensemble process is finished to avoid shutting down
+        # while the ensemble builder tries to access the data
+        if self._proc_ensemble is not None and self._ensemble_size > 0:
+            self._proc_ensemble.join()
+            self.ensemble_performance_history = self._proc_ensemble.get_ensemble_history()
+
+        self._proc_ensemble = None
+
+        if load_models:
+            self._load_models()
+
+        return self
+
+    def setup_and_run_smac_job(self, datamanager, num_run, level):
 
         # kill the datamanager as it will be re-loaded anyways from sub processes
         try:
@@ -722,7 +749,8 @@ class AutoML(BaseEstimator):
                 dask_client=self._dask_client,
                 start_num_run=num_run,
                 num_metalearning_cfgs=self._initial_configurations_via_metalearning,
-                config_file=configspace_path,
+                # This SMAC CASH is done at the highest level always
+                level=level,
                 seed=self._seed,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,
@@ -744,7 +772,9 @@ class AutoML(BaseEstimator):
                 self.runhistory_, self.trajectory_, self._budget_type = \
                     _proc_smac.run_smbo()
                 trajectory_filename = os.path.join(
-                    self._backend.get_smac_output_directory_for_run(self._seed),
+                    # The run_id for stacking experiments is no longer the seed, but the smac
+                    # level
+                    self._backend.get_smac_output_directory_for_run(self._max_stacking_levels),
                     'trajectory.json')
                 saveable_trajectory = \
                     [list(entry[:2]) + [entry[2].get_dictionary()] + list(entry[3:])
@@ -755,39 +785,15 @@ class AutoML(BaseEstimator):
                 self._logger.exception(e)
                 raise
 
-        self._logger.info("Starting shutdown...")
-        # Wait until the ensemble process is finished to avoid shutting down
-        # while the ensemble builder tries to access the data
-        if proc_ensemble is not None:
-            self.ensemble_performance_history = list(proc_ensemble.history)
+    def feature_enrichment(self, datamanager):
 
-            # save the ensemble performance history file
-            if len(self.ensemble_performance_history) > 0:
-                pd.DataFrame(self.ensemble_performance_history).to_json(
-                        os.path.join(self._backend.internals_directory, 'ensemble_history.json'))
+        self._stopwatch.start_task('feature_enrichment_' + self._dataset_name)
+        # If Just 1 stacking, perform the traditional 1 level
+        # models and 1 ensemble selection
+        if self._max_stacking_levels < 2:
+            return datamanager
 
-            if len(proc_ensemble.futures) > 0:
-                future = proc_ensemble.futures.pop()
-                # Now we need to wait for the future to return as it cannot be cancelled while it
-                # is running: https://stackoverflow.com/a/49203129
-                self._logger.info("Ensemble script still running, waiting for it to finish.")
-                future.result()
-                self._logger.info("Ensemble script finished, continue shutdown.")
-
-        if load_models:
-            self._logger.info("Loading models...")
-            self._load_models()
-            self._logger.info("Finished loading models...")
-
-        self._logger.info("Closing the dask infrastructure")
-        self._close_dask_client()
-        self._logger.info("Finished closing the dask infrastructure")
-
-        # Clean up the logger
-        self._logger.info("Starting to clean up the logger")
-        self._clean_logger()
-
-        return self
+        self._stopwatch.stop_task('feature_enrichment_' + self._dataset_name)
 
     @staticmethod
     def subsample_if_too_large(X, y, logger, seed, memory_limit, task):
@@ -1006,6 +1012,8 @@ class AutoML(BaseEstimator):
             ensemble_size=ensemble_size if ensemble_size else self._ensemble_size,
             ensemble_nbest=ensemble_nbest if ensemble_nbest else self._ensemble_nbest,
             max_models_on_disc=self._max_models_on_disc,
+            # Let the ensemble builder know the max level
+            max_stacking_levels=self._max_stacking_levels,
             seed=self._seed,
             precision=precision if precision else self.precision,
             max_iterations=1,

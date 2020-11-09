@@ -163,6 +163,7 @@ def _print_debug_info_of_init_configuration(initial_configurations, basename,
 
 def get_smac_object(
     scenario_dict,
+    level,
     seed,
     ta,
     ta_kwargs,
@@ -189,7 +190,7 @@ def get_smac_object(
         tae_runner=ta,
         tae_runner_kwargs=ta_kwargs,
         initial_configurations=initial_configurations,
-        run_id=seed,
+        run_id=level,
         intensifier=intensifier,
         dask_client=dask_client,
         n_jobs=n_jobs,
@@ -211,7 +212,7 @@ class AutoMLSMBO(object):
                  start_num_run=1,
                  data_memory_limit=None,
                  num_metalearning_cfgs=25,
-                 config_file=None,
+                 level=1,
                  seed=1,
                  metadata_directory=None,
                  resampling_strategy='holdout',
@@ -256,7 +257,7 @@ class AutoMLSMBO(object):
         self.data_memory_limit = data_memory_limit
         self.watcher = watcher
         self.num_metalearning_cfgs = num_metalearning_cfgs
-        self.config_file = config_file
+        self.level = level
         self.seed = seed
         self.metadata_directory = metadata_directory
         self.start_num_run = start_num_run
@@ -294,7 +295,7 @@ class AutoMLSMBO(object):
         if isinstance(self.dataset_name, AbstractDataManager):
             self.datamanager = self.dataset_name
         else:
-            self.datamanager = self.backend.load_datamanager()
+            self.datamanager = self.backend.load_datamanager(self.level)
 
         self.task = self.datamanager.info['task']
 
@@ -438,6 +439,7 @@ class AutoMLSMBO(object):
 
         ta_kwargs = dict(
             backend=copy.deepcopy(self.backend),
+            level=self.level,
             autosklearn_seed=seed,
             resampling_strategy=self.resampling_strategy,
             initial_num_run=num_run,
@@ -497,6 +499,7 @@ class AutoMLSMBO(object):
 
         smac_args = {
             'scenario_dict': scenario_dict,
+            'level': self.level,
             'seed': seed,
             'ta': ta,
             'ta_kwargs': ta_kwargs,
