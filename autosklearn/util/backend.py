@@ -1,6 +1,7 @@
 import glob
 import os
 import pickle
+import re
 import shutil
 import tempfile
 import time
@@ -20,6 +21,8 @@ from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_lo
 __all__ = [
     'Backend'
 ]
+
+MODEL_FN_RE = r'([0-9]*)\.([0-9]*)\.([0-9]*)\.([0-9]{1,3}\.[0-9]*)\.model'
 
 
 def create(
@@ -320,6 +323,25 @@ class Backend(object):
 
     def get_runs_directory(self) -> str:
         return os.path.join(self.internals_directory, 'runs')
+
+    def load_level_predictions(self, level, dim):
+        train_prediction_files = sorted(glob.glob(os.path.join(
+            self._get_prediction_output_dir('orig_train'),
+            '*npy'
+        )))
+        y_hat = [np.load(f, allow_pickle=True) for f in train_prediction_files]
+
+        test_prediction_files = sorted(glob.glob(os.path.join(
+            self._get_prediction_output_dir('orig_test'),
+            '*npy'
+        )))
+        y_test = None
+        if test_prediction_files:
+            y_test = [np.load(f, allow_pickle=True) for f in test_prediction_files]
+        return y_hat, y_test
+
+    def get_model_dir(self) -> str:
+        return os.path.join(self.internals_directory, 'models')
 
     def get_numrun_directory(self, level: int, seed: int, num_run: int, budget: float) -> str:
         return os.path.join(self.internals_directory, 'runs', '%d_%d_%d_%s' % (level, seed, num_run, budget))

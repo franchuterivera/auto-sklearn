@@ -37,6 +37,7 @@ Y_VALID = 1
 Y_TEST = 2
 
 # _level_seed_idx_budget.budget
+# Change to import this from backend
 MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)\.npy'
 
 

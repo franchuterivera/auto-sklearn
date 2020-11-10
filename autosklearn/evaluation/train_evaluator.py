@@ -430,6 +430,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.partial = False
 
+            opt_indices = []
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
@@ -452,6 +453,7 @@ class TrainEvaluator(AbstractEvaluator):
                     groups=self.resampling_strategy_args.get('groups')
             )):
 
+                opt_indices.extend(test_split)
                 # TODO add check that split is actually an integer array,
                 # not a boolean array (to allow indexed assignement of
                 # training data later).
@@ -610,10 +612,10 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
-            print(f"Here self.model={self.model}")
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
+                opt_indices=opt_indices,
                 opt_pred=Y_optimization_pred,
                 valid_pred=Y_valid_pred,
                 test_pred=Y_test_pred,

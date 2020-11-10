@@ -23,6 +23,7 @@ class AutoSklearnEstimator(BaseEstimator):
         ensemble_size: int = 50,
         ensemble_nbest=50,
         max_models_on_disc=50,
+        max_stacking_levels=2,
         seed=1,
         memory_limit=3072,
         include_estimators=None,
@@ -84,6 +85,9 @@ class AutoSklearnEstimator(BaseEstimator):
             It must be an integer greater or equal than 1.
             If set to None, all models are kept on the disc.
 
+        max_stacking_levels : int, optional (1 or 2)
+            How many stacking levels to use. Currently we support just 1 or 2
+            stacking levels
         seed : int, optional (default=1)
             Used to seed SMAC. Will determine the output file names.
 
@@ -219,11 +223,11 @@ class AutoSklearnEstimator(BaseEstimator):
             :meth:`autosklearn.metrics.make_scorer`. These are the `Built-in
             Metrics`_.
             If None is provided, a default metric is selected depending on the task.
-            
+
         scoring_functions : List[Scorer], optional (None)
-            List of scorers which will be calculated for each pipeline and results will be 
+            List of scorers which will be calculated for each pipeline and results will be
             available via ``cv_results``
-            
+
         load_models : bool, optional (True)
             Whether to load the models after fitting Auto-sklearn.
 
@@ -249,6 +253,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self.max_models_on_disc = max_models_on_disc
         self.seed = seed
         self.memory_limit = memory_limit
+        self.max_stacking_levels = max_stacking_levels
         self.include_estimators = include_estimators
         self.exclude_estimators = exclude_estimators
         self.include_preprocessors = include_preprocessors
@@ -310,6 +315,7 @@ class AutoSklearnEstimator(BaseEstimator):
             max_models_on_disc=self.max_models_on_disc,
             seed=seed,
             memory_limit=self.memory_limit,
+            max_stacking_levels=self.max_stacking_levels,
             include_estimators=self.include_estimators,
             exclude_estimators=self.exclude_estimators,
             include_preprocessors=self.include_preprocessors,

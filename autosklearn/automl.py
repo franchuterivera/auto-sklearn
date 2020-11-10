@@ -66,7 +66,11 @@ from autosklearn.pipeline.components.data_preprocessing.minority_coalescense imp
 from autosklearn.pipeline.components.data_preprocessing.rescaling import RescalingChoice
 
 
-def _model_predict(model, X, batch_size, logger, task):
+def _model_predict(model, X, batch_size, logger, task, identifier, lower_level_predictions=None, lower_level_pred_index=None):
+    if lower_level_pred_index is not None:
+        return lower_level_predictions[lower_level_pred_index]
+    if lower_level_predictions is not None:
+        X = np.concatenate([X] + lower_level_predictions, axis=1)
     def send_warnings_to_log(
             message, category, filename, lineno, file=None, line=None):
         logger.debug('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
@@ -613,7 +617,7 @@ class AutoML(BaseEstimator):
 
         # Here is where the stacking magic happens. We augment the features with the predictions
         # of a pre-SMBO task
-        # datamanager = self.feature_enrichment(datamanager)
+        datamanager = self.feature_enrichment(datamanager)
 
         # == Pickle the data manager to speed up loading
         # This correspond to the top most datamanager
@@ -691,7 +695,7 @@ class AutoML(BaseEstimator):
 
         return self
 
-    def setup_and_run_smac_job(self, datamanager, num_run, level):
+    def setup_and_run_smac_job(self, datamanager, num_run, level, fraction_time_for_this_smbo=1.0):
 
         # kill the datamanager as it will be re-loaded anyways from sub processes
         try:
@@ -704,6 +708,9 @@ class AutoML(BaseEstimator):
         self._stopwatch.start_task(smac_task_name)
         elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
         time_left_for_smac = max(0, self._time_for_task - elapsed_time)
+
+        # Allow to run smac for fractions of time
+        time_left_for_smac *= fraction_time_for_this_smbo
 
         if self._logger:
             self._logger.info(
@@ -774,7 +781,7 @@ class AutoML(BaseEstimator):
                 trajectory_filename = os.path.join(
                     # The run_id for stacking experiments is no longer the seed, but the smac
                     # level
-                    self._backend.get_smac_output_directory_for_run(self._max_stacking_levels),
+                    self._backend.get_smac_output_directory_for_run(level),
                     'trajectory.json')
                 saveable_trajectory = \
                     [list(entry[:2]) + [entry[2].get_dictionary()] + list(entry[3:])
@@ -793,7 +800,60 @@ class AutoML(BaseEstimator):
         if self._max_stacking_levels < 2:
             return datamanager
 
+        if self._max_stacking_levels != 2:
+            raise NotImplementedError("Can support right now at max 2 levels!")
+
+        if 'cv' not in self._resampling_strategy:
+            raise NotImplementedError("Need OOF to build stack!!")
+
+        self._backend.save_datamanager(datamanager, level=1)
+        self.setup_and_run_smac_job(datamanager, num_run=1, level=1, fraction_time_for_this_smbo=0.4)
+
+
+        # Build a stacked prediction for the next level
+        X, y, X_test, y_test, new_features = self.selectLevelPredictionsAndConcat(
+            datamanager, level=1
+        )
+
+        stacked_datamanager = XYDataManager(
+            X, y,
+            X_test=X_test,
+            y_test=y_test,
+            task=datamanager.info['task'],
+            feat_type=datamanager.feat_type + new_features,
+            dataset_name=datamanager.name,
+        )
         self._stopwatch.stop_task('feature_enrichment_' + self._dataset_name)
+        self._backend.save_datamanager(stacked_datamanager, level=0)
+
+        return stacked_datamanager
+
+    def selectLevelPredictionsAndConcat(self, datamanager, level):
+
+        # The original data
+        X = datamanager.data['X_train']
+        y = datamanager.data['Y_train']
+        X_test = None
+        y_test = None
+        if 'X_test' in datamanager.data:
+            X_test = datamanager.data['X_test']
+            y_test = datamanager.data['Y_test']
+
+        y_hat, y_test_hat = self._backend.load_level_predictions(level, dim=y.shape)
+
+        y_hat = np.concatenate(y_hat, axis=1)
+        if X_test is not None:
+            y_test_hat = np.concatenate(y_test_hat, axis=1)
+
+        X_augmented = np.concatenate([X, y_hat], axis=1)
+        X_test_augmented = None
+        if X_test is not None:
+            X_test_augmented = np.concatenate([X_test, y_test_hat], axis=1)
+
+        new_feature = 'Numerical' if datamanager.info['task'] in REGRESSION_TASKS else 'Categorical'
+        new_features = [new_feature] * (y_hat.shape[1])
+
+        return X_augmented, y, X_test_augmented, y_test, new_features
 
     @staticmethod
     def subsample_if_too_large(X, y, logger, seed, memory_limit, task):
@@ -956,9 +1016,25 @@ class AutoML(BaseEstimator):
             except sklearn.exceptions.NotFittedError:
                 raise ValueError('Found no fitted models!')
 
+        # We first need all predictions form the lower stacking layers if any
+        cv = 'cv' in self._resampling_strategy
+        base_models = self._backend.load_all_models(self._seed, self._max_stacking_levels-1, cv)
+        assert self._max_stacking_levels <= 2
+        all_base_predictions = None
+        lower_level_identifiers = []
+        if self._max_stacking_levels > 1:
+            lower_level_identifiers = self._backend.get_model_identifiers_for_level(self._seed, self._max_stacking_levels-1, cv)
+            all_base_predictions = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(_model_predict)(
+                    base_models[identifier], X, batch_size, self._logger, self._task, identifier
+                )
+                for identifier in lower_level_identifiers
+            )
+
+
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(_model_predict)(
-                models[identifier], X, batch_size, self._logger, self._task
+                models[identifier], X, batch_size, self._logger, self._task, identifier, all_base_predictions,  lower_level_identifiers.index(identifier) if identifier in lower_level_identifiers else None
             )
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )

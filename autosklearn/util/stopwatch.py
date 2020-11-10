@@ -31,7 +31,7 @@ class TimingTask(object):
             self._cpu_dur = self._cpu_tac - self._cpu_tic
             self._wall_dur = self._wall_tac - self._wall_tic
         else:
-            sys.stdout.write('Task has already stopped\n')
+            sys.stdout.write(f"Task {self._name} has already stopped\n")
 
     @property
     def name(self) -> str:
