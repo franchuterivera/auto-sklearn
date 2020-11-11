@@ -1478,7 +1478,7 @@ class EnsembleBuilder(object):
 
             numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget)
             # Only delete the last stack level predictions
-            if _level != self.max_stacking_levels:
+            if int(_level) != self.max_stacking_levels:
                 continue
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
