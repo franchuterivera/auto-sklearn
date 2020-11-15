@@ -890,7 +890,8 @@ class EnsembleBuilder(object):
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False,
-                    bootstrap_indices=self.bootstrap_indices_generator(),
+                    #bootstrap_indices=self.bootstrap_indices_generator(),
+                    bootstrap_indices=None,
                     oob=True,
                 )
 
