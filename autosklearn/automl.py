@@ -116,6 +116,7 @@ class AutoML(BaseEstimator):
                  ensemble_nbest=1,
                  max_models_on_disc=1,
                  max_stacking_levels=2,
+                 fraction_time_for_this_smbo=0.5,
                  seed=1,
                  memory_limit=3072,
                  metadata_directory=None,
@@ -148,6 +149,7 @@ class AutoML(BaseEstimator):
         self._ensemble_nbest = ensemble_nbest
         self._max_models_on_disc = max_models_on_disc
         self._max_stacking_levels = max_stacking_levels
+        self._fraction_time_for_this_smbo = fraction_time_for_this_smbo
         self._seed = seed
         self._memory_limit = memory_limit
         self._data_memory_limit = None
@@ -549,6 +551,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  max_stacking_levels: %d', self._max_stacking_levels)
+        self._logger.debug('  fraction_time_for_this_smbo: %s', str(self._fraction_time_for_this_smbo))
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
         self._logger.debug('  metadata_directory: %s', self._metadata_directory)
@@ -707,6 +710,7 @@ class AutoML(BaseEstimator):
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
         elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
+        self._logger.info(f"As of now elapsed_time={elapsed_time} and self._time_for_task={self._time_for_task}")
         time_left_for_smac = max(0, self._time_for_task - elapsed_time)
 
         # Allow to run smac for fractions of time
@@ -807,8 +811,7 @@ class AutoML(BaseEstimator):
             raise NotImplementedError("Need OOF to build stack!!")
 
         self._backend.save_datamanager(datamanager, level=1)
-        self.setup_and_run_smac_job(datamanager, num_run=1, level=1, fraction_time_for_this_smbo=0.4)
-
+        self.setup_and_run_smac_job(datamanager, num_run=1, level=1, fraction_time_for_this_smbo=self._fraction_time_for_this_smbo)
 
         # Build a stacked prediction for the next level
         X, y, X_test, y_test, new_features = self.selectLevelPredictionsAndConcat(

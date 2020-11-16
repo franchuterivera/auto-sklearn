@@ -24,6 +24,7 @@ class AutoSklearnEstimator(BaseEstimator):
         ensemble_nbest=50,
         max_models_on_disc=50,
         max_stacking_levels=2,
+        fraction_time_for_this_smbo=0.5,
         seed=1,
         memory_limit=3072,
         include_estimators=None,
@@ -254,6 +255,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self.seed = seed
         self.memory_limit = memory_limit
         self.max_stacking_levels = max_stacking_levels
+        self.fraction_time_for_this_smbo = fraction_time_for_this_smbo
         self.include_estimators = include_estimators
         self.exclude_estimators = exclude_estimators
         self.include_preprocessors = include_preprocessors
@@ -316,6 +318,7 @@ class AutoSklearnEstimator(BaseEstimator):
             seed=seed,
             memory_limit=self.memory_limit,
             max_stacking_levels=self.max_stacking_levels,
+            fraction_time_for_this_smbo=self.fraction_time_for_this_smbo,
             include_estimators=self.include_estimators,
             exclude_estimators=self.exclude_estimators,
             include_preprocessors=self.include_preprocessors,
