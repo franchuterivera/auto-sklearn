@@ -890,9 +890,8 @@ class EnsembleBuilder(object):
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False,
-                    #bootstrap_indices=self.bootstrap_indices_generator(),
-                    bootstrap_indices=None,
-                    oob=True,
+                    bootstrap_indices=self.bootstrap_indices_generator(),
+                    oob=False if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelectionPreSelectInES' else True,
                 )
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
@@ -948,6 +947,7 @@ class EnsembleBuilder(object):
         if self.bbc_cv_strategy not in [
                 'autosklearnBBCScoreEnsemble',
                 'autosklearnBBCEnsembleSelection',
+                'autosklearnBBCEnsembleSelectionPreSelectInES',
                 'autosklearnBBCSMBOAndEnsembleSelection'
         ]:
             return None
@@ -1296,7 +1296,7 @@ class EnsembleBuilder(object):
                 len(predictions_train),
             )
             start_time = time.time()
-            if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelection':
+            if self.bbc_cv_strategy in ['autosklearnBBCEnsembleSelection', 'autosklearnBBCEnsembleSelectionPreSelectInES']:
                 weights = []
                 for indices in self.bootstrap_indices_generator():
                     ensemble.fit(np.take(predictions_train, indices, axis=1),
