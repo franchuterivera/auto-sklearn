@@ -833,12 +833,15 @@ class EnsembleBuilder(multiprocessing.Process):
             return None
         self.last_hash = current_hash
 
+        self.logger.debug("Bagging enabled!")
         ensemble = EnsembleSelection(
             ensemble_size=self.ensemble_size,
             task_type=self.task_type,
             metric=self.metric,
             random_state=self.random_state,
+            bagging=True,
         )
+        self.logger.debug("Bagging produced: {ensemble.indices_}")
 
         try:
             self.logger.debug(
