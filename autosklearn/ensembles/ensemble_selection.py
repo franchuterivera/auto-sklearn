@@ -17,7 +17,7 @@ class EnsembleSelection(AbstractEnsemble):
         task_type: int,
         metric: Scorer,
         random_state: np.random.RandomState,
-        bagging: bool = False,
+        bagging: bool = True,
         mode: str = 'fast',
     ) -> None:
         self.ensemble_size = ensemble_size
@@ -62,8 +62,8 @@ class EnsembleSelection(AbstractEnsemble):
             self._bagging(predictions, labels)
         else:
             self._fit(predictions, labels)
-        self._calculate_weights()
         self.identifiers_ = identifiers
+        self._calculate_weights()
         return self
 
     def _fit(
@@ -225,8 +225,17 @@ class EnsembleSelection(AbstractEnsemble):
         )
         self.train_score_ = trajectory[-1]
 
+        return self.indices_
+
     def _calculate_weights(self) -> None:
         ensemble_members = Counter(self.indices_).most_common()
+        # Here autocomplete missing weights, like if identifiers are
+        # [0, 1] and only [0 was selected 100 times], need to say that
+        # 1 was selected 0 times
+        used_identifiers = [idx for idx, frequency in ensemble_members]
+        for i in range(len(self.identifiers_)):
+            if i not in used_identifiers:
+                ensemble_members.insert(i, (i, 0))
         weights = np.zeros(
             (self.num_input_models_,),
             dtype=np.float64,
@@ -248,22 +257,21 @@ class EnsembleSelection(AbstractEnsemble):
         n_bags: int = 20,
     ) -> np.ndarray:
         """Rich Caruana's ensemble selection method with bagging."""
-        raise ValueError('Bagging might not work with class-based interface!')
         n_models = predictions.shape[0]
-        bag_size = int(n_models * fraction)
+        bag_size = max(1, int(n_models * fraction))
 
         order_of_each_bag = []
         for j in range(n_bags):
             # Bagging a set of models
-            indices = sorted(random.sample(range(0, n_models), bag_size))
+            indices = sorted(np.random.choice(list(range(0, n_models)), bag_size).tolist())
             bag = predictions[indices, :, :]
-            order, _ = self._fit(bag, labels)
-            order_of_each_bag.append(order)
+            self._fit(bag, labels)
+            order_of_each_bag.extend(self.indices_)
 
-        return np.array(
-            order_of_each_bag,
-            dtype=np.int64,
-        )
+        self.indices_ = order_of_each_bag
+
+        # Correct the number of input models at the end
+        self.num_input_models_ = len(predictions)
 
     def predict(self, predictions: Union[np.ndarray, List[np.ndarray]]) -> np.ndarray:
 
