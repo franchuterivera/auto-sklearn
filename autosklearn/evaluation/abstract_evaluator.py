@@ -253,7 +253,7 @@ class AbstractEvaluator(object):
             y_true, y_hat, self.task_type, self.metric,
             all_scoring_functions=all_scoring_functions,
             bootstrap_indices=bootstrap_indices,
-            oob=True,
+            oob=False,
         )
 
         if hasattr(score, '__len__'):

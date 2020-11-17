@@ -587,7 +587,8 @@ class EnsembleBuilder(multiprocessing.Process):
         if self.bbc_cv_strategy not in [
                 'autosklearnBBCScoreEnsemble',
                 'autosklearnBBCEnsembleSelection',
-                'autosklearnBBCSMBOAndEnsembleSelection'
+                'autosklearnBBCSMBOAndEnsembleSelection',
+                'autosklearnBBCSMBOAndEnsembleSelectionBISMAC',
         ]:
             return None
 
@@ -915,6 +916,20 @@ class EnsembleBuilder(multiprocessing.Process):
             if self.bbc_cv_strategy in ['autosklearnBBCEnsembleSelection', 'autosklearnBBCSMBOAndEnsembleSelection']:
                 weights = []
                 for indices in self.bootstrap_indices_generator():
+                    ensemble.fit(np.take(predictions_train, indices, axis=1),
+                                 np.take(self.y_true_ensemble, indices, axis=0),
+                                 include_num_runs)
+                    weights.append(ensemble.weights_)
+
+                ensemble.weights_ = np.mean(weights, axis=0)
+                # Normalize the weight
+                ensemble.weights_ /= np.linalg.norm(ensemble.weights_)
+            elif self.bbc_cv_strategy in ['autosklearnBBCSMBOAndEnsembleSelectionBISMAC']:
+                weights = []
+                number_of_samples = self.y_true_ensemble.shape[0]
+                for indices in self.bootstrap_indices_generator():
+                    # Do out of boot
+                    indices = np.setdiff1d(list(range(number_of_samples)), indices)
                     ensemble.fit(np.take(predictions_train, indices, axis=1),
                                  np.take(self.y_true_ensemble, indices, axis=0),
                                  include_num_runs)
