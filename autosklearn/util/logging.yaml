@@ -16,7 +16,7 @@ handlers:
     class: logging.FileHandler
     level: DEBUG
     formatter: simple
-    filename: autosklearn.log
+    filename: /tmp/autosklearn.log
 
   distributed_logfile:
     class: logging.FileHandler
@@ -26,7 +26,7 @@ handlers:
 
 root:
   level: DEBUG
-  handlers: [console, file_handler]
+  handlers: [console]
 
 loggers:
   autosklearn.metalearning:
@@ -35,20 +35,23 @@ loggers:
 
   autosklearn.util.backend:
     level: DEBUG
-    handlers: [file_handler]
+    handlers: [console]
     propagate: no
 
   smac.intensification.intensification.Intensifier:
     level: INFO
-    handlers: [file_handler, console]
+    handlers: [console]
+    propagate: no
 
   smac.optimizer.local_search.LocalSearch:
     level: INFO
-    handlers: [file_handler, console]
+    handlers: [console]
+    propagate: no
 
   smac.optimizer.smbo.SMBO:
     level: INFO
-    handlers: [file_handler, console]
+    handlers: [console]
+    propagate: no
 
   EnsembleBuilder:
     level: DEBUG
