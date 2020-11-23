@@ -70,9 +70,10 @@ class EnsembleSelection(AbstractEnsemble):
         self,
         predictions: List[np.ndarray],
         labels: np.ndarray,
+        indices = None,
     ) -> AbstractEnsemble:
         if self.mode == 'fast':
-            self._fast(predictions, labels)
+            self._fast(predictions, labels, indices)
         else:
             self._slow(predictions, labels)
         return self
@@ -81,6 +82,7 @@ class EnsembleSelection(AbstractEnsemble):
         self,
         predictions: List[np.ndarray],
         labels: np.ndarray,
+        indices=None,
     ) -> None:
         """Fast version of Rich Caruana's ensemble selection method."""
         self.num_input_models_ = len(predictions)
@@ -91,6 +93,10 @@ class EnsembleSelection(AbstractEnsemble):
 
         ensemble_size = self.ensemble_size
 
+        if indices is None:
+            # IF not bagging, can use all predictions
+            indices = list(range(len(predictions)))
+
         weighted_ensemble_prediction = np.zeros(
             predictions[0].shape,
             dtype=np.float64,
@@ -100,10 +106,10 @@ class EnsembleSelection(AbstractEnsemble):
             dtype=np.float64,
         )
         for i in range(ensemble_size):
-            scores = np.zeros(
+            scores = np.ones(
                 (len(predictions)),
                 dtype=np.float64,
-            )
+            ) * (self.metric._optimum-self.metric._worst_possible_result)
             s = len(ensemble)
             if s == 0:
                 weighted_ensemble_prediction.fill(0.0)
@@ -127,7 +133,8 @@ class EnsembleSelection(AbstractEnsemble):
                 )
 
             # Memory-efficient averaging!
-            for j, pred in enumerate(predictions):
+            for j in indices:
+                pred = predictions[j]
                 # TODO: this could potentially be vectorized! - let's profile
                 # the script first!
                 fant_ensemble_prediction.fill(0.0)
@@ -257,15 +264,14 @@ class EnsembleSelection(AbstractEnsemble):
         n_bags: int = 20,
     ) -> np.ndarray:
         """Rich Caruana's ensemble selection method with bagging."""
-        n_models = predictions.shape[0]
+        n_models = len(predictions)
         bag_size = max(1, int(n_models * fraction))
 
         order_of_each_bag = []
         for j in range(n_bags):
             # Bagging a set of models
             indices = sorted(np.random.choice(list(range(0, n_models)), bag_size).tolist())
-            bag = predictions[indices, :, :]
-            self._fit(bag, labels)
+            self._fit(predictions, labels, indices=indices)
             order_of_each_bag.extend(self.indices_)
 
         self.indices_ = order_of_each_bag
