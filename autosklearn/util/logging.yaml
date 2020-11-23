@@ -16,7 +16,7 @@ handlers:
     class: logging.FileHandler
     level: DEBUG
     formatter: simple
-    filename: autosklearn.log
+    filename: /tmp/autosklearn.log
 
   distributed_logfile:
     class: logging.FileHandler
@@ -41,14 +41,17 @@ loggers:
   smac.intensification.intensification.Intensifier:
     level: INFO
     handlers: [file_handler, console]
+    propagate: no
 
   smac.optimizer.local_search.LocalSearch:
     level: INFO
     handlers: [file_handler, console]
+    propagate: no
 
   smac.optimizer.smbo.SMBO:
     level: INFO
     handlers: [file_handler, console]
+    propagate: no
 
   EnsembleBuilder:
     level: DEBUG
