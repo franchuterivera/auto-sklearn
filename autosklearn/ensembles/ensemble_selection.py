@@ -58,12 +58,19 @@ class EnsembleSelection(AbstractEnsemble):
         if self.mode not in ('fast', 'slow'):
             raise ValueError('Unknown mode %s' % self.mode)
 
+        self.identifiers_ = identifiers
         if self.bagging:
             self._bagging(predictions, labels)
         else:
             self._fit(predictions, labels)
-        self.identifiers_ = identifiers
-        self._calculate_weights()
+            # Weight calculation has to be done in bagging differently
+            # as the average of averages. The problem is that different models
+            # get selected a different number of times, so it is better if we build
+            # the ensemble agnostic with the provided bag, then we have N ensembles.
+            # The final ensemble is then the average of this N ensembles and this is done
+            # in bagging
+            self._calculate_weights()
+        print(f"the final weights are={self.weights_}")
         return self
 
     def _fit(
@@ -236,19 +243,15 @@ class EnsembleSelection(AbstractEnsemble):
 
     def _calculate_weights(self) -> None:
         ensemble_members = Counter(self.indices_).most_common()
-        # Here autocomplete missing weights, like if identifiers are
-        # [0, 1] and only [0 was selected 100 times], need to say that
-        # 1 was selected 0 times
-        used_identifiers = [idx for idx, frequency in ensemble_members]
-        for i in range(len(self.identifiers_)):
-            if i not in used_identifiers:
-                ensemble_members.insert(i, (i, 0))
+        print(f"after ensemble_members={ensemble_members} self.num_input_models_={self.num_input_models_}")
         weights = np.zeros(
             (self.num_input_models_,),
             dtype=np.float64,
         )
+        total = sum([b for a, b in ensemble_members])
+        print(f"Using total of = {total}")
         for ensemble_member in ensemble_members:
-            weight = float(ensemble_member[1]) / self.ensemble_size
+            weight = float(ensemble_member[1]) / total
             weights[ensemble_member[0]] = weight
 
         if np.sum(weights) < 1:
@@ -267,14 +270,23 @@ class EnsembleSelection(AbstractEnsemble):
         n_models = len(predictions)
         bag_size = max(1, int(n_models * fraction))
 
+        weights_of_each_bag = []
         order_of_each_bag = []
         for j in range(n_bags):
             # Bagging a set of models
             indices = sorted(np.random.choice(list(range(0, n_models)), bag_size).tolist())
             self._fit(predictions, labels, indices=indices)
-            order_of_each_bag.extend(self.indices_)
+            self._calculate_weights()
+            # Calculate the weights for this case
+            order_of_each_bag.append(self.indices_)
+            weights_of_each_bag.append(np.expand_dims(self.weights_, axis=0))
 
         self.indices_ = order_of_each_bag
+        print(f"BEFORE created indices are ={order_of_each_bag} with weights={weights_of_each_bag}")
+        self.weights_ = np.mean(np.array(np.concatenate(weights_of_each_bag, axis=0)), axis=0)
+        if np.sum(self.weights_) < 1:
+            self.weights_ = self.weights_ / np.sum(self.weights_)
+        print(f"created indices are ={order_of_each_bag} with weights={weights_of_each_bag}")
 
         # Correct the number of input models at the end
         self.num_input_models_ = len(predictions)
