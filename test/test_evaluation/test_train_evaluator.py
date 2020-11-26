@@ -3,6 +3,7 @@ import json
 import queue
 import multiprocessing
 import os
+import tempfile
 import shutil
 import sys
 import unittest
@@ -38,6 +39,9 @@ from evaluation_util import get_regression_datamanager, BaseEvaluatorTest, \
 
 
 class BackendMock(object):
+    def __init__(self):
+        self.temporary_directory = tempfile.gettempdir()
+
     def load_datamanager(self):
         return get_multiclass_classification_datamanager()
 
@@ -63,6 +67,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         dummy_pred_files = [os.path.join(self.ev_path, str(n)) for n in range(100, 200)]
         dummy_cv_model_files = [os.path.join(self.ev_path, str(n)) for n in range(200, 300)]
         backend_mock = unittest.mock.Mock()
+        backend_mock.temporary_directory = tempfile.gettempdir()
         backend_mock.get_model_dir.return_value = self.ev_path
         backend_mock.get_cv_model_dir.return_value = self.ev_path
         backend_mock.get_model_path.side_effect = dummy_model_files
@@ -631,6 +636,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         evaluator = TrainEvaluator(backend_mock, queue_,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -677,6 +683,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
 
         configuration = unittest.mock.Mock(spec=Configuration)
         queue_ = multiprocessing.Queue()
+        backend_mock.temporary_directory = tempfile.gettempdir()
         evaluator = TrainEvaluator(backend_mock, queue_,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -745,6 +752,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
     ):
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         mock.side_effect = lambda **kwargs: mock
         _partial_fit_and_predict_mock.return_value = (
             np.array([[0.1, 0.9]] * 46),
@@ -847,6 +855,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
 
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         mock.side_effect = lambda **kwargs: mock
 
         configuration = unittest.mock.Mock(spec=Configuration)
@@ -883,6 +892,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
 
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         mock.side_effect = lambda **kwargs: mock
 
         configuration = unittest.mock.Mock(spec=Configuration)
@@ -929,6 +939,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
 
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         mock.side_effect = lambda **kwargs: mock
 
         configuration = unittest.mock.Mock(spec=Configuration)
@@ -967,6 +978,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
 
         D = get_binary_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         mock.side_effect = lambda **kwargs: mock
 
         configuration = unittest.mock.Mock(spec=Configuration)
@@ -2233,6 +2245,7 @@ class FunctionsTest(unittest.TestCase):
             shutil.rmtree(self.ev_path)
         os.makedirs(self.ev_path, exist_ok=False)
         self.backend = unittest.mock.Mock()
+        self.backend.temporary_directory = tempfile.gettempdir()
         self.backend.get_model_dir.return_value = self.ev_path
         self.backend.get_cv_model_dir.return_value = self.ev_path
         dummy_model_files = [os.path.join(self.ev_path, str(n)) for n in range(100)]

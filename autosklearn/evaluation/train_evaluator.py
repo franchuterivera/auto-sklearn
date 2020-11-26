@@ -142,6 +142,7 @@ def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train
 
 class TrainEvaluator(AbstractEvaluator):
     def __init__(self, backend, queue, metric,
+                 port=9020,
                  configuration=None,
                  scoring_functions=None,
                  seed=1,
@@ -159,6 +160,7 @@ class TrainEvaluator(AbstractEvaluator):
         super().__init__(
             backend=backend,
             queue=queue,
+            port=port,
             configuration=configuration,
             metric=metric,
             scoring_functions=scoring_functions,
@@ -1053,9 +1055,11 @@ def eval_holdout(
         iterative=False,
         budget=100.0,
         budget_type=None,
+        port=9020,
 ):
     evaluator = TrainEvaluator(
         backend=backend,
+        port=port,
         queue=queue,
         resampling_strategy=resampling_strategy,
         resampling_strategy_args=resampling_strategy_args,
@@ -1093,6 +1097,7 @@ def eval_iterative_holdout(
         init_params=None,
         budget=100.0,
         budget_type=None,
+        port=9020,
 ):
     return eval_holdout(
         queue=queue,
@@ -1135,6 +1140,7 @@ def eval_partial_cv(
         iterative=False,
         budget=None,
         budget_type=None,
+        port=9020,
 ):
     if budget_type is not None:
         raise NotImplementedError()
@@ -1143,6 +1149,7 @@ def eval_partial_cv(
 
     evaluator = TrainEvaluator(
         backend=backend,
+        port=port,
         queue=queue,
         metric=metric,
         configuration=config,
@@ -1180,7 +1187,8 @@ def eval_partial_cv_iterative(
         disable_file_output,
         init_params=None,
         budget=None,
-        budget_type=None
+        budget_type=None,
+        port=9020,
 ):
     if budget_type is not None:
         raise NotImplementedError()
@@ -1224,9 +1232,11 @@ def eval_cv(
         budget=None,
         budget_type=None,
         iterative=False,
+        port=9020,
 ):
     evaluator = TrainEvaluator(
         backend=backend,
+        port=port,
         queue=queue,
         metric=metric,
         configuration=config,
@@ -1266,6 +1276,7 @@ def eval_iterative_cv(
         budget=None,
         budget_type=None,
         iterative=True,
+        port=9020,
 ):
     eval_cv(
         backend=backend,

@@ -1,6 +1,7 @@
+import warnings
+
 import pandas as pd
 
-from ...util.logging_ import get_logger
 from ..input import aslib_simple
 from ..metafeatures.metafeature import DatasetMetafeatures
 from ConfigSpace.configuration_space import Configuration
@@ -24,7 +25,7 @@ class Instance(object):
 
 
 class MetaBase(object):
-    def __init__(self, configuration_space, aslib_directory):
+    def __init__(self, configuration_space, aslib_directory, logger=None):
         """Container for dataset metadata and experiment results.
 
         Constructor arguments:
@@ -32,7 +33,7 @@ class MetaBase(object):
         - aslib_directory: directory with a problem instance in the aslib format
         """
 
-        self.logger = get_logger(__name__)
+        self.logger = logger
 
         self.configuration_space = configuration_space
         self.aslib_directory = aslib_directory
@@ -49,7 +50,10 @@ class MetaBase(object):
                 configurations[str(algorithm_id)] = \
                     (Configuration(configuration_space, values=configuration))
             except (ValueError, KeyError) as e:
-                self.logger.debug("Error reading configurations: %s", e)
+                if self.logger is not None:
+                    self.logger.debug("Error reading configurations: %s", e)
+                else:
+                    warnings.warn("Error reading configurations: {}".format(e))
 
         self.configurations = configurations
 
@@ -59,9 +63,14 @@ class MetaBase(object):
             data_ = {mf.name: mf.value for mf in metafeatures.metafeature_values.values()}
             metafeatures = pd.Series(name=name, data=data_)
         if name.lower() in self.metafeatures.index:
-            self.logger.warning(
-                'Dataset %s already in meta-data. Removing occurence.', name
-            )
+            if self.logger is not None:
+                self.logger.warning(
+                    'Dataset %s already in meta-data. Removing occurence.', name
+                )
+            else:
+                warnings.warn(
+                    'Dataset {} already in meta-data. Removing occurence.'.format(name)
+                )
             self.metafeatures.drop(name.lower(), inplace=True)
         self.metafeatures = self.metafeatures.append(metafeatures)
 
@@ -95,8 +104,11 @@ class MetaBase(object):
         """This is inside an extra function for testing purpose"""
         # Load the task
 
-        self.logger.info("Going to use the following metafeature subset: %s",
-                         features)
+        if self.logger is not None:
+            self.logger.info("Going to use the following metafeature subset: %s",
+                             features)
+        else:
+            warnings.warn("Going to use the following metafeature subset: {}".format(features))
         all_metafeatures = self.metafeatures
         all_metafeatures = all_metafeatures.loc[:, features]
 

@@ -2,10 +2,9 @@ import ast
 import pandas as pd
 import numpy as np
 import sklearn.utils
+import warnings
 
 from autosklearn.metalearning.metalearning.kNearestDatasets.kND import KNearestDatasets
-
-from ....util.logging_ import get_logger
 
 
 def test_function(params):
@@ -15,7 +14,7 @@ def test_function(params):
 class MetaLearningOptimizer(object):
     def __init__(self, dataset_name, configuration_space,
                  meta_base, distance='l1', seed=None, use_features=None,
-                 distance_kwargs=None):
+                 distance_kwargs=None, logger=None):
         self.dataset_name = dataset_name
         self.configuration_space = configuration_space
         self.meta_base = meta_base
@@ -25,7 +24,7 @@ class MetaLearningOptimizer(object):
         self.distance_kwargs = distance_kwargs
         self.kND = None     # For caching, makes things faster...
 
-        self.logger = get_logger(__name__)
+        self.logger = logger
 
     def metalearning_suggest_all(self, exclude_double_configurations=True):
         """Return a list of the best hyperparameters of neighboring datasets"""
@@ -35,9 +34,15 @@ class MetaLearningOptimizer(object):
         for neighbor in neighbors:
             try:
                 configuration = self.meta_base.get_configuration_from_algorithm_index(neighbor[2])
-                self.logger.info("%s %s %s" % (neighbor[0], neighbor[1], configuration))
+                if self.logger is not None:
+                    self.logger.info("%s %s %s" % (neighbor[0], neighbor[1], configuration))
+                else:
+                    warnings.warn("%s %s %s" % (neighbor[0], neighbor[1], configuration))
             except (KeyError):
-                self.logger.warning("Configuration %s not found" % neighbor[2])
+                if self.logger is not None:
+                    self.logger.warning("Configuration %s not found" % neighbor[2])
+                else:
+                    warnings.warn("Configuration %s not found" % neighbor[2])
                 continue
 
             hp_list.append(configuration)
@@ -64,9 +69,14 @@ class MetaLearningOptimizer(object):
                     break
 
             if not already_evaluated:
-                self.logger.info("Nearest dataset with hyperparameters of best value "
-                                 "not evaluated yet is %s with a distance of %f" %
-                                 (neighbor[0], neighbor[1]))
+                if self.logger is not None:
+                    self.logger.info("Nearest dataset with hyperparameters of best value "
+                                     "not evaluated yet is %s with a distance of %f" %
+                                     (neighbor[0], neighbor[1]))
+                else:
+                    warnings.warn("Nearest dataset with hyperparameters of best value "
+                                  "not evaluated yet is %s with a distance of %f" %
+                                  (neighbor[0], neighbor[1]))
                 return self.meta_base.get_configuration_from_algorithm_index(
                     neighbor[2])
         raise StopIteration("No more values available.")
@@ -111,7 +121,10 @@ class MetaLearningOptimizer(object):
                     runs[task_id] = self.meta_base.get_runs(task_id)
                 except KeyError:
                     # TODO should I really except this?
-                    self.logger.warning("Could not find runs for instance %s" % task_id)
+                    if self.logger is not None:
+                        self.logger.warning("Could not find runs for instance %s" % task_id)
+                    else:
+                        warnings.warn("Could not find runs for instance %s" % task_id)
                     runs[task_id] = pd.Series([], name=task_id)
             runs = pd.DataFrame(runs)
 

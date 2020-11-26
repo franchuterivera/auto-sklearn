@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
 import lockfile
@@ -15,7 +16,7 @@ from sklearn.pipeline import Pipeline
 
 from autosklearn.data.abstract_data_manager import AbstractDataManager
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
-from autosklearn.util import logging_ as logging
+from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_logger
 
 
 __all__ = [
@@ -81,12 +82,23 @@ class BackendContext(object):
             )
         )
         self._output_directory = output_directory
+        # We create a dummy logger to start with
+        # Then, when a port is available we can create a
+        # client logger
+        self.logger = None  # type: Optional[PicklableClientLogger]
         self.create_directories()
         # This is the first place the logger gets created.
         # We want to make sure any logging forward sets the correct directory
         # were all files should be created
         logging.setup_logger(output_dir=self._temporary_directory)
         self._logger = logging.get_logger(__name__)
+
+    def setup_logger(self, port: int) -> None:
+        self._logger = get_named_client_logger(
+            name=__name__,
+            port=port,
+            output_dir=self.temporary_directory,
+        )
 
     @property
     def output_directory(self) -> Optional[str]:
@@ -158,7 +170,7 @@ class Backend(object):
     """
 
     def __init__(self, context: BackendContext):
-        self.logger = logging.get_logger(__name__)
+        self.logger = None  # type: Optional[PicklableClientLogger]
         self.context = context
 
         # Create the temporary directory if it does not yet exist
@@ -174,6 +186,14 @@ class Backend(object):
         self.internals_directory = os.path.join(self.temporary_directory, ".auto-sklearn")
         self._make_internals_directory()
 
+    def setup_logger(self, port: int) -> None:
+        self.logger = get_named_client_logger(
+            name=__name__,
+            port=port,
+            output_dir=self.temporary_directory,
+        )
+        self.context.setup_logger(port)
+
     @property
     def output_directory(self) -> Optional[str]:
         return self.context.output_directory
@@ -186,11 +206,13 @@ class Backend(object):
         try:
             os.makedirs(self.internals_directory)
         except Exception as e:
-            self.logger.debug("_make_internals_directory: %s" % e)
+            if self.logger is not None:
+                self.logger.debug("_make_internals_directory: %s" % e)
         try:
             os.makedirs(self.get_runs_directory())
         except Exception as e:
-            self.logger.debug("_make_internals_directory: %s" % e)
+            if self.logger is not None:
+                self.logger.debug("_make_internals_directory: %s" % e)
 
     def _get_start_time_filename(self, seed: Union[str, int]) -> str:
         if isinstance(seed, str):
@@ -417,7 +439,10 @@ class Backend(object):
         ensemble_dir = self.get_ensemble_dir()
 
         if not os.path.exists(ensemble_dir):
-            self.logger.warning('Directory %s does not exist' % ensemble_dir)
+            if self.logger is not None:
+                self.logger.warning('Directory %s does not exist' % ensemble_dir)
+            else:
+                warnings.warn('Directory %s does not exist' % ensemble_dir)
             return None
 
         if seed >= 0:
@@ -490,4 +515,5 @@ class Backend(object):
                 fh.write(data)
                 tempname = fh.name
             os.rename(tempname, filepath)
-            self.logger.debug('Created %s file %s' % (name, filepath))
+            if self.logger is not None:
+                self.logger.debug('Created %s file %s' % (name, filepath))

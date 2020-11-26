@@ -3,6 +3,7 @@ import logging
 import shutil
 import sys
 import time
+import tempfile
 import unittest
 import unittest.mock
 
@@ -29,6 +30,9 @@ def safe_eval_success_mock(*args, **kwargs):
 
 
 class BackendMock(object):
+    def __init__(self):
+        self.temporary_directory = tempfile.gettempdir()
+
     def load_datamanager(self):
         return get_multiclass_classification_datamanager()
 

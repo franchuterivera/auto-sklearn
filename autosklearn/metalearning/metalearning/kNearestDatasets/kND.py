@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -5,12 +7,10 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import MinMaxScaler
 import sklearn.utils
 
-from ....util.logging_ import get_logger
-
 
 class KNearestDatasets(object):
-    def __init__(self, metric='l1', random_state=None, metric_params=None):
-        self.logger = get_logger(__name__)
+    def __init__(self, metric='l1', random_state=None, metric_params=None, logger=None):
+        self.logger = logger
 
         self.metric = metric
         self.model = None
@@ -141,8 +141,12 @@ class KNearestDatasets(object):
                 dataset_name]
 
             if best_configuration is None:
-                self.logger.warning("Found no best configuration for instance "
-                                    "%s" % dataset_name)
+                if self.logger is not None:
+                    self.logger.warning("Found no best configuration for instance "
+                                        "%s" % dataset_name)
+                else:
+                    warnings.warn("Found no best configuration for instance "
+                                  "%s" % dataset_name)
                 continue
 
             if exclude_double_configurations:

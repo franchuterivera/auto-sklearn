@@ -4,6 +4,7 @@ import shutil
 import sys
 import unittest
 import unittest.mock
+import tempfile
 
 import numpy as np
 import sklearn.dummy
@@ -37,6 +38,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
         backend_mock.get_prediction_output_path.side_effect = dummy_pred_files
         D = get_multiclass_classification_datamanager()
         backend_mock.load_datamanager.return_value = D
+        backend_mock.temporary_directory = tempfile.gettempdir()
         self.backend_mock = backend_mock
 
         self.working_directory = os.path.join(this_directory, '.tmp_%s' % self.id())

@@ -18,7 +18,7 @@ from autosklearn.pipeline.implementations.util import (
     convert_multioutput_multiclass_to_multilabel
 )
 from autosklearn.metrics import calculate_score, CLASSIFICATION_METRICS, REGRESSION_METRICS
-from autosklearn.util.logging_ import get_logger
+from autosklearn.util.logging_ import get_named_client_logger
 
 from ConfigSpace import Configuration
 
@@ -119,12 +119,14 @@ class AbstractEvaluator(object):
                  disable_file_output=False,
                  init_params=None,
                  budget=None,
+                 port=9020,
                  budget_type=None):
 
         self.starttime = time.time()
 
         self.configuration = configuration
         self.backend = backend
+        self.port = port
         self.queue = queue
 
         self.datamanager = self.backend.load_datamanager()
@@ -186,7 +188,11 @@ class AbstractEvaluator(object):
 
         logger_name = '%s(%d):%s' % (self.__class__.__name__.split('.')[-1],
                                      self.seed, self.datamanager.name)
-        self.logger = get_logger(logger_name)
+        self.logger = get_named_client_logger(
+            name=logger_name,
+            port=self.port,
+            output_dir=self.backend.temporary_directory,
+        )
 
         self.Y_optimization = None
         self.Y_actual_train = None

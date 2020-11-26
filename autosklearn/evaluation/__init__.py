@@ -22,7 +22,7 @@ from autosklearn.metrics import Scorer
 import autosklearn.evaluation.train_evaluator
 import autosklearn.evaluation.test_evaluator
 import autosklearn.evaluation.util
-import autosklearn.util.logging_
+from autosklearn.util.logging_ import get_named_client_logger
 
 
 def fit_predict_try_except_decorator(ta, queue, cost_for_crash, **kwargs):
@@ -101,7 +101,8 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
                  run_obj='quality', par_factor=1, scoring_functions=None,
                  output_y_hat_optimization=True, include=None, exclude=None,
                  memory_limit=None, disable_file_output=False, init_params=None,
-                 budget_type=None, ta=False, pynisher_context='spawn', **resampling_strategy_args):
+                 budget_type=None, ta=False, port=9020,
+                 pynisher_context='spawn', **resampling_strategy_args):
 
         if resampling_strategy == 'holdout':
             eval_function = autosklearn.evaluation.train_evaluator.eval_holdout
@@ -175,6 +176,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
         else:
             self._get_test_loss = False
 
+        self.port = port
         self.pynisher_context = pynisher_context
 
     def run_wrapper(
@@ -255,7 +257,11 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             init_params.update(self.init_params)
 
         arguments = dict(
-            logger=autosklearn.util.logging_.get_logger("pynisher"),
+            logger=get_named_client_logger(
+                name="pynisher",
+                output_dir=self.backend.temporary_directory,
+                port=self.port,
+            ),
             wall_time_in_s=cutoff,
             mem_in_mb=self.memory_limit,
             capture_output=True,
@@ -271,6 +277,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             queue=queue,
             config=config,
             backend=self.backend,
+            port=self.port,
             metric=self.metric,
             seed=self.autosklearn_seed,
             num_run=num_run,

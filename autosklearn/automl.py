@@ -43,7 +43,7 @@ from autosklearn.metrics import calculate_score
 from autosklearn.util.backend import Backend
 from autosklearn.util.stopwatch import StopWatch
 from autosklearn.util.logging_ import (
-    get_logger,
+    get_named_client_logger,
     setup_logger,
     start_log_server,
 )
@@ -313,7 +313,14 @@ class AutoML(BaseEstimator):
 
         self._logger_port = int(port.value)
 
-        return get_logger(logger_name)
+        return get_named_client_logger(
+            name=logger_name,
+            host='localhost',
+            port=self._logger_port,
+            filename='%s.log' % str(logger_name),
+            logging_config=self.logging_config,
+            output_dir=self._backend.temporary_directory,
+        )
 
     def _clean_logger(self):
         if not hasattr(self, 'stop_logging_server') or self.stop_logging_server is None:
@@ -380,6 +387,7 @@ class AutoML(BaseEstimator):
                                     disable_file_output=self._disable_evaluator_output,
                                     abort_on_first_run_crash=False,
                                     cost_for_crash=get_cost_of_crash(self._metric),
+                                    port=self._logger_port,
                                     **self._resampling_strategy_arguments)
 
         status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task)
@@ -428,6 +436,14 @@ class AutoML(BaseEstimator):
         only_return_configuration_space: Optional[bool] = False,
         load_models: bool = True,
     ):
+        if dataset_name is None:
+            dataset_name = hash_array_or_matrix(X)
+        # The first thing we have to do is create the logger to update the backend
+        # By default try to use the TCP logging port or get a new port
+        self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
+        self._logger = self._get_logger(dataset_name)
+        self._backend.setup_logger(self._logger_port)
+
         self._backend.save_start_time(self._seed)
         self._stopwatch = StopWatch()
 
@@ -458,12 +474,6 @@ class AutoML(BaseEstimator):
         if not isinstance(self._metric, Scorer):
             raise ValueError('Metric must be instance of '
                              'autosklearn.metrics.Scorer.')
-
-        if dataset_name is None:
-            dataset_name = hash_array_or_matrix(X)
-        # By default try to use the TCP logging port or get a new port
-        self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
-        self._logger = self._get_logger(dataset_name)
 
         # If no dask client was provided, we create one, so that we can
         # start a ensemble process in parallel to smbo optimize
@@ -718,6 +728,7 @@ class AutoML(BaseEstimator):
                 get_smac_object_callback=self._get_smac_object_callback,
                 smac_scenario_args=self._smac_scenario_args,
                 scoring_functions=self._scoring_functions,
+                port=self._logger_port,
                 ensemble_callback=proc_ensemble,
             )
 

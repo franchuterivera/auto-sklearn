@@ -45,16 +45,24 @@ def _create_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def get_logger(name: str) -> 'PickableLoggerAdapter':
-    logger = PickableLoggerAdapter(name)
-    return logger
+class PicklableClientLogger(object):
 
-
-class PickableLoggerAdapter(object):
-
-    def __init__(self, name: str):
+    def __init__(self, output_dir: str, name: str, host: str, port: int,
+                 filename: Optional[str], logging_config: Optional[Dict]):
+        self.output_dir = output_dir
         self.name = name
-        self.logger = _create_logger(name)
+        self.host = host
+        self.port = port
+        self.filename = filename
+        self.logging_config = logging_config
+        self.logger = _get_named_client_logger(
+            output_dir=self.output_dir,
+            name=self.name,
+            host=self.host,
+            port=self.port,
+            logging_config=self.logging_config,
+            filename=self.filename,
+        )
 
     def __getstate__(self) -> Dict[str, Any]:
         """
@@ -65,7 +73,9 @@ class PickableLoggerAdapter(object):
         Dictionary, representing the object state to be pickled. Ignores
         the self.logger field and only returns the logger name.
         """
-        return {'name': self.name}
+        return {'name': self.name, 'host': self.host, 'port': self.port,
+                'filename': self.filename,
+                'output_dir': self.output_dir, 'logging_config': self.logging_config}
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """
@@ -78,7 +88,19 @@ class PickableLoggerAdapter(object):
 
         """
         self.name = state['name']
-        self.logger = _create_logger(self.name)
+        self.host = state['host']
+        self.port = state['port']
+        self.output_dir = state['output_dir']
+        self.logging_config = state['logging_config']
+        self.filename = state['filename']
+        self.logger = _get_named_client_logger(
+            output_dir=self.output_dir,
+            name=self.name,
+            host=self.host,
+            port=self.port,
+            logging_config=self.logging_config,
+            filename=self.filename,
+        )
 
     def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
         self.logger.debug(msg, *args, **kwargs)
@@ -108,14 +130,18 @@ class PickableLoggerAdapter(object):
 def get_named_client_logger(
     output_dir: str,
     name: str,
+    port: int,
     host: str = 'localhost',
-    port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    filename: Optional[str] = None,
+    logging_config: Optional[Dict] = None,
 ) -> 'PicklableClientLogger':
     logger = PicklableClientLogger(
         output_dir=output_dir,
         name=name,
         host=host,
-        port=port
+        port=port,
+        filename=filename,
+        logging_config=logging_config,
     )
     return logger
 
@@ -125,6 +151,8 @@ def _get_named_client_logger(
     name: str,
     host: str = 'localhost',
     port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    filename: Optional[str] = None,
+    logging_config: Optional[Dict] = None,
 ) -> logging.Logger:
     """
     When working with a logging server, clients are expected to create a logger using
@@ -139,19 +167,29 @@ def _get_named_client_logger(
 
     Parameters
     ----------
-        outputdir: (str)
-            The path where the log files are going to be dumped
+        output_dir: (str)
+            The location where the named log will be created
         name: (str)
             the name of the logger, used to tag the messages in the main log
         host: (str)
             Address of where the server is gonna look for messages
+        port: (str)
+            The port that receives the msgs
+        filename: (str)
+            The filename to overwrite the default handler filename
+        logging_config: (dict)
+            A user specified logging configuration
 
     Returns
     -------
         local_loger: a logger object that has a socket handler
     """
     # Setup the logger configuration
-    setup_logger(output_dir=output_dir)
+    setup_logger(
+        output_dir=output_dir,
+        filename=filename,
+        logging_config=logging_config,
+    )
 
     local_logger = _create_logger(name)
 
@@ -163,58 +201,6 @@ def _get_named_client_logger(
     local_logger.addHandler(socketHandler)
 
     return local_logger
-
-
-class PicklableClientLogger(PickableLoggerAdapter):
-
-    def __init__(self, output_dir: str, name: str, host: str, port: int):
-        self.output_dir = output_dir
-        self.name = name
-        self.host = host
-        self.port = port
-        self.logger = _get_named_client_logger(
-            output_dir=output_dir,
-            name=name,
-            host=host,
-            port=port
-        )
-
-    def __getstate__(self) -> Dict[str, Any]:
-        """
-        Method is called when pickle dumps an object.
-
-        Returns
-        -------
-        Dictionary, representing the object state to be pickled. Ignores
-        the self.logger field and only returns the logger name.
-        """
-        return {
-            'name': self.name,
-            'host': self.host,
-            'port': self.port,
-            'output_dir': self.output_dir,
-        }
-
-    def __setstate__(self, state: Dict[str, Any]) -> None:
-        """
-        Method is called when pickle loads an object. Retrieves the name and
-        creates a logger.
-
-        Parameters
-        ----------
-        state - dictionary, containing the logger name.
-
-        """
-        self.name = state['name']
-        self.host = state['host']
-        self.port = state['port']
-        self.output_dir = state['output_dir']
-        self.logger = _get_named_client_logger(
-            name=self.name,
-            host=self.host,
-            port=self.port,
-            output_dir=self.output_dir,
-        )
 
 
 class LogRecordStreamHandler(socketserver.StreamRequestHandler):
@@ -267,13 +253,15 @@ def start_log_server(
     logname: str,
     event: threading.Event,
     port: multiprocessing.Value,
+    output_dir: str,
     filename: str,
     logging_config: Dict,
-    output_dir: str,
 ) -> None:
-    setup_logger(filename=filename,
-                 logging_config=logging_config,
-                 output_dir=output_dir)
+    setup_logger(
+        output_dir=output_dir,
+        filename=filename,
+        logging_config=logging_config,
+    )
 
     while True:
         # Loop until we find a valid port
