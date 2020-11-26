@@ -192,7 +192,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                         ensemble_history,
                     ))
                     self.history.extend(ensemble_history)
-                    print(f"Gonna add ensemble_history={ensemble_history} to total={self.history}")
 
         # Only submit new jobs if the previous ensemble job finished
         if len(self.futures) == 0:
