@@ -1,3 +1,4 @@
+import faulthandler
 import os
 import sys
 import time
@@ -5,6 +6,7 @@ import unittest.mock
 import pickle
 import pytest
 import shutil
+import threading
 
 import dask.distributed
 import numpy as np
@@ -809,3 +811,142 @@ def test_ensemble_builder_nbest_remembered(
     dask.distributed.wait([future])  # wait for the ensemble process to finish
     assert not os.path.exists(file_path)
     assert future.result() == ([], 2, None, None, None)
+
+
+
+def no_deadclock(selected_keys):
+    a = 5
+    alock = threading.Lock()
+    b = 5
+    block = threading.Lock()
+
+    def thread1calc():
+        faulthandler.dump_traceback_later(2)
+        print("Thread1 acquiring lock a")
+        alock.acquire()
+        time.sleep(5)
+
+        a += 5
+
+        print("Thread1 releasing both locks")
+        alock.release()
+        faulthandler.dump_traceback_later(2)
+
+    def thread2calc():
+        faulthandler.dump_traceback_later(2)
+        print("Thread2 acquiring lock b")
+        block.acquire()
+        time.sleep(5)
+
+        b += 10
+
+        print("Thread2 releasing both locks")
+        block.release()
+        faulthandler.dump_traceback_later(2)
+
+    t = threading.Thread(target = thread1calc)
+    t.setDaemon(1)
+    t.start()
+
+    t = threading.Thread(target = thread2calc)
+    t.setDaemon(2)
+    t.start()
+
+    while True:
+def force_deadclock(selected_keys):
+    a = 5
+    alock = threading.Lock()
+    b = 5
+    block = threading.Lock()
+
+    def thread1calc():
+        faulthandler.dump_traceback_later(2)
+        print("Thread1 acquiring lock a")
+        alock.acquire()
+        time.sleep(5)
+
+        faulthandler.dump_traceback_later(2)
+        print("Thread1 acquiring lock b")
+        block.acquire()
+        time.sleep(5)
+        a += 5
+        b += 5
+
+        print("Thread1 releasing both locks")
+        block.release()
+        alock.release()
+
+    def thread2calc():
+        faulthandler.dump_traceback_later(2)
+        print("Thread2 acquiring lock b")
+        block.acquire()
+        time.sleep(5)
+
+        print("Thread2 acquiring lock a")
+        alock.acquire()
+        time.sleep(5)
+        a += 10
+        b += 10
+
+        print("Thread2 releasing both locks")
+        block.release()
+        alock.release()
+
+    t = threading.Thread(target = thread1calc)
+    t.setDaemon(1)
+    t.start()
+
+    t = threading.Thread(target = thread2calc)
+    t.setDaemon(2)
+    t.start()
+
+    while True:
+        time.sleep(100)
+
+
+@unittest.mock.patch('autosklearn.ensemble_builder.EnsembleBuilder.fit_ensemble')
+def test_deadlock_in_ensemble(
+    fit_ensemble,
+    ensemble_backend,
+    dask_client_single_worker,
+):
+    """
+    Makes sure ensemble builder returns the size of the ensemble that pynisher allowed
+    This way, we can remember it and not waste more time trying big ensemble sizes
+    """
+
+    fit_ensemble.side_effect = force_deadclock
+
+    manager = EnsembleBuilderManager(
+        start_time=time.time(),
+        time_left_for_ensembles=10,
+        backend=ensemble_backend,
+        dataset_name='Test',
+        task=MULTILABEL_CLASSIFICATION,
+        metric=roc_auc,
+        ensemble_size=50,
+        ensemble_nbest=10,
+        max_models_on_disc=None,
+        seed=0,
+        precision=32,
+        read_at_most=np.inf,
+        ensemble_memory_limit=1000,
+        random_state=0,
+        max_iterations=None,
+    )
+
+    # Use fork context in the next line to allow for the mock to work
+    manager.build_ensemble(dask_client_single_worker, 'fork')
+    future = manager.futures[0]
+    dask.distributed.wait([future])  # wait for the ensemble process to finish
+    assert future.result() == ([], 5, None, None, None)
+    file_path = os.path.join(ensemble_backend.internals_directory, 'ensemble_read_preds.pkl')
+    assert not os.path.exists(file_path)
+
+    manager.build_ensemble(dask_client_single_worker, 'fork')
+
+    future = manager.futures[0]
+    dask.distributed.wait([future])  # wait for the ensemble process to finish
+    assert not os.path.exists(file_path)
+    assert future.result() == ([], 2, None, None, None)
+

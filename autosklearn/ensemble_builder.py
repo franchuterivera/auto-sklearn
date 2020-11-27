@@ -581,6 +581,7 @@ class EnsembleBuilder(object):
                 context=context,
             )(self.main)
             safe_ensemble_script(time_left, iteration, return_predictions)
+            print(f"safe_ensemble_script.exit_status={safe_ensemble_script.exit_status}")
             if safe_ensemble_script.exit_status is pynisher.MemorylimitException:
                 # if ensemble script died because of memory error,
                 # reduce nbest to reduce memory consumption and try it again
