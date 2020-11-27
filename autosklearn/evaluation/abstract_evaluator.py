@@ -109,6 +109,7 @@ def _fit_and_suppress_warnings(logger, model, X, y):
 
 class AbstractEvaluator(object):
     def __init__(self, backend, queue, metric,
+                 port,
                  configuration=None,
                  scoring_functions=None,
                  seed=1,
@@ -119,7 +120,6 @@ class AbstractEvaluator(object):
                  disable_file_output=False,
                  init_params=None,
                  budget=None,
-                 port=9020,
                  budget_type=None):
 
         self.starttime = time.time()

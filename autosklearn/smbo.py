@@ -206,6 +206,7 @@ class AutoMLSMBO(object):
                  watcher,
                  n_jobs,
                  dask_client: dask.distributed.Client,
+                 port: int,
                  start_num_run=1,
                  data_memory_limit=None,
                  num_metalearning_cfgs=25,
@@ -223,7 +224,6 @@ class AutoMLSMBO(object):
                  get_smac_object_callback=None,
                  scoring_functions=None,
                  ensemble_callback: typing.Optional[EnsembleBuilderManager] = None,
-                 port=9020,
                  ):
         super(AutoMLSMBO, self).__init__()
         # data related

@@ -142,7 +142,7 @@ def _fit_with_budget(X_train, Y_train, budget, budget_type, logger, model, train
 
 class TrainEvaluator(AbstractEvaluator):
     def __init__(self, backend, queue, metric,
-                 port=9020,
+                 port,
                  configuration=None,
                  scoring_functions=None,
                  seed=1,
@@ -1051,11 +1051,11 @@ def eval_holdout(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         iterative=False,
         budget=100.0,
         budget_type=None,
-        port=9020,
 ):
     evaluator = TrainEvaluator(
         backend=backend,
@@ -1094,13 +1094,14 @@ def eval_iterative_holdout(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         budget=100.0,
         budget_type=None,
-        port=9020,
 ):
     return eval_holdout(
         queue=queue,
+        port=port,
         config=config,
         backend=backend,
         metric=metric,
@@ -1136,11 +1137,11 @@ def eval_partial_cv(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         iterative=False,
         budget=None,
         budget_type=None,
-        port=9020,
 ):
     if budget_type is not None:
         raise NotImplementedError()
@@ -1185,10 +1186,10 @@ def eval_partial_cv_iterative(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         budget=None,
         budget_type=None,
-        port=9020,
 ):
     if budget_type is not None:
         raise NotImplementedError()
@@ -1228,11 +1229,11 @@ def eval_cv(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         budget=None,
         budget_type=None,
         iterative=False,
-        port=9020,
 ):
     evaluator = TrainEvaluator(
         backend=backend,
@@ -1272,11 +1273,11 @@ def eval_iterative_cv(
         include,
         exclude,
         disable_file_output,
+        port,
         init_params=None,
         budget=None,
         budget_type=None,
         iterative=True,
-        port=9020,
 ):
     eval_cv(
         backend=backend,

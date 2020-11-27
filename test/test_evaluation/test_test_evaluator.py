@@ -1,6 +1,7 @@
 # -*- encoding: utf-8 -*-
 import copy
 import json
+import logging.handlers
 import multiprocessing
 import os
 import shutil
@@ -22,8 +23,13 @@ from autosklearn.metrics import accuracy, r2, f1_macro
 
 this_directory = os.path.dirname(__file__)
 sys.path.append(this_directory)
-from evaluation_util import get_dataset_getters, BaseEvaluatorTest, \
-    get_multiclass_classification_datamanager, SCORER_LIST  # noqa (E402: module level import not at top of file)
+from evaluation_util import (
+    get_evaluation_backend,
+    get_dataset_getters,
+    BaseEvaluatorTest,
+    get_multiclass_classification_datamanager,
+    SCORER_LIST,
+)  # noqa (E402: module level import not at top of file)
 
 
 N_TEST_RUNS = 3
@@ -43,8 +49,7 @@ class TestEvaluator_Test(BaseEvaluatorTest, unittest.TestCase):
                                   getter.__name__)
 
             with self.subTest(testname):
-                backend_mock = unittest.mock.Mock(spec=Backend)
-                backend_mock.temporary_directory = tempfile.gettempdir()
+                backend_mock = get_evaluation_backend()
                 D = getter()
                 D_ = copy.deepcopy(D)
                 y = D.data['Y_train']
@@ -60,7 +65,8 @@ class TestEvaluator_Test(BaseEvaluatorTest, unittest.TestCase):
                 evaluator = TestEvaluator(
                     backend_mock,
                     queue_,
-                    metric=metric_lookup[D.info['task']]
+                    metric=metric_lookup[D.info['task']],
+                    port=logging.handlers.DEFAULT_TCP_LOGGING_PORT,
                 )
 
                 evaluator.fit_predict_and_loss()
@@ -84,6 +90,8 @@ class FunctionsTest(unittest.TestCase):
         self.backend.load_datamanager.return_value = self.data
         self.dataset_name = json.dumps({'task_id': 'test'})
 
+        self.port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
+
     def tearDown(self):
         try:
             shutil.rmtree(self.tmp_dir)
@@ -102,7 +110,8 @@ class FunctionsTest(unittest.TestCase):
             include=None,
             exclude=None,
             disable_file_output=False,
-            instance=self.dataset_name
+            instance=self.dataset_name,
+            port=self.port,
         )
         rval = read_queue(self.queue)
         self.assertEqual(len(rval), 1)
@@ -123,6 +132,7 @@ class FunctionsTest(unittest.TestCase):
             exclude=None,
             disable_file_output=False,
             instance=self.dataset_name,
+            port=self.port,
         )
         rval = read_queue(self.queue)
         self.assertEqual(len(rval), 1)

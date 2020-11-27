@@ -1,4 +1,5 @@
 # -*- encoding: utf-8 -*-
+import logging.handlers
 import os
 import shutil
 import sys
@@ -41,6 +42,8 @@ class AbstractEvaluatorTest(unittest.TestCase):
         backend_mock.temporary_directory = tempfile.gettempdir()
         self.backend_mock = backend_mock
 
+        self.port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
+
         self.working_directory = os.path.join(this_directory, '.tmp_%s' % self.id())
 
     def tearDown(self):
@@ -56,6 +59,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
 
         queue_mock = unittest.mock.Mock()
         ae = AbstractEvaluator(backend=self.backend_mock,
+                               port=self.port,
                                output_y_hat_optimization=False,
                                queue=queue_mock, metric=accuracy)
         ae.Y_optimization = rs.rand(33, 3)
@@ -131,6 +135,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
             queue=queue_mock,
             disable_file_output=True,
             metric=accuracy,
+            port=self.port,
         )
 
         predictions_ensemble = rs.rand(33, 3)
@@ -157,6 +162,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
                 queue=queue_mock,
                 disable_file_output=[disable],
                 metric=accuracy,
+                port=self.port,
             )
             ae.Y_optimization = predictions_ensemble
             ae.model = unittest.mock.Mock()
@@ -202,6 +208,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
             queue=queue_mock,
             metric=accuracy,
             disable_file_output=['y_optimization'],
+            port=self.port,
         )
         ae.Y_optimization = predictions_ensemble
         ae.model = 'model'
@@ -253,6 +260,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
                 output_y_hat_optimization=False,
                 queue=queue_mock,
                 metric=accuracy,
+                port=self.port,
             )
             ae.model = sklearn.dummy.DummyClassifier()
 

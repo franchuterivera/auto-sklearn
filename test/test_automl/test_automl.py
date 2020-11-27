@@ -354,12 +354,18 @@ def test_automl_outputs(backend, dask_client):
     for run_value in auto.runhistory_.data.values():
         if run_value.status != StatusType.RUNNING:
             # Running is not gonna return a value, it is left running
-            if 'info' in run_value.additional_run_info:
-                if 'Run stopped because' not in run_value.additional_run_info['info']:
-                    # If the run had a TIMEOUT,
-                    # it won't log a return value, only the exception
-                    total_completed_runs_auto += 1
-    assert total_completed_runs_log == total_completed_runs_auto, print_debug_information(auto)
+            if 'info' in run_value.additional_info or 'traceback' in run_value.additional_info:
+                # If the run had a TIMEOUT,
+                # it won't log a return value, only the exception
+                # Same with a crash - this information is available in runhistory
+                continue
+            total_completed_runs_auto += 1
+
+    # We check if we have all success return in the log file. Checking for crashes depends on
+    # the stage where the job finished. An job that is not success full will be registered in the
+    # run history, but not necessarily in the log file as it might have been terminated before
+    # printing.
+    assert total_completed_runs_log >= total_completed_runs_auto, print_debug_information(auto)
 
     # Lastly check that settings are print to logfile
     ensemble_size = parser.get_automl_setting_from_log(auto._dataset_name, 'ensemble_size')

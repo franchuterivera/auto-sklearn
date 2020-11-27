@@ -2,6 +2,7 @@
 import re
 import os
 import glob
+import typing
 
 import numpy as np
 
@@ -28,9 +29,9 @@ def print_debug_information(automl):
             content = logfile.readlines()
 
         # Get the messages to debug easier!
-        content = [x for x in content if any(
-            msg in x for msg in include_messages
-        ) and 'metalearning' not in x]
+        content = [line for line in content if any(
+            msg in line for msg in include_messages
+        ) and 'metalearning' not in line]
 
     except Exception as e:
         return str(e)
@@ -59,24 +60,19 @@ def count_succeses(cv_results):
 
 
 class AutoMLLogParser(object):
-    def __init__(self, logfile):
+    def __init__(self, logfile: str):
         self.logfile = logfile
         self.lines = self.parse_logfile()
 
-    def parse_logfile(self):
+    def parse_logfile(self) -> typing.List[str]:
         # We care about the [debug/info/...] messages
         assert os.path.exists(self.logfile), "{} not found".format(self.logfile)
 
-        with open(self.logfile) as f:
-            content = f.readlines()
-        content = [x.strip() for x in content if re.search(r'[\w+]', x)]
+        with open(self.logfile) as fh:
+            content = [line.strip() for line in fh if re.search(r'[\w+]', line)]
         return content
 
-    def count_ensembler_iterations(self):
-        # we have to count the start msg from pynisher
-        # and the return msg
-        # We expect the start msg to be something like:
-        # [DEBUG] [2020-11-26 19:22:42,160:EnsembleBuilder] Function called with argument: (61.
+    def count_ensembler_iterations(self) -> int:
         iterations = []
 
         # One thing is to call phynisher, the other is to actually execute the funciton
@@ -84,13 +80,21 @@ class AutoMLLogParser(object):
         for line in self.lines:
 
             # Pynisher call
+            # we have to count the start msg from pynisher
+            # and the return msg
+            # We expect the start msg to be something like:
+            # [DEBUG] [2020-11-26 19:22:42,160:EnsembleBuilder] \
+            # Function called with argument: (61....
             match = re.search(
                 r'EnsembleBuilder]\s+Function called with argument:\s+\(\d+\.\d+, (\d+), \w+',
                 line)
             if match:
                 iterations.append(int(match.group(1)))
 
-            # Ensemble Builder actuall call
+            # Ensemble Builder actual call
+            # Here we expect the msg:
+            # [DEBUG] [2020-11-27 20:27:28,044:EnsembleBuilder] Starting iteration 2,
+            # time left: 10.603252
             match = re.search(
                 r'EnsembleBuilder]\s+Starting iteration (\d+)',
                 line)
@@ -103,23 +107,23 @@ class AutoMLLogParser(object):
 
         return iterations
 
-    def count_ensembler_success_pynisher_calls(self):
+    def count_ensembler_success_pynisher_calls(self) -> int:
 
         # We expect the return msg to be something like:
         # [DEBUG] [2020-11-26 19:22:43,018:EnsembleBuilder] return value: (([{'Times...
-        return_msgs = len([x for x in self.lines if re.search(
-            r'EnsembleBuilder]\s+return value:.*Timestamp', x)])
+        return_msgs = len([line for line in self.lines if re.search(
+            r'EnsembleBuilder]\s+return value:.*Timestamp', line)])
 
         return return_msgs
 
-    def count_tae_pynisher_calls(self):
+    def count_tae_pynisher_calls(self) -> int:
         # We expect the return msg to be something like:
         # [DEBUG] [2020-11-26 19:22:39,558:pynisher] return value: (...
-        return_msgs = len([x for x in self.lines if re.search(
-            r'pynisher]\s+return value:\s+', x)])
+        return_msgs = len([line for line in self.lines if re.search(
+            r'pynisher]\s+return value:\s+', line)])
         return (return_msgs)
 
-    def get_automl_setting_from_log(self, dataset_name, setting):
+    def get_automl_setting_from_log(self, dataset_name: str, setting: str) -> str:
         for line in self.lines:
             match = re.search(
                 f"{dataset_name}]\\s*{setting}\\s*:\\s*(\\w+)",
