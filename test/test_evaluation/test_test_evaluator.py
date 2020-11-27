@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 import unittest.mock
 
@@ -43,6 +44,7 @@ class TestEvaluator_Test(BaseEvaluatorTest, unittest.TestCase):
 
             with self.subTest(testname):
                 backend_mock = unittest.mock.Mock(spec=Backend)
+                backend_mock.temporary_directory = tempfile.gettempdir()
                 D = getter()
                 D_ = copy.deepcopy(D)
                 y = D.data['Y_train']
@@ -78,6 +80,7 @@ class FunctionsTest(unittest.TestCase):
         self.tmp_dir = os.path.join(os.path.dirname(__file__),
                                     '.test_cv_functions')
         self.backend = unittest.mock.Mock(spec=Backend)
+        self.backend.temporary_directory = tempfile.gettempdir()
         self.backend.load_datamanager.return_value = self.data
         self.dataset_name = json.dumps({'task_id': 'test'})
 

@@ -353,7 +353,7 @@ def test_automl_outputs(backend, dask_client):
     total_completed_runs_auto = len(
         [run_value.status for run_value in auto.runhistory_.data.values() if (
             run_value.status != StatusType.RUNNING)])
-    assert total_completed_runs_log == total_completed_runs_auto
+    assert total_completed_runs_log == total_completed_runs_auto, print_debug_information(auto)
 
     # Lastly check that settings are print to logfile
     ensemble_size = parser.get_automl_setting_from_log(auto._dataset_name, 'ensemble_size')
@@ -385,6 +385,11 @@ def test_do_dummy_prediction(backend, dask_client, datasets):
         dask_client=dask_client,
     )
 
+    # Make a dummy logger
+    auto._logger_port = 9020
+    auto._logger = unittest.mock.Mock()
+    auto._logger.info.return_value = None
+
     auto._backend.save_datamanager(datamanager)
     D = backend.load_datamanager()
 
@@ -399,6 +404,8 @@ def test_do_dummy_prediction(backend, dask_client, datasets):
         backend.temporary_directory, '.auto-sklearn', 'runs', '1_1_0.0',
         'predictions_ensemble_1_1_0.0.npy')
     )
+
+    auto._clean_logger()
 
     del auto
 
