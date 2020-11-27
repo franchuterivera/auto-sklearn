@@ -350,9 +350,15 @@ def test_automl_outputs(backend, dask_client):
     # Running configurations cannot be check as they might not reached
     # a point where pynisher is called before budget exhaustion
     total_completed_runs_log = parser.count_tae_pynisher_calls() - 1  # Dummy not in run history
-    total_completed_runs_auto = len(
-        [run_value.status for run_value in auto.runhistory_.data.values() if (
-            run_value.status != StatusType.RUNNING)])
+    total_completed_runs_auto = 0
+    for run_value in auto.runhistory_.data.values():
+        if run_value.status != StatusType.RUNNING:
+            # Running is not gonna return a value, it is left running
+            if 'info' in run_value.additional_run_info:
+                if 'Run stopped because' not in run_value.additional_run_info['info']:
+                    # If the run had a TIMEOUT,
+                    # it won't log a return value, only the exception
+                    total_completed_runs_auto += 1
     assert total_completed_runs_log == total_completed_runs_auto, print_debug_information(auto)
 
     # Lastly check that settings are print to logfile
