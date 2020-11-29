@@ -30,6 +30,7 @@ from autosklearn.metrics import calculate_score, Scorer
 from autosklearn.ensembles.ensemble_selection import EnsembleSelection
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import get_named_client_logger, get_logger
+from autosklearn.util.common import thresholdout
 
 Y_ENSEMBLE = 0
 Y_VALID = 1
@@ -57,6 +58,8 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         ensemble_memory_limit: Optional[int],
         random_state: int,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+        ensemble_builder_thresholdout = 0,
+        ensemble_builder_thresholdout_scale = 0.1,
     ):
         """ SMAC callback to handle ensemble building
 
@@ -127,6 +130,8 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_memory_limit = ensemble_memory_limit
         self.random_state = random_state
         self.logger_port = logger_port
+        self.ensemble_builder_thresholdout = ensemble_builder_thresholdout
+        self.ensemble_builder_thresholdout_scale = ensemble_builder_thresholdout_scale
 
         # Store something similar to SMAC's runhistory
         self.history = []
@@ -224,6 +229,8 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     priority=100,
                     pynisher_context=pynisher_context,
                     logger_port=self.logger_port,
+                    ensemble_builder_thresholdout=self.ensemble_builder_thresholdout,
+                    ensemble_builder_thresholdout_scale=self.ensemble_builder_thresholdout_scale,
                 ))
 
                 logger.info(
@@ -262,6 +269,8 @@ def fit_and_return_ensemble(
     return_predictions: bool,
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    ensemble_builder_thresholdout=0,
+    ensemble_builder_thresholdout_scale=0.1,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
         int,
@@ -340,6 +349,8 @@ def fit_and_return_ensemble(
         read_at_most=read_at_most,
         random_state=random_state,
         logger_port=logger_port,
+        ensemble_builder_thresholdout=ensemble_builder_thresholdout,
+        ensemble_builder_thresholdout_scale=ensemble_builder_thresholdout_scale,
     ).run(
         end_at=end_at,
         iteration=iteration,
@@ -366,6 +377,8 @@ class EnsembleBuilder(object):
             read_at_most: int = 5,
             random_state: Optional[Union[int, np.random.RandomState]] = None,
             logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+            ensemble_builder_thresholdout=0,
+            ensemble_builder_thresholdout_scale=0.1,
     ):
         """
             Constructor
@@ -459,6 +472,8 @@ class EnsembleBuilder(object):
             port=self.logger_port,
             output_dir=self.backend.temporary_directory,
         )
+        self.ensemble_builder_thresholdout = ensemble_builder_thresholdout
+        self.ensemble_builder_thresholdout_scale = ensemble_builder_thresholdout_scale
 
         if ensemble_nbest == 1:
             self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
@@ -469,6 +484,7 @@ class EnsembleBuilder(object):
 
         self.last_hash = None  # hash of ensemble training data
         self.y_true_ensemble = None
+        self.y_true_train_ensemble = None
         self.SAVE2DISC = True
 
         # already read prediction files
@@ -800,6 +816,16 @@ class EnsembleBuilder(object):
                 )
                 return False
 
+        if self.y_true_train_ensemble is None:
+            try:
+                self.y_true_train_ensemble = self.backend.load_train_targets_ensemble()
+            except FileNotFoundError:
+                self.logger.debug(
+                    "Could not find true train targets on ensemble data set: %s",
+                    traceback.format_exc(),
+                )
+                return False
+
         pred_path = os.path.join(
             glob.escape(self.backend.get_runs_directory()),
             '%d_*_*' % self.seed,
@@ -869,12 +895,15 @@ class EnsembleBuilder(object):
 
             # actually read the predictions and score them
             try:
-                y_ensemble = self._read_np_fn(y_ens_fn)
-                score = calculate_score(solution=self.y_true_ensemble,
-                                        prediction=y_ensemble,
-                                        task_type=self.task_type,
-                                        metric=self.metric,
-                                        all_scoring_functions=False)
+                score = self._get_score(pred_file=y_ens_fn, train=False)
+                if self.ensemble_builder_thresholdout >= 1:
+                    train_score = self._get_score(pred_file=y_ens_fn.replace('ensemble', 'train'), train=True)
+                    #score = thresholdout(train_score, score, thresholdout_scale=self.ensemble_builder_thresholdout_scale)
+                    # Notice how I inverted the score and train score. This is because
+                    # in the ensemble scenario we use the OOF predictions for optimization.
+                    # Nevertheless there is bias becuase the train data was used to build the
+                    # model
+                    score = thresholdout(score, train_score, thresholdout_scale=self.ensemble_builder_thresholdout_scale)
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
                     self.logger.debug(
@@ -914,6 +943,15 @@ class EnsembleBuilder(object):
             np.sum([pred["loaded"] > 0 for pred in self.read_scores.values()])
         )
         return True
+
+    def _get_score(self, pred_file, train):
+        y_ensemble = self._read_np_fn(pred_file)
+        score = calculate_score(solution=self.y_true_train_ensemble if train else self.y_true_ensemble,
+                                prediction=y_ensemble,
+                                task_type=self.task_type,
+                                metric=self.metric,
+                                all_scoring_functions=False)
+        return score
 
     def get_n_best_preds(self):
         """

@@ -262,7 +262,7 @@ class AbstractEvaluator(object):
 
         return err
 
-    def finish_up(self, loss, train_loss,  opt_pred, valid_pred, test_pred,
+    def finish_up(self, loss, train_loss,  train_pred, opt_pred, valid_pred, test_pred,
                   additional_run_info, file_output, final_call, status):
         """This function does everything necessary after the fitting is done:
 
@@ -276,7 +276,7 @@ class AbstractEvaluator(object):
 
         if file_output:
             loss_, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                train_pred, opt_pred, valid_pred, test_pred,
             )
         else:
             loss_ = None
@@ -346,6 +346,7 @@ class AbstractEvaluator(object):
 
     def file_output(
             self,
+            Y_train_pred,
             Y_optimization_pred,
             Y_valid_pred,
             Y_test_pred
@@ -400,6 +401,11 @@ class AbstractEvaluator(object):
             if self.output_y_hat_optimization:
                 self.backend.save_targets_ensemble(self.Y_optimization)
 
+        # This file can be written independently of the others down bellow
+        if ('y_train' not in self.disable_file_output):
+            if self.output_y_hat_optimization:
+                self.backend.save_train_targets_ensemble(self.Y_actual_train)
+
         if hasattr(self, 'models') and len(self.models) > 0 and self.models[0] is not None:
             if ('models' not in self.disable_file_output):
 
@@ -419,6 +425,9 @@ class AbstractEvaluator(object):
             budget=self.budget,
             model=self.model if 'model' not in self.disable_file_output else None,
             cv_model=models if 'cv_model' not in self.disable_file_output else None,
+            train_predictions=(
+                Y_train_pred if 'y_train' not in self.disable_file_output else None
+            ),
             ensemble_predictions=(
                 Y_optimization_pred if 'y_optimization' not in self.disable_file_output else None
             ),

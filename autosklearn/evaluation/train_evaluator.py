@@ -7,6 +7,7 @@ from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit, KFold,
     StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit
 from sklearn.model_selection._split import _RepeatedSplits, BaseShuffleSplit
 
+from autosklearn.util.common import thresholdout
 from autosklearn.evaluation.abstract_evaluator import (
     AbstractEvaluator,
     _fit_and_suppress_warnings,
@@ -19,7 +20,7 @@ from autosklearn.constants import (
 )
 
 
-__all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
+__all__ = ['TrainEvaluator', 'eval_holdout', 'eval_thresholdout', 'eval_iterative_holdout',
            'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative']
 
 __baseCrossValidator_defaults__ = {'GroupKFold': {'n_splits': 3},
@@ -185,6 +186,7 @@ class TrainEvaluator(AbstractEvaluator):
         self.X_train = self.datamanager.data['X_train']
         self.Y_train = self.datamanager.data['Y_train']
         self.Y_optimization = None
+        self.Y_mytrain_optimization = None
         self.Y_targets = [None] * self.num_cv_folds
         self.Y_train_targets = np.ones(self.Y_train.shape) * np.NaN
         self.models = [None] * self.num_cv_folds
@@ -512,7 +514,15 @@ class TrainEvaluator(AbstractEvaluator):
                     self.Y_targets[i],
                     opt_pred,
                 )
-                opt_losses.append(optimization_loss)
+                if self.resampling_strategy == 'thresholdout':
+                    opt_losses.append(thresholdout(
+                        train_loss=train_loss,
+                        holdout_loss=optimization_loss,
+                        thresholdout_scale=self.resampling_strategy_args.get('thresholdout_scale', 0.1),
+                    ))
+                    self.logger.info(f"train_loss={train_loss} optimization_loss={optimization_loss} opt_losses={opt_losses}")
+                else:
+                    opt_losses.append(optimization_loss)
                 # number of optimization data points for this fold. Used for weighting
                 # the average.
                 opt_fold_weights.append(len(test_split))
@@ -545,11 +555,21 @@ class TrainEvaluator(AbstractEvaluator):
                 opt_loss = np.average(opt_losses, weights=opt_fold_weights)
 
             Y_targets = self.Y_targets
-            Y_train_targets = self.Y_train_targets
+
+            # This only makes sense on holdout. Looks like if I print
+            # the original self.Y_train_targets it does not account for the nature
+            # of having folds. Like it has Nans on it, probably because of the way it
+            # is defined. Clean this up if this method works
+            # Because on holdout there is only 1 split, we can use train_split directly
+            Y_train_targets = np.array(self.Y_train_targets[train_split])
 
             Y_optimization_pred = np.concatenate(
                 [Y_optimization_pred[i] for i in range(self.num_cv_folds)
                  if Y_optimization_pred[i] is not None])
+
+            Y_train_pred = np.concatenate(
+                [Y_train_pred[i] for i in range(self.num_cv_folds)
+                 if Y_train_pred[i] is not None])
             Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
                                         if Y_targets[i] is not None])
 
@@ -609,6 +629,7 @@ class TrainEvaluator(AbstractEvaluator):
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
+                train_pred=Y_train_pred,
                 opt_pred=Y_optimization_pred,
                 valid_pred=Y_valid_pred,
                 test_pred=Y_test_pred,
@@ -975,7 +996,8 @@ class TrainEvaluator(AbstractEvaluator):
 
             y = y.ravel()
             if self.resampling_strategy in ['holdout',
-                                            'holdout-iterative-fit']:
+                                            'holdout-iterative-fit',
+                                            'thresholdout']:
 
                 if shuffle:
                     try:
@@ -1009,7 +1031,8 @@ class TrainEvaluator(AbstractEvaluator):
                 raise ValueError(self.resampling_strategy)
         else:
             if self.resampling_strategy in ['holdout',
-                                            'holdout-iterative-fit']:
+                                            'holdout-iterative-fit',
+                                            'thresholdout']:
                 # TODO shuffle not taken into account for this
                 if shuffle:
                     cv = ShuffleSplit(n_splits=1, test_size=test_size,
@@ -1035,6 +1058,47 @@ class TrainEvaluator(AbstractEvaluator):
 
 # create closure for evaluating an algorithm
 def eval_holdout(
+        queue,
+        config,
+        backend,
+        resampling_strategy,
+        resampling_strategy_args,
+        metric,
+        seed,
+        num_run,
+        instance,
+        all_scoring_functions,
+        output_y_hat_optimization,
+        include,
+        exclude,
+        disable_file_output,
+        init_params=None,
+        iterative=False,
+        budget=100.0,
+        budget_type=None,
+):
+    evaluator = TrainEvaluator(
+        backend=backend,
+        queue=queue,
+        resampling_strategy=resampling_strategy,
+        resampling_strategy_args=resampling_strategy_args,
+        metric=metric,
+        configuration=config,
+        seed=seed,
+        num_run=num_run,
+        all_scoring_functions=all_scoring_functions,
+        output_y_hat_optimization=output_y_hat_optimization,
+        include=include,
+        exclude=exclude,
+        disable_file_output=disable_file_output,
+        init_params=init_params,
+        budget=budget,
+        budget_type=budget_type,
+    )
+    evaluator.fit_predict_and_loss(iterative=iterative)
+
+
+def eval_thresholdout(
         queue,
         config,
         backend,

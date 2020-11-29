@@ -118,8 +118,9 @@ class AutoML(BaseEstimator):
                  exclude_estimators=None,
                  include_preprocessors=None,
                  exclude_preprocessors=None,
-                 resampling_strategy='holdout-iterative-fit',
+                 resampling_strategy='thresholdout',
                  resampling_strategy_arguments=None,
+                 ensemble_builder_thresholdout=False,
                  n_jobs=None,
                  dask_client: Optional[dask.distributed.Client] = None,
                  precision=32,
@@ -149,9 +150,12 @@ class AutoML(BaseEstimator):
         self._include_preprocessors = include_preprocessors
         self._exclude_preprocessors = exclude_preprocessors
         self._resampling_strategy = resampling_strategy
+        self._ensemble_builder_thresholdout = ensemble_builder_thresholdout
+        self._ensemble_builder_thresholdout = ensemble_builder_thresholdout
         self._resampling_strategy_arguments = resampling_strategy_arguments \
             if resampling_strategy_arguments is not None else {}
         if self._resampling_strategy not in ['holdout',
+                                             'thresholdout',
                                              'holdout-iterative-fit',
                                              'cv',
                                              'cv-iterative-fit',
@@ -532,6 +536,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  resampling_strategy: %s', str(self._resampling_strategy))
         self._logger.debug('  resampling_strategy_arguments: %s',
                            str(self._resampling_strategy_arguments))
+        self._logger.debug('  ensemble_builder_thresholdout: %s', str(self._ensemble_builder_thresholdout))
         self._logger.debug('  n_jobs: %s', str(self._n_jobs))
         self._logger.debug('  dask_client: %s', str(self._dask_client))
         self._logger.debug('  precision: %s', str(self.precision))
@@ -642,6 +647,8 @@ class AutoML(BaseEstimator):
                 ensemble_memory_limit=self._memory_limit,
                 random_state=self._seed,
                 logger_port=self._logger_port,
+                ensemble_builder_thresholdout=self._ensemble_builder_thresholdout,
+                ensemble_builder_thresholdout_scale=self._resampling_strategy_arguments.get('thresholdout_scale', 0.1),
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -825,7 +832,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'thresholdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit',)
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -929,6 +936,8 @@ class AutoML(BaseEstimator):
             ensemble_memory_limit=self._memory_limit,
             random_state=self._seed,
             logger_port=self._logger_port,
+            ensemble_builder_thresholdout=self._ensemble_builder_thresholdout,
+            ensemble_builder_thresholdout_scale=self._resampling_strategy_arguments.get('thresholdout_scale', 0.1),
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()

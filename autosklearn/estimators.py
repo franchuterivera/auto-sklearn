@@ -28,8 +28,9 @@ class AutoSklearnEstimator(BaseEstimator):
         exclude_estimators=None,
         include_preprocessors=None,
         exclude_preprocessors=None,
-        resampling_strategy='holdout',
+        resampling_strategy='thresholdout',
         resampling_strategy_arguments=None,
+        ensemble_builder_thresholdout=False,
         tmp_folder=None,
         output_folder=None,
         delete_tmp_folder_after_terminate=True,
@@ -114,6 +115,7 @@ class AutoSklearnEstimator(BaseEstimator):
             how to to handle overfitting, might need 'resampling_strategy_arguments'
 
             * 'holdout': 67:33 (train:test) split
+            * 'thresholdout': 67:33 (train:test) split
             * 'holdout-iterative-fit':  67:33 (train:test) split, calls iterative
               fit where possible
             * 'cv': crossvalidation, requires 'folds'
@@ -217,7 +219,7 @@ class AutoSklearnEstimator(BaseEstimator):
             :meth:`autosklearn.metrics.make_scorer`. These are the `Built-in
             Metrics`_.
             If None is provided, a default metric is selected depending on the task.
-            
+
         load_models : bool, optional (True)
             Whether to load the models after fitting Auto-sklearn.
 
@@ -249,6 +251,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self.exclude_preprocessors = exclude_preprocessors
         self.resampling_strategy = resampling_strategy
         self.resampling_strategy_arguments = resampling_strategy_arguments
+        self.ensemble_builder_thresholdout = ensemble_builder_thresholdout
         self.tmp_folder = tmp_folder
         self.output_folder = output_folder
         self.delete_tmp_folder_after_terminate = delete_tmp_folder_after_terminate
@@ -309,6 +312,7 @@ class AutoSklearnEstimator(BaseEstimator):
             exclude_preprocessors=self.exclude_preprocessors,
             resampling_strategy=self.resampling_strategy,
             resampling_strategy_arguments=self.resampling_strategy_arguments,
+            ensemble_builder_thresholdout=self.ensemble_builder_thresholdout,
             n_jobs=self._n_jobs,
             dask_client=self.dask_client,
             get_smac_object_callback=self.get_smac_object_callback,

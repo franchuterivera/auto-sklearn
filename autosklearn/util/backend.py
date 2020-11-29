@@ -237,6 +237,57 @@ class Backend(object):
         return os.path.join(self.internals_directory,
                             "true_targets_ensemble.npy")
 
+    def _get_train_targets_ensemble_filename(self) -> str:
+        return os.path.join(self.internals_directory,
+                            "true_train_targets_ensemble.npy")
+
+    def save_train_targets_ensemble(self, targets: np.ndarray) -> str:
+        self._make_internals_directory()
+        if not isinstance(targets, np.ndarray):
+            raise ValueError('Targets must be of type np.ndarray, but is %s' %
+                             type(targets))
+
+        filepath = self._get_train_targets_ensemble_filename()
+
+        # Try to open the file without locking it, this will reduce the
+        # number of times where we erroneously keep a lock on the ensemble
+        # targets file although the process already was killed
+        try:
+            existing_targets = np.load(filepath, allow_pickle=True)
+            if existing_targets.shape[0] > targets.shape[0] or \
+                    (existing_targets.shape == targets.shape and
+                     np.allclose(existing_targets, targets)):
+
+                return filepath
+        except Exception:
+            pass
+
+        with lockfile.LockFile(filepath):
+            if os.path.exists(filepath):
+                with open(filepath, 'rb') as fh:
+                    existing_targets = np.load(fh, allow_pickle=True)
+                    if existing_targets.shape[0] > targets.shape[0] or \
+                            (existing_targets.shape == targets.shape and
+                             np.allclose(existing_targets, targets)):
+                        return filepath
+
+            with tempfile.NamedTemporaryFile('wb', dir=os.path.dirname(
+                    filepath), delete=False) as fh_w:
+                np.save(fh_w, targets.astype(np.float32))
+                tempname = fh_w.name
+
+            os.rename(tempname, filepath)
+
+        return filepath
+
+    def load_train_targets_ensemble(self) -> np.ndarray:
+        filepath = self._get_train_targets_ensemble_filename()
+
+        with lockfile.LockFile(filepath):
+            with open(filepath, 'rb') as fh:
+                targets = np.load(fh, allow_pickle=True)
+        return targets
+
     def save_targets_ensemble(self, targets: np.ndarray) -> str:
         self._make_internals_directory()
         if not isinstance(targets, np.ndarray):
@@ -374,7 +425,7 @@ class Backend(object):
 
     def save_numrun_to_dir(
         self, seed: int, idx: int, budget: float, model: Optional[Pipeline],
-        cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
+        cv_model: Optional[Pipeline], train_predictions: Optional[np.ndarray], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
     ) -> None:
         runs_directory = self.get_runs_directory()
@@ -390,6 +441,7 @@ class Backend(object):
                 pickle.dump(cv_model, fh, -1)
 
         for preds, subset in (
+            (train_predictions, 'train'),
             (ensemble_predictions, 'ensemble'),
             (valid_predictions, 'valid'),
             (test_predictions, 'test')
