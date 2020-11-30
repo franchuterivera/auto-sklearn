@@ -12,8 +12,8 @@ def test_function(params):
 
 class MetaLearningOptimizer(object):
     def __init__(self, dataset_name, configuration_space,
-                 meta_base, distance='l1', seed=None, use_features=None,
-                 distance_kwargs=None, logger=None):
+                 meta_base, logger, distance='l1', seed=None, use_features=None,
+                 distance_kwargs=None):
         self.dataset_name = dataset_name
         self.configuration_space = configuration_space
         self.meta_base = meta_base

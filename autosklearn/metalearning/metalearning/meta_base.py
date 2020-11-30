@@ -23,7 +23,7 @@ class Instance(object):
 
 
 class MetaBase(object):
-    def __init__(self, configuration_space, aslib_directory, logger=None):
+    def __init__(self, configuration_space, aslib_directory, logger):
         """Container for dataset metadata and experiment results.
 
         Constructor arguments:

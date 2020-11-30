@@ -7,7 +7,7 @@ import sklearn.utils
 
 
 class KNearestDatasets(object):
-    def __init__(self, metric='l1', random_state=None, metric_params=None, logger=None):
+    def __init__(self, logger, metric='l1', random_state=None, metric_params=None):
         self.logger = logger
 
         self.metric = metric
