@@ -76,11 +76,13 @@ class MetaFeaturesTest(TestCase):
             )
         self.helpers.set_value(
             "Skewnesses",
-            self.helpers["Skewnesses"](self.X_transformed, self.y, self.logger, self.categorical_transformed),
+            self.helpers["Skewnesses"](self.X_transformed, self.y,
+                                       self.logger, self.categorical_transformed),
             )
         self.helpers.set_value(
             "Kurtosisses",
-            self.helpers["Kurtosisses"](self.X_transformed, self.y, self.logger, self.categorical_transformed),
+            self.helpers["Kurtosisses"](self.X_transformed, self.y,
+                                        self.logger, self.categorical_transformed),
             )
 
     def tearDown(self):
@@ -134,22 +136,27 @@ class MetaFeaturesTest(TestCase):
     def test_percentage_of_Instances_with_missing_values(self):
         self.mf.set_value(
             "NumberOfInstancesWithMissingValues",
-            self.mf["NumberOfInstancesWithMissingValues"](self.X, self.y, self.logger,  self.categorical),
+            self.mf["NumberOfInstancesWithMissingValues"](
+                self.X, self.y, self.logger,  self.categorical),
             )
-        mf = self.mf["PercentageOfInstancesWithMissingValues"](self.X, self.y, self.logger,  self.categorical)
+        mf = self.mf["PercentageOfInstancesWithMissingValues"](self.X, self.y,
+                                                               self.logger,  self.categorical)
         self.assertAlmostEqual(mf.value, 1.0)
         self.assertIsInstance(mf, MetaFeatureValue)
 
     def test_number_of_features_with_missing_values(self):
-        mf = self.mf["NumberOfFeaturesWithMissingValues"](self.X, self.y, self.logger,  self.categorical)
+        mf = self.mf["NumberOfFeaturesWithMissingValues"](self.X, self.y,
+                                                          self.logger,  self.categorical)
         self.assertEqual(mf.value, 29)
         self.assertIsInstance(mf, MetaFeatureValue)
 
     def test_percentage_of_features_with_missing_values(self):
         self.mf.set_value(
             "NumberOfFeaturesWithMissingValues",
-            self.mf["NumberOfFeaturesWithMissingValues"](self.X, self.y, self.logger,  self.categorical))
-        mf = self.mf["PercentageOfFeaturesWithMissingValues"](self.X, self.y, self.logger,  self.categorical)
+            self.mf["NumberOfFeaturesWithMissingValues"](self.X, self.y,
+                                                         self.logger,  self.categorical))
+        mf = self.mf["PercentageOfFeaturesWithMissingValues"](self.X, self.y,
+                                                              self.logger,  self.categorical)
         self.assertAlmostEqual(mf.value, float(29)/float(38))
         self.assertIsInstance(mf, MetaFeatureValue)
 
@@ -160,7 +167,8 @@ class MetaFeaturesTest(TestCase):
 
     def test_percentage_missing_values(self):
         self.mf.set_value("NumberOfMissingValues",
-                          self.mf["NumberOfMissingValues"](self.X, self.y, self.logger,  self.categorical))
+                          self.mf["NumberOfMissingValues"](self.X, self.y,
+                                                           self.logger,  self.categorical))
         mf = self.mf["PercentageOfMissingValues"](self.X, self.y, self.logger,  self.categorical)
         self.assertAlmostEqual(mf.value, float(22175)/float((38*898)))
         self.assertIsInstance(mf, MetaFeatureValue)
@@ -313,19 +321,23 @@ class MetaFeaturesTest(TestCase):
 
     def test_kurtosis_min(self):
         # TODO: somehow compute the expected output?
-        self.mf["KurtosisMin"](self.X_transformed, self.y, self.logger, self.categorical_transformed)
+        self.mf["KurtosisMin"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_kurtosis_max(self):
         # TODO: somehow compute the expected output?
-        self.mf["KurtosisMax"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["KurtosisMax"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_kurtosis_mean(self):
         # TODO: somehow compute the expected output?
-        self.mf["KurtosisMean"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["KurtosisMean"](self.X_transformed, self.y, self.logger,
+                                self.categorical_transformed)
 
     def test_kurtosis_std(self):
         # TODO: somehow compute the expected output?
-        self.mf["KurtosisSTD"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["KurtosisSTD"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_skewnesses(self):
         mf = self.helpers["Skewnesses"](self.X_transformed, self.y, self.logger,
@@ -334,19 +346,23 @@ class MetaFeaturesTest(TestCase):
 
     def test_skewness_min(self):
         # TODO: somehow compute the expected output?
-        self.mf["SkewnessMin"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["SkewnessMin"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_skewness_max(self):
         # TODO: somehow compute the expected output?
-        self.mf["SkewnessMax"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["SkewnessMax"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_skewness_mean(self):
         # TODO: somehow compute the expected output?
-        self.mf["SkewnessMean"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["SkewnessMean"](self.X_transformed, self.y, self.logger,
+                                self.categorical_transformed)
 
     def test_skewness_std(self):
         # TODO: somehow compute the expected output?
-        self.mf["SkewnessSTD"](self.X_transformed, self.y, self.logger,  self.categorical_transformed)
+        self.mf["SkewnessSTD"](self.X_transformed, self.y, self.logger,
+                               self.categorical_transformed)
 
     def test_class_entropy(self):
         mf = self.mf["ClassEntropy"](self.X, self.y, self.logger,  self.categorical)
@@ -433,7 +449,8 @@ class MetaFeaturesTest(TestCase):
         self.helpers["PCA"](self.X_transformed, self.y, self.logger)
 
     def test_pca_95percent(self):
-        mf = self.mf["PCAFractionOfComponentsFor95PercentVariance"](self.X_transformed, self.y, self.logger)
+        mf = self.mf["PCAFractionOfComponentsFor95PercentVariance"](
+            self.X_transformed, self.y, self.logger)
         self.assertAlmostEqual(0.2716049382716049, mf.value)
 
     def test_pca_kurtosis_first_pc(self):

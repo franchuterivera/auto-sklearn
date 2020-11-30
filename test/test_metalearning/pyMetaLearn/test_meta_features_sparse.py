@@ -95,11 +95,13 @@ class SparseMetaFeaturesTest(test_meta_features.MetaFeaturesTest,
             )
         self.helpers.set_value(
             "Skewnesses",
-            self.helpers["Skewnesses"](self.X_transformed, self.y, self.logger, self.categorical_transformed),
+            self.helpers["Skewnesses"](self.X_transformed, self.y, self.logger,
+                                       self.categorical_transformed),
             )
         self.helpers.set_value(
             "Kurtosisses",
-            self.helpers["Kurtosisses"](self.X_transformed, self.y, self.logger, self.categorical_transformed),
+            self.helpers["Kurtosisses"](self.X_transformed, self.y, self.logger,
+                                        self.categorical_transformed),
             )
 
     def test_missing_values(self):
