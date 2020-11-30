@@ -584,6 +584,11 @@ class EnsembleBuilder(object):
                     time_left = end_at - current_time
 
             if time_left - time_buffer < 1:
+                self.logger.debug(
+                    'Not starting iteration %d, as time left: %f',
+                    iteration,
+                    time_left,
+                )
                 break
             context = multiprocessing.get_context(pynisher_context)
             safe_ensemble_script = pynisher.enforce_limits(

@@ -111,6 +111,16 @@ class AutoMLLogParser(object):
             if match:
                 iterations_from_inside_ensemble_builder.append(int(match.group(1)))
 
+            # The ensemble builder might not be called if there is no time.
+            # Here we expect the msg:
+            # [DEBUG] [2020-11-27 20:27:28,044:EnsembleBuilder] Not starting iteration 2,
+            # as time left: 1.59324
+            match = re.search(
+                r'EnsembleBuilder]\s+Not starting iteration (\d+)',
+                line)
+            if match:
+                iterations_from_inside_ensemble_builder.append(int(match.group(1)))
+
         assert iterations == iterations_from_inside_ensemble_builder, "{} ! {}".format(
             iterations, iterations_from_inside_ensemble_builder
         )
