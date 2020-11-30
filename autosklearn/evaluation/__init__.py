@@ -1,5 +1,6 @@
 # -*- encoding: utf-8 -*-
 import functools
+import logging
 import json
 import math
 import multiprocessing
@@ -256,12 +257,16 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
         if self.init_params is not None:
             init_params.update(self.init_params)
 
-        arguments = dict(
-            logger=get_named_client_logger(
+        if self.port is None:
+            logger = logging.getLogger("pynisher")
+        else:
+            logger = get_named_client_logger(
                 name="pynisher",
                 output_dir=self.backend.temporary_directory,
                 port=self.port,
-            ),
+            )
+        arguments = dict(
+            logger=logger,
             wall_time_in_s=cutoff,
             mem_in_mb=self.memory_limit,
             capture_output=True,

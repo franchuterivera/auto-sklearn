@@ -3,7 +3,6 @@ if __name__ == '__main__':
     import argparse
     import json
     import logging
-    import logging.handlers
     import os
     import shutil
     import sys
@@ -151,7 +150,7 @@ if __name__ == '__main__':
                                         include=include,
                                         metric=automl_arguments['metric'],
                                         cost_for_crash=get_cost_of_crash(automl_arguments['metric']),
-                                        port=logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+                                        port=None,
                                         abort_on_first_run_crash=False,)
             run_info, run_value = ta.run_wrapper(
                 RunInfo(

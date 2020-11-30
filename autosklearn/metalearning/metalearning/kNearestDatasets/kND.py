@@ -1,5 +1,3 @@
-import warnings
-
 import numpy as np
 import pandas as pd
 
@@ -141,12 +139,8 @@ class KNearestDatasets(object):
                 dataset_name]
 
             if best_configuration is None:
-                if self.logger is not None:
-                    self.logger.warning("Found no best configuration for instance "
-                                        "%s" % dataset_name)
-                else:
-                    warnings.warn("Found no best configuration for instance "
-                                  "%s" % dataset_name)
+                self.logger.warning("Found no best configuration for instance "
+                                    "%s" % dataset_name)
                 continue
 
             if exclude_double_configurations:

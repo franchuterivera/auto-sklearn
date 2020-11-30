@@ -1,5 +1,3 @@
-import warnings
-
 import pandas as pd
 
 from ..input import aslib_simple
@@ -50,10 +48,7 @@ class MetaBase(object):
                 configurations[str(algorithm_id)] = \
                     (Configuration(configuration_space, values=configuration))
             except (ValueError, KeyError) as e:
-                if self.logger is not None:
-                    self.logger.debug("Error reading configurations: %s", e)
-                else:
-                    warnings.warn("Error reading configurations: {}".format(e))
+                self.logger.debug("Error reading configurations: %s", e)
 
         self.configurations = configurations
 
@@ -63,14 +58,9 @@ class MetaBase(object):
             data_ = {mf.name: mf.value for mf in metafeatures.metafeature_values.values()}
             metafeatures = pd.Series(name=name, data=data_)
         if name.lower() in self.metafeatures.index:
-            if self.logger is not None:
-                self.logger.warning(
-                    'Dataset %s already in meta-data. Removing occurence.', name
-                )
-            else:
-                warnings.warn(
-                    'Dataset {} already in meta-data. Removing occurence.'.format(name)
-                )
+            self.logger.warning(
+                'Dataset %s already in meta-data. Removing occurence.', name.lower()
+            )
             self.metafeatures.drop(name.lower(), inplace=True)
         self.metafeatures = self.metafeatures.append(metafeatures)
 
@@ -104,11 +94,8 @@ class MetaBase(object):
         """This is inside an extra function for testing purpose"""
         # Load the task
 
-        if self.logger is not None:
-            self.logger.info("Going to use the following metafeature subset: %s",
-                             features)
-        else:
-            warnings.warn("Going to use the following metafeature subset: {}".format(features))
+        self.logger.info("Going to use the following metafeature subset: %s",
+                         features)
         all_metafeatures = self.metafeatures
         all_metafeatures = all_metafeatures.loc[:, features]
 

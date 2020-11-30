@@ -1,3 +1,5 @@
+import typing
+import logging
 import time
 import warnings
 
@@ -109,7 +111,7 @@ def _fit_and_suppress_warnings(logger, model, X, y):
 
 class AbstractEvaluator(object):
     def __init__(self, backend, queue, metric,
-                 port,
+                 port: typing.Optional[int],
                  configuration=None,
                  scoring_functions=None,
                  seed=1,
@@ -188,11 +190,15 @@ class AbstractEvaluator(object):
 
         logger_name = '%s(%d):%s' % (self.__class__.__name__.split('.')[-1],
                                      self.seed, self.datamanager.name)
-        self.logger = get_named_client_logger(
-            name=logger_name,
-            port=self.port,
-            output_dir=self.backend.temporary_directory,
-        )
+
+        if self.port is None:
+            self.logger = logging.getLogger(__name__)
+        else:
+            self.logger = get_named_client_logger(
+                name=logger_name,
+                port=self.port,
+                output_dir=self.backend.temporary_directory,
+            )
 
         self.Y_optimization = None
         self.Y_actual_train = None

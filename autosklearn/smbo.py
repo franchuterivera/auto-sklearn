@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import os
 import time
 import traceback
@@ -272,11 +273,14 @@ class AutoMLSMBO(object):
 
         dataset_name_ = "" if dataset_name is None else dataset_name
         logger_name = '%s(%d):%s' % (self.__class__.__name__, self.seed, ":" + dataset_name_)
-        self.logger = get_named_client_logger(
-            name=logger_name,
-            output_dir=self.backend.temporary_directory,
-            port=self.port,
-        )
+        if port is None:
+            self.logger = logging.getLogger(__name__)
+        else:
+            self.logger = get_named_client_logger(
+                name=logger_name,
+                output_dir=self.backend.temporary_directory,
+                port=self.port,
+            )
 
     def _send_warnings_to_log(self, message, category, filename, lineno,
                               file=None, line=None):
