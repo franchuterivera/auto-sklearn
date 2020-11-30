@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 import time
 import unittest.mock
 
@@ -126,7 +127,8 @@ def dask_client(request):
     """
 
     dask.config.set({'distributed.worker.daemon': False})
-    client = Client(n_workers=2, threads_per_worker=1, processes=True)
+    client = Client(n_workers=2, threads_per_worker=1, processes=True,
+                    local_directory=tempfile.gettempdir())
     print("Started Dask client={}\n".format(client))
 
     def get_finalizer(address):

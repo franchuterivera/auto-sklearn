@@ -82,9 +82,11 @@ class BackendContext(object):
             )
         )
         self._output_directory = output_directory
-        # We create a dummy logger to start with
-        # Then, when a port is available we can create a
-        # client logger
+        # Auto-Sklearn logs through the use of a PicklableClientLogger
+        # For this reason we need a port to communicate with the server
+        # When the backend is created, this port is not available
+        # When the port is available in the main process, we
+        # call the setup_logger with this port and update self.logger
         self.logger = None  # type: Optional[PicklableClientLogger]
         self.create_directories()
         # This is the first place the logger gets created.
@@ -170,6 +172,9 @@ class Backend(object):
     """
 
     def __init__(self, context: BackendContext):
+        # When the backend is created, this port is not available
+        # When the port is available in the main process, we
+        # call the setup_logger with this port and update self.logger
         self.logger = None  # type: Optional[PicklableClientLogger]
         self.context = context
 
