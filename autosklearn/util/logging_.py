@@ -10,6 +10,7 @@ import socketserver
 import struct
 import threading
 from typing import Any, Dict, Optional, Type
+import tempfile
 
 import yaml
 
@@ -18,6 +19,8 @@ def setup_logger(output_file: Optional[str] = None, logging_config: Optional[Dic
                  ) -> None:
     # logging_config must be a dictionary object specifying the configuration
     # for the loggers to be used in auto-sklearn.
+    if output_file is None:
+        output_file = os.path.join(tempfile.gettempdir(), 'autosklearn.log')
     if logging_config is not None:
         if output_file is not None:
             logging_config['handlers']['file_handler']['filename'] = output_file
