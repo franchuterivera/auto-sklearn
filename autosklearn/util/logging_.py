@@ -11,7 +11,6 @@ import socketserver
 import struct
 import threading
 from typing import Any, Dict, Optional, Type
-import tempfile
 
 import yaml
 
