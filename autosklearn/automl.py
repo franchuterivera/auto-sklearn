@@ -547,6 +547,9 @@ class AutoML(BaseEstimator):
             self._initial_configurations_via_metalearning,
         )
         self._logger.debug('  ensemble_size: %d', self._ensemble_size)
+        self._logger.debug('  bbc_cv_strategy: %s', self.bbc_cv_strategy)
+        self._logger.debug('  bbc_cv_sample_size: %s', self.bbc_cv_sample_size)
+        self._logger.debug('  bbc_cv_n_bootstrap: %s', self.bbc_cv_n_bootstrap)
         self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
@@ -670,6 +673,9 @@ class AutoML(BaseEstimator):
                 ensemble_memory_limit=self._memory_limit,
                 random_state=self._seed,
                 logger_port=self._logger_port,
+                bbc_cv_strategy=self.bbc_cv_strategy,
+                bbc_cv_sample_size=self.bbc_cv_sample_size,
+                bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
