@@ -58,6 +58,9 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         ensemble_memory_limit: Optional[int],
         random_state: int,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+        bbc_cv_strategy: Optional[str] = None,
+        bbc_cv_sample_size: float = 0.20,
+        bbc_cv_n_bootstrap: float = 100,
     ):
         """ SMAC callback to handle ensemble building
 
@@ -128,6 +131,9 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_memory_limit = ensemble_memory_limit
         self.random_state = random_state
         self.logger_port = logger_port
+        self.bbc_cv_strategy = bbc_cv_strategy
+        self.bbc_cv_sample_size = bbc_cv_sample_size
+        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
 
         # Store something similar to SMAC's runhistory
         self.history = []
@@ -225,6 +231,9 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     priority=100,
                     pynisher_context=pynisher_context,
                     logger_port=self.logger_port,
+                    bbc_cv_strategy=self.bbc_cv_strategy,
+                    bbc_cv_sample_size=self.bbc_cv_sample_size,
+                    bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
                 ))
 
                 logger.info(
@@ -263,6 +272,9 @@ def fit_and_return_ensemble(
     return_predictions: bool,
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    bbc_cv_strategy: Optional[str] = None,
+    bbc_cv_sample_size: float = 0.20,
+    bbc_cv_n_bootstrap: float = 100,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
         int,
@@ -341,6 +353,9 @@ def fit_and_return_ensemble(
         read_at_most=read_at_most,
         random_state=random_state,
         logger_port=logger_port,
+        bbc_cv_strategy=bbc_cv_strategy,
+        bbc_cv_sample_size=bbc_cv_sample_size,
+        bbc_cv_n_bootstrap=bbc_cv_n_bootstrap,
     ).run(
         end_at=end_at,
         iteration=iteration,
@@ -557,6 +572,9 @@ class EnsembleBuilder(object):
         # The automl generates bootstrap so that consumers like SMAC and ensemble
         # can read them, making sure OOB predictions are linked
         self.prediction_indices_inb = None
+        self.logger.debug(f"bbc_cv_strategy={self.bbc_cv_strategy}")
+        self.logger.debug(f"self.bbc_cv_sample_size={self.bbc_cv_sample_size}")
+        self.logger.debug(f"iself.bbc_cv_n_bootstrap={self.bbc_cv_n_bootstrap}")
         # ---------------------------------------------------------------------
 
     def run(
