@@ -89,11 +89,6 @@ class BackendContext(object):
         # call the setup_logger with this port and update self.logger
         self.logger = None  # type: Optional[PicklableClientLogger]
         self.create_directories()
-        # This is the first place the logger gets created.
-        # We want to make sure any logging forward sets the correct directory
-        # were all files should be created
-        logging.setup_logger(output_dir=self._temporary_directory)
-        self._logger = logging.get_logger(__name__)
 
     def setup_logger(self, port: int) -> None:
         self._logger = get_named_client_logger(

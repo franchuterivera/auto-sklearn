@@ -10,6 +10,7 @@ import select
 import socketserver
 import struct
 import threading
+import uuid
 from typing import Any, Dict, Optional, Type
 
 import yaml
@@ -39,61 +40,7 @@ def setup_logger(
             output_dir, distributedlog_filename
         )
 
-    # Applying the configuration is expensive, because logging.config.dictConfig
-    # reconstruct the logging singletons each time it is called. We only call it when
-    # needed, and to do so, we created a initialized attributed to control if a logger
-    # was created
-    if not is_logging_config_applied(logging_config):
-        logging.config.dictConfig(logging_config)
-        for logger_name in list(logging_config['loggers'].keys()) + ['root']:
-            if logger_name == 'root':
-                logger = logging.getLogger()
-            else:
-                logger = logging.getLogger(logger_name)
-            setattr(logger, 'initialized', True)
-
-
-def is_logging_config_applied(logging_config: Dict) -> bool:
-    """
-    This functions check if the provided logging config is already applied to the environment.
-    if it is not the case, it returns false.
-
-    The motivation towards this checking is that in multiprocessing the loggers might be lost,
-    because a new worker in a new node might not have the logger configuration setup.
-
-    Parameters
-    ----------
-    logging_config: (Dict)
-        A logging configuration following the format specified in
-        https://docs.python.org/3/library/logging.config.html
-
-    Returns
-    -------
-    (bool)
-        True if a configuration has already been applied to the environment
-    """
-
-    # The logging config is a dictionary with
-    # dict_keys(['version', 'disable_existing_loggers', 'formatters', 'handlers',
-    # 'root', 'loggers']) . There are 2 things to check. Whether the logger changed
-    # or whether the handlers changed
-
-    # Check the loggers
-    for logger_name in list(logging_config['loggers'].keys()) + ['root']:
-
-        if logger_name == 'root':
-            logger = logging.getLogger()
-        else:
-            logger = logging.getLogger(logger_name)
-
-        # Checking for the contents of the logging config is not feasible as the
-        # logger uses a hierarchical structure, so depending on where this function is
-        # called, the logger_name requires the full hierarchy (like autosklearn.automl)
-        # But because loggers are singletons we can rely on the initialized attribute we
-        # set on them on creation
-        if not hasattr(logger, 'initialized'):
-            return False
-    return True
+    logging.config.dictConfig(logging_config)
 
 
 def _create_logger(name: str) -> logging.Logger:
@@ -240,13 +187,7 @@ def _get_named_client_logger(
 
     # local_logger is mainly used to create a TCP record which is going to be formatted
     # and handled by the main logger server. The main logger server sets up the logging format
-    # that is desired, so we just make sure of two things.
-    # First the local_logger below should not have extra handlers, or else we will be unecessarily
-    # dumping more messages, in addition to the Socket handler we create below
-    # Second, during each multiprocessing spawn, a logger is created
-    # via the logger __setstate__, which is expensive. This is better handled with using
-    # the multiprocessing logger
-    local_logger = multiprocessing.get_logger()
+    local_logger = _create_logger(str(uuid.uuid4()))
 
     # Under this perspective, we print every msg (DEBUG) and let the server decide what to
     # dump. Also, the no propagate disable the root setup to interact with the client
@@ -257,7 +198,8 @@ def _get_named_client_logger(
     # The logger is a singleton, but the logger.handlers is a list. So we need to
     # check if it already has a socket handler on it
     socketHandler = logging.handlers.SocketHandler(host, port)
-    if not any([handler for handler in local_logger.handlers if 'SocketHandler' in str(handler)]):
+    registered_ports = [hdr.port for hdr in local_logger.handlers if 'SocketHandler' in str(hdr)]
+    if port not in registered_ports:
         local_logger.addHandler(socketHandler)
 
     return local_logger
