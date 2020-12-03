@@ -23,12 +23,12 @@ from autosklearn.metrics import accuracy, r2, f1_macro
 
 this_directory = os.path.dirname(__file__)
 sys.path.append(this_directory)
-from evaluation_util import (
+from evaluation_util import (  # noqa (E402: module level import not at top of file)
     get_evaluation_backend,
     get_dataset_getters,
     BaseEvaluatorTest,
     get_multiclass_classification_datamanager,
-    SCORER_LIST,
+    SCORER_LIST
 )  # noqa (E402: module level import not at top of file)
 
 

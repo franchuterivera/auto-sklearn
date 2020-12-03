@@ -194,13 +194,8 @@ def _get_named_client_logger(
     local_logger.propagate = False
     local_logger.setLevel(logging.DEBUG)
 
-    # We also need to make sure that we only have a single socket handler.
-    # The logger is a singleton, but the logger.handlers is a list. So we need to
-    # check if it already has a socket handler on it
     socketHandler = logging.handlers.SocketHandler(host, port)
-    registered_ports = [hdr.port for hdr in local_logger.handlers if 'SocketHandler' in str(hdr)]
-    if port not in registered_ports:
-        local_logger.addHandler(socketHandler)
+    local_logger.addHandler(socketHandler)
 
     return local_logger
 
