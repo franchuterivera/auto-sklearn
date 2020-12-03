@@ -38,7 +38,62 @@ def setup_logger(
     logging_config['handlers']['distributed_logfile']['filename'] = os.path.join(
             output_dir, distributedlog_filename
         )
-    logging.config.dictConfig(logging_config)
+
+    # Applying the configuration is expensive, because logging.config.dictConfig
+    # reconstruct the logging singletons each time it is called. We only call it when
+    # needed, and to do so, we created a initialized attributed to control if a logger
+    # was created
+    if not is_logging_config_applied(logging_config):
+        logging.config.dictConfig(logging_config)
+        for logger_name in list(logging_config['loggers'].keys()) + ['root']:
+            if logger_name == 'root':
+                logger = logging.getLogger()
+            else:
+                logger = logging.getLogger(logger_name)
+            setattr(logger, 'initialized', True)
+
+
+def is_logging_config_applied(logging_config: Dict):
+    """
+    This functions check if the provided logging config is already applied to the environment.
+    if it is not the case, it returns false.
+
+    The motivation towards this checking is that in multiprocessing the loggers might be lost,
+    because a new worker in a new node might not have the logger configuration setup.
+
+    Parameters
+    ----------
+    logging_config: (Dict)
+        A logging configuration following the format specified in
+        https://docs.python.org/3/library/logging.config.html
+
+    Returns
+    -------
+    (bool)
+        True if a configuration has already been applied to the environment
+    """
+
+    # The logging config is a dictionary with
+    # dict_keys(['version', 'disable_existing_loggers', 'formatters', 'handlers',
+    # 'root', 'loggers']) . There are 2 things to check. Whether the logger changed
+    # or whether the handlers changed
+
+    # Check the loggers
+    for logger_name in list(logging_config['loggers'].keys()) + ['root']:
+
+        if logger_name == 'root':
+            logger = logging.getLogger()
+        else:
+            logger = logging.getLogger(logger_name)
+
+        # Checking for the contents of the logging config is not feasible as the
+        # logger uses a hierarchical structure, so depending on where this function is
+        # called, the logger_name requires the full hierarchy (like autosklearn.automl)
+        # But because loggers are singletons we can rely on the initialized attribute we
+        # set on them on creation
+        if not hasattr(logger, 'initialized'):
+            return False
+    return True
 
 
 def _create_logger(name: str) -> logging.Logger:
@@ -57,7 +112,6 @@ class PicklableClientLogger(object):
         self.logging_config = logging_config
         self.logger = _get_named_client_logger(
             output_dir=self.output_dir,
-            name=self.name,
             host=self.host,
             port=self.port,
             logging_config=self.logging_config,
@@ -95,33 +149,35 @@ class PicklableClientLogger(object):
         self.filename = state['filename']
         self.logger = _get_named_client_logger(
             output_dir=self.output_dir,
-            name=self.name,
             host=self.host,
             port=self.port,
             logging_config=self.logging_config,
             filename=self.filename,
         )
 
+    def format(self, msg):
+        return "[{}] {}".format(self.name, msg)
+
     def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.debug(msg, *args, **kwargs)
+        self.logger.debug(self.format(msg), *args, **kwargs)
 
     def info(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.info(msg, *args, **kwargs)
+        self.logger.info(self.format(msg), *args, **kwargs)
 
     def warning(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.warning(msg, *args, **kwargs)
+        self.logger.warning(self.format(msg), *args, **kwargs)
 
     def error(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.error(msg, *args, **kwargs)
+        self.logger.error(self.format(msg), *args, **kwargs)
 
     def exception(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.exception(msg, *args, **kwargs)
+        self.logger.exception(self.format(msg), *args, **kwargs)
 
     def critical(self, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.critical(msg, *args, **kwargs)
+        self.logger.critical(self.format(msg), *args, **kwargs)
 
     def log(self, level: int, msg: str, *args: Any, **kwargs: Any) -> None:
-        self.logger.log(level, msg, *args, **kwargs)
+        self.logger.log(level, self.format(msg), *args, **kwargs)
 
     def isEnabledFor(self, level: int) -> bool:
         return self.logger.isEnabledFor(level)
@@ -148,7 +204,6 @@ def get_named_client_logger(
 
 def _get_named_client_logger(
     output_dir: str,
-    name: str,
     host: str = 'localhost',
     port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
     filename: Optional[str] = None,
@@ -169,8 +224,6 @@ def _get_named_client_logger(
     ----------
         output_dir: (str)
             The location where the named log will be created
-        name: (str)
-            the name of the logger, used to tag the messages in the main log
         host: (str)
             Address of where the server is gonna look for messages
         port: (str)
@@ -184,21 +237,28 @@ def _get_named_client_logger(
     -------
         local_loger: a logger object that has a socket handler
     """
-    # Setup the logger configuration
-    setup_logger(
-        output_dir=output_dir,
-        filename=filename,
-        logging_config=logging_config,
-    )
 
-    local_logger = _create_logger(name)
+    # local_logger is mainly used to create a TCP record which is going to be formatted
+    # and handled by the main logger server. The main logger server sets up the logging format
+    # that is desired, so we just make sure of two things.
+    # First the local_logger below should not have extra handlers, or else we will be unecessarily
+    # dumping more messages, in addition to the Socket handler we create below
+    # Second, during each multiprocessing spawn, a logger is created
+    # via the logger __setstate__, which is expensive. This is better handled with using
+    # the multiprocessing logger
+    local_logger = multiprocessing.get_logger()
 
-    # Remove any handler, so that the server handles
-    # how to process the message
-    local_logger.handlers.clear()
+    # Under this perspective, we print every msg (DEBUG) and let the server decide what to
+    # dump. Also, the no propagate disable the root setup to interact with the client
+    local_logger.propagate = False
+    local_logger.setLevel(logging.DEBUG)
 
+    # We also need to make sure that we only have a single socket handler.
+    # The logger is a singleton, but the logger.handlers is a list. So we need to
+    # check if it already has a socket handler on it
     socketHandler = logging.handlers.SocketHandler(host, port)
-    local_logger.addHandler(socketHandler)
+    if not any([handler for handler in local_logger.handlers if 'SocketHandler' in str(handler)]):
+        local_logger.addHandler(socketHandler)
 
     return local_logger
 

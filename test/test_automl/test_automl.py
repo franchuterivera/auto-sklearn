@@ -335,9 +335,10 @@ def test_automl_outputs(backend, dask_client):
     parser = AutoMLLogParser(logfile)
 
     # The number of ensemble trajectories properly in log file
-    total_success_ensemble_iterations_auto = len(auto.ensemble_performance_history)
-    total_success_ensemble_iterations_log = parser.count_ensembler_success_pynisher_calls()
-    assert total_success_ensemble_iterations_auto == total_success_ensemble_iterations_log
+    success_ensemble_iters_auto = len(auto.ensemble_performance_history)
+    success_ensemble_iters_log = parser.count_ensembler_success_pynisher_calls()
+    assert success_ensemble_iters_auto == success_ensemble_iters_log, print_debug_information(
+        auto)
 
     # We also care that no iteration got lost
     # This is important because it counts for pynisher calls

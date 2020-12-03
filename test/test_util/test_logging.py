@@ -1,15 +1,21 @@
+import copy
 import os
 import unittest
 import logging
 import logging.config
 import tempfile
 import yaml
+from importlib import reload
 
 
 from autosklearn.util import logging_
 
 
 class LoggingTest(unittest.TestCase):
+    def setUp(self):
+        # We need a clean start for the logging
+        logging.shutdown()
+        reload(logging)
 
     def test_setup_logger(self):
         # Test that setup_logger function correctly configures the logger
@@ -36,6 +42,8 @@ class LoggingTest(unittest.TestCase):
         self.assertEqual(logging.getLogger().getEffectiveLevel(), 10)
 
         # Make sure we log to the desired directory
+        # We have to call setup again, to clean the past logging
+        self.setUp()
         logging_.setup_logger(output_dir=os.path.dirname(__file__),
                               filename='test.log'
                               )
@@ -45,3 +53,30 @@ class LoggingTest(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), 'test.log')) as fh:
             self.assertIn('test_setup_logger', ''.join(fh.readlines()))
         os.remove(os.path.join(os.path.dirname(__file__), 'test.log'))
+
+    def test_setup_logger_called_when_needed(self):
+
+        # Create the testing configuration
+        with open(os.path.join(os.path.dirname(__file__), 'example_config.yaml'), 'r') as fh:
+            example_config = yaml.safe_load(fh)
+
+        logging_config = copy.deepcopy(example_config)
+        output_dir = tempfile.gettempdir()
+        filename = logging_config['handlers']['file_handler']['filename']
+        logging_config['handlers']['file_handler']['filename'] = os.path.join(
+            output_dir, filename
+        )
+        distributedlog_filename = logging_config['handlers']['distributed_logfile']['filename']
+        logging_config['handlers']['distributed_logfile']['filename'] = os.path.join(
+            output_dir, distributedlog_filename
+        )
+
+        # We have not yet sourced any configuration
+        self.assertFalse(logging_.is_logging_config_applied(logging_config=logging_config))
+
+        # Then setup the logging config
+        logging_.setup_logger(logging_config=example_config,
+                              output_dir=tempfile.gettempdir())
+
+        # Then here we do not expect the configuration to change
+        self.assertTrue(logging_.is_logging_config_applied(logging_config=logging_config))
