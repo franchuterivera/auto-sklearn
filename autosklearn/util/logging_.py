@@ -53,7 +53,7 @@ def setup_logger(
             setattr(logger, 'initialized', True)
 
 
-def is_logging_config_applied(logging_config: Dict):
+def is_logging_config_applied(logging_config: Dict) -> bool:
     """
     This functions check if the provided logging config is already applied to the environment.
     if it is not the case, it returns false.
@@ -155,7 +155,7 @@ class PicklableClientLogger(object):
             filename=self.filename,
         )
 
-    def format(self, msg):
+    def format(self, msg: str) -> str:
         return "[{}] {}".format(self.name, msg)
 
     def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
