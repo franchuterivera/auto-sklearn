@@ -10,7 +10,6 @@ import select
 import socketserver
 import struct
 import threading
-import uuid
 from typing import Any, Dict, Optional, Type
 
 import yaml
@@ -187,7 +186,13 @@ def _get_named_client_logger(
 
     # local_logger is mainly used to create a TCP record which is going to be formatted
     # and handled by the main logger server. The main logger server sets up the logging format
-    local_logger = _create_logger(str(uuid.uuid4()))
+    # that is desired, so we just make sure of two things.
+    # First the local_logger below should not have extra handlers, or else we will be unecessarily
+    # dumping more messages, in addition to the Socket handler we create below
+    # Second, during each multiprocessing spawn, a logger is created
+    # via the logger __setstate__, which is expensive. This is better handled with using
+    # the multiprocessing logger
+    local_logger = multiprocessing.get_logger()
 
     # Under this perspective, we print every msg (DEBUG) and let the server decide what to
     # dump. Also, the no propagate disable the root setup to interact with the client
