@@ -33,12 +33,6 @@ def setup_logger(
         output_dir, filename
     )
 
-    if distributedlog_filename is None:
-        distributedlog_filename = logging_config['handlers']['distributed_logfile']['filename']
-    logging_config['handlers']['distributed_logfile']['filename'] = os.path.join(
-            output_dir, distributedlog_filename
-        )
-
     logging.config.dictConfig(logging_config)
 
 
@@ -196,7 +190,7 @@ def _get_named_client_logger(
     # via the logger __setstate__, which is expensive. This is better handled with using
     # the multiprocessing logger
     #local_logger = multiprocessing.get_logger()
-    local_logger = multiprocessing.get_logger('Client-' + name)
+    local_logger = logging.getLogger('Client-' + name)
 
     # Under this perspective, we print every msg (DEBUG) and let the server decide what to
     # dump. Also, the no propagate disable the root setup to interact with the client
