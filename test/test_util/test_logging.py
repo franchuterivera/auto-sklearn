@@ -1,12 +1,9 @@
-import copy
 import os
 import unittest
 import logging
 import logging.config
 import tempfile
 import yaml
-from importlib import reload
-
 
 from autosklearn.util import logging_
 
