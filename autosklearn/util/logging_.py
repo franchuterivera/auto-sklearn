@@ -57,6 +57,7 @@ class PicklableClientLogger(object):
         self.filename = filename
         self.logging_config = logging_config
         self.logger = _get_named_client_logger(
+            name=self.name,
             output_dir=self.output_dir,
             host=self.host,
             port=self.port,
@@ -94,6 +95,7 @@ class PicklableClientLogger(object):
         self.logging_config = state['logging_config']
         self.filename = state['filename']
         self.logger = _get_named_client_logger(
+            name=self.name,
             output_dir=self.output_dir,
             host=self.host,
             port=self.port,
@@ -149,6 +151,7 @@ def get_named_client_logger(
 
 
 def _get_named_client_logger(
+    name: str,
     output_dir: str,
     host: str = 'localhost',
     port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
@@ -192,7 +195,8 @@ def _get_named_client_logger(
     # Second, during each multiprocessing spawn, a logger is created
     # via the logger __setstate__, which is expensive. This is better handled with using
     # the multiprocessing logger
-    local_logger = multiprocessing.get_logger()
+    #local_logger = multiprocessing.get_logger()
+    local_logger = multiprocessing.get_logger('Client-' + name)
 
     # Under this perspective, we print every msg (DEBUG) and let the server decide what to
     # dump. Also, the no propagate disable the root setup to interact with the client
