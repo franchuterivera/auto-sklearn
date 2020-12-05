@@ -916,6 +916,7 @@ class AutoML(BaseEstimator):
                              '%s' % (str(list(self.ensemble_indices_.keys())),
                                      str(list(self.models_.keys()))))
 
+        print(f"Using to predict = {self.ensemble_}")
         predictions = self.ensemble_.predict(all_predictions)
 
         if self._task not in REGRESSION_TASKS:

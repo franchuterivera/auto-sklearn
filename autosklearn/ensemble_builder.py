@@ -121,7 +121,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.dataset_name = dataset_name
         self.task = task
         self.metric = metric
-        self.ensemble_size = ensemble_size
+        self.ensemble_size = int(ensemble_size)
         self.ensemble_nbest = ensemble_nbest
         self.max_models_on_disc = max_models_on_disc
         self.seed = seed
@@ -132,8 +132,19 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.random_state = random_state
         self.logger_port = logger_port
         self.bbc_cv_strategy = bbc_cv_strategy
-        self.bbc_cv_sample_size = bbc_cv_sample_size
-        self.bbc_cv_n_bootstrap = bbc_cv_n_bootstrap
+        if bbc_cv_strategy not in [
+            'autosklearnBBCScoreEnsemble',
+            'autosklearnBBCEnsembleSelection',
+            'autosklearnBBCEnsembleSelectionNoPreSelect',
+            'autosklearnBBCEnsembleSelectionPreSelectInES',
+            'bagging',
+            None
+        ]:
+            raise ValueError(f"Unsupported Strategy={self.bbc_cv_strategy}")
+
+        self.bbc_cv_sample_size = float(bbc_cv_sample_size)
+        self.bbc_cv_n_bootstrap = int(bbc_cv_n_bootstrap)
+        print(f"self.ensemble_size={self.ensemble_size} and strategy={self.bbc_cv_strategy} with self.bbc_cv_sample_size={self.bbc_cv_sample_size} self.bbc_cv_n_bootstrap={self.bbc_cv_n_bootstrap}")
 
         # Store something similar to SMAC's runhistory
         self.history = []
@@ -744,6 +755,7 @@ class EnsembleBuilder(object):
 
         # Save the ensemble for later use in the main auto-sklearn module!
         if ensemble is not None and self.SAVE2DISC:
+            print(f"Created an ensemble that looks like ={ensemble}")
             self.backend.save_ensemble(ensemble, iteration, self.seed)
 
         # Delete files of non-candidate models - can only be done after fitting the ensemble and
@@ -756,6 +768,12 @@ class EnsembleBuilder(object):
             pickle.dump(self.read_scores, memory)
 
         if ensemble is not None:
+            self.logger.info("Created ensemble with {}".format(
+                  '\n'.join([str(z) for z in zip(ensemble.weights_.tolist(), ensemble.identifiers_)]),
+            ))
+            print("Created ensemble with {}".format(
+                  '\n'.join([str(z) for z in zip(ensemble.weights_.tolist(), ensemble.identifiers_)]),
+            ))
             train_pred = self.predict(set_="train",
                                       ensemble=ensemble,
                                       selected_keys=candidate_models,
@@ -994,6 +1012,10 @@ class EnsembleBuilder(object):
 
             # Bootstrap is saved with the true targets for optimizations.
             # It has to be available at this point
+            if not os.path.exists(self.backend._get_bootstrap_inb_filename()):
+                self.logger.info("Ensemble bootstrap not found. Generating it")
+                self.backend.set_bbc_constraints(self.bbc_cv_n_bootstrap, self.bbc_cv_sample_size)
+                self.backend.save_bootstrap(self.y_true_ensemble)
             self.prediction_indices_inb = self.backend.load_bootstrap()
 
         return self.prediction_indices_inb
@@ -1330,8 +1352,15 @@ class EnsembleBuilder(object):
                     weights.append(ensemble.weights_)
 
                 ensemble.weights_ = np.mean(weights, axis=0)
+
+                # In case we have a maximum number of ensemble, just rebalance among biggest
+                if self.ensemble_size < np.count_nonzero(ensemble.weights_):
+                    order = np.argsort(-1*ensemble.weights_)
+                    ensemble.weights_[order[self.ensemble_size:]] = 0
+
                 # Normalize the weight
-                ensemble.weights_ /= np.linalg.norm(ensemble.weights_)
+                #ensemble.weights_ /= np.linalg.norm(ensemble.weights_)
+                ensemble.weights_ /= np.sum(ensemble.weights_)
             else:
                 ensemble.fit(predictions_train, self.y_true_ensemble,
                              include_num_runs)

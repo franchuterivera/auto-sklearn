@@ -325,6 +325,7 @@ class Backend(object):
         # self.bootstrap_shape = (bbc_cv_n_bootstrap, bbc_cv_sample_size*number_of_samples)
         # Following github.com/mensxmachina/BBC-CV/ we sample from a uniform distribution
         prediction_indices_inb = []
+        print(f"I am backend with self.bbc_cv_n_bootstrap={self.bbc_cv_n_bootstrap} and self.bbc_cv_sample_size={self.bbc_cv_sample_size}")
         for i in range(self.bbc_cv_n_bootstrap):
             indices_inb = resample(
                 list(range(number_of_samples)),

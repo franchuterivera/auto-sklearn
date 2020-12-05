@@ -28,6 +28,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.mode = mode
         self.random_state = random_state
         self.bootstrap_indices = bootstrap_indices
+        print(f"bootstrap_indices = {bootstrap_indices}")
 
     def __getstate__(self) -> Dict[str, Any]:
         # Cannot serialize a metric if
