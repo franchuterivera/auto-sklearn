@@ -189,7 +189,10 @@ class AutoML(BaseEstimator):
                 None,
                 'autosklearnBBCScoreEnsemble',
                 'autosklearnBBCEnsembleSelection',
-                'autosklearnBBCSMBOAndEnsembleSelection'
+                'autosklearnBBCEnsembleSelectionNoPreSelect',
+                'autosklearnBBCSMBOAndEnsembleSelection',
+                'autosklearnBBCEnsembleSelectionPreSelectInES',
+                'bagging',
         ]:
             raise NotImplementedError(self.bbc_cv_strategy)
         if self.bbc_cv_strategy is not None and self._resampling_strategy != 'cv':

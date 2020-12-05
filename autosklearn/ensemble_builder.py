@@ -563,6 +563,7 @@ class EnsembleBuilder(object):
         self.y_test = datamanager.data.get('Y_test')
         del datamanager
         self.ensemble_history = []
+        # ---------------------------------------------------------------------
         # Parameters to correct bias before ensemble selection calculation
         self.bbc_cv_strategy = bbc_cv_strategy
         self.bbc_cv_sample_size = bbc_cv_sample_size
@@ -907,8 +908,13 @@ class EnsembleBuilder(object):
                     task_type=self.task_type,
                     metric=self.metric,
                     all_scoring_functions=False,
-                    bootstrap_indices=self.bootstrap_indices_generator(),
-                    oob=True,
+                    bootstrap_indices=None if self.bbc_cv_strategy is None or self.bbc_cv_strategy not in [
+                        'autosklearnBBCScoreEnsemble',
+                        'autosklearnBBCEnsembleSelection',
+		        'autosklearnBBCEnsembleSelectionPreSelectInES',
+
+                    ] else self.bootstrap_indices_generator(),
+                    oob=False if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelectionPreSelectInES' else True,
                 )
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
@@ -962,9 +968,11 @@ class EnsembleBuilder(object):
 
         """
         if self.bbc_cv_strategy not in [
-                'autosklearnBBCScoreEnsemble',
-                'autosklearnBBCEnsembleSelection',
-                'autosklearnBBCSMBOAndEnsembleSelection'
+            'autosklearnBBCScoreEnsemble',
+            'autosklearnBBCEnsembleSelection',
+            'autosklearnBBCEnsembleSelectionNoPreSelect',
+            'autosklearnBBCEnsembleSelectionPreSelectInES',
+            'autosklearnBBCSMBOAndEnsembleSelection',
         ]:
             return None
 
@@ -1304,6 +1312,7 @@ class EnsembleBuilder(object):
             # calling fit in this strategy
             bootstrap_indices=self.bootstrap_indices_generator(
             ) if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsemble' else None,
+            bagging = True if self.bbc_cv_strategy == 'bagging' else False,
         )
 
         try:
@@ -1312,7 +1321,7 @@ class EnsembleBuilder(object):
                 len(predictions_train),
             )
             start_time = time.time()
-            if self.bbc_cv_strategy == 'autosklearnBBCEnsembleSelection':
+            if self.bbc_cv_strategy is not None and 'autosklearnBBCEnsembleSelection' in self.bbc_cv_strategy:
                 weights = []
                 for indices in self.bootstrap_indices_generator():
                     ensemble.fit(np.take(predictions_train, indices, axis=1),
