@@ -428,6 +428,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
+            Y_optimization_indices = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
             Y_test_pred = [None] * self.num_cv_folds
             additional_run_info = None
@@ -492,6 +493,7 @@ class TrainEvaluator(AbstractEvaluator):
 
                 Y_train_pred[i] = train_pred
                 Y_optimization_pred[i] = opt_pred
+                Y_optimization_indices[i] = test_split
                 Y_valid_pred[i] = valid_pred
                 Y_test_pred[i] = test_pred
                 train_splits[i] = train_split
@@ -550,8 +552,14 @@ class TrainEvaluator(AbstractEvaluator):
             Y_optimization_pred = np.concatenate(
                 [Y_optimization_pred[i] for i in range(self.num_cv_folds)
                  if Y_optimization_pred[i] is not None])
+
+
+            Y_optimization_indices = np.concatenate(
+                [Y_optimization_indices[i] for i in range(self.num_cv_folds)
+                 if Y_optimization_indices[i] is not None])
             Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
                                         if Y_targets[i] is not None])
+
 
             if self.X_valid is not None:
                 Y_valid_pred = np.array([Y_valid_pred[i]
@@ -575,6 +583,36 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.Y_optimization = Y_targets
             self.Y_actual_train = Y_train_targets
+
+            if issubclass(self.resampling_strategy, _RepeatedSplits):
+                """
+                Repeated splits means that we will have R repetitions and due to this,
+                R times the data size. We want to collapse the R with an average, so we
+                only have 1 set of OOF predictions rather than have them R times concated in
+                an array. This will remove the variance of the predictions and help to
+                reduce the overfit
+                """
+                # Reorder Y_optimization_pred and also the expected ground truth
+                repeats = self.splitter.n_repeats
+
+                # indices contains the indices that will convert
+                # Y_optimization_indices (a 10 datapoints, 3 repeated CV test)
+                # array([7, 0, 4, 5, 3, 2, 1, 8, 9, 6, 9, 6, 2, 1, 7, 0, 5, 3, 4, 8, 9, 7,       8, 4, 6, 3, 5, 2, 0, 1])
+                # to
+                # array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+                # The only tricky thing about this code is that you have to add split.shape[0]
+                # because when reordering the Y_optimization_pred, each split must account for
+                # each OOF prediction
+                indices = [np.concatenate(
+                    [np.argsort(split) + i * split.shape[0] for i, split in enumerate(
+                        np.split(Y_optimization_indices, repeats))])]
+                self.Y_optimization = np.mean( np.split(self.Y_optimization[indices], repeats), axis=0)
+                Y_optimization_pred = np.mean( np.split(Y_optimization_pred[indices], repeats), axis=0)
+                if self.X_test is not None:
+                    # Nothing to do for the test prediction. What is being done here is an average of all
+                    # the k folds of all repetitions
+                    pass
+
 
             if self.num_cv_folds > 1:
                 self.model = self._get_model()

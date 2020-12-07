@@ -29,6 +29,7 @@ from smac.stats.stats import Stats
 import joblib
 import sklearn.utils
 import scipy.sparse
+import sklearn.model_selection
 from sklearn.metrics._classification import type_of_target
 from sklearn.utils.validation import check_is_fitted
 from sklearn.dummy import DummyClassifier, DummyRegressor
@@ -861,7 +862,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', sklearn.model_selection.RepeatedStratifiedKFold)
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -993,7 +994,7 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
-            if self._resampling_strategy in ('cv', 'cv-iterative-fit'):
+            if self._resampling_strategy in ('cv', 'cv-iterative-fit', sklearn.model_selection.RepeatedStratifiedKFold):
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(identifiers)
             else:
                 self.cv_models_ = None
@@ -1003,7 +1004,7 @@ class AutoML(BaseEstimator):
             ):
                 raise ValueError('No models fitted!')
             if (
-                self._resampling_strategy in ['cv', 'cv-iterative-fit']
+                self._resampling_strategy in ['cv', 'cv-iterative-fit', sklearn.model_selection.RepeatedStratifiedKFold]
                 and len(self.cv_models_) == 0
             ):
                 raise ValueError('No models fitted!')
