@@ -327,6 +327,7 @@ class AutoMLSMBO(object):
         time_limit = max(time_limit, 1)
         try:
             safe_mf = pynisher.enforce_limits(mem_in_mb=self.memory_limit,
+                                              tmp_dir=self.backend.temporary_directory,
                                               wall_time_in_s=int(time_limit),
                                               grace_period_in_s=30,
                                               logger=self.logger)(
@@ -356,6 +357,7 @@ class AutoMLSMBO(object):
         time_limit = max(time_limit, 1)
         try:
             safe_mf = pynisher.enforce_limits(mem_in_mb=self.memory_limit,
+                                              tmp_dir=self.backend.temporary_directory,
                                               wall_time_in_s=int(time_limit),
                                               grace_period_in_s=30,
                                               logger=self.logger)(

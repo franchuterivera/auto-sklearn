@@ -267,6 +267,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             mem_in_mb=self.memory_limit,
             capture_output=True,
             context=context,
+            tmp_dir=self.backend.temporary_directory,
         )
 
         if isinstance(config, int):

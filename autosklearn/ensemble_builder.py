@@ -604,6 +604,7 @@ class EnsembleBuilder(object):
             context = multiprocessing.get_context(pynisher_context)
 
             safe_ensemble_script = pynisher.enforce_limits(
+                tmp_dir=self.backend.temporary_directory,
                 wall_time_in_s=wall_time_in_s,
                 mem_in_mb=self.memory_limit,
                 logger=self.logger,
