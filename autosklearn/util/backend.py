@@ -243,7 +243,7 @@ class Backend(object):
         return os.path.join(self.internals_directory,
                             "true_targets_ensemble.npy")
 
-    def save_targets_ensemble(self, targets: np.ndarray) -> str:
+    def save_targets_ensemble(self, targets: np.ndarray, random_state=0) -> str:
         self._make_internals_directory()
         if not isinstance(targets, np.ndarray):
             raise ValueError('Targets must be of type np.ndarray, but is %s' %
@@ -285,7 +285,7 @@ class Backend(object):
             # changed. Under the lockfile, we are certain that only one entity
             # has access to the file, so it is safe to save the bootstrap here
             if self.bbc_cv_n_bootstrap is not None:
-                self.save_bootstrap(targets)
+                self.save_bootstrap(targets, random_state=0)
 
         return filepath
 
@@ -310,7 +310,7 @@ class Backend(object):
     def _get_bootstrap_inb_filename(self) -> str:
         return os.path.join(self.internals_directory, 'bootstrap_inb.npy')
 
-    def save_bootstrap(self, Y: np.ndarray) -> None:
+    def save_bootstrap(self, Y: np.ndarray, random_state=0) -> None:
         """
         Save the bootstrap indices for SMAC and ensemble builder.
         We need this to be done, aware of the optimization targets, or
@@ -332,6 +332,7 @@ class Backend(object):
                 stratify=Y,
                 n_samples=int(self.bbc_cv_sample_size*number_of_samples),
                 replace=True,
+                random_state=random_state,
             )
             # numpy is tooo memory greedy?
             # indices_oob = np.setdiff1d(list(range(number_of_samples)), indices_inb)

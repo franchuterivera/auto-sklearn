@@ -344,6 +344,7 @@ def calculate_score(
     all_scoring_functions: bool = False,
     bootstrap_indices: Optional[List[List[int]]] = None,
     oob=False,
+    return_all_boot_scores=False,
 ) -> Union[float, Dict[str, float]]:
     if task_type not in TASK_TYPES:
         raise NotImplementedError(task_type)
@@ -411,6 +412,8 @@ def calculate_score(
                     solution_b = np.take(solution, indices, axis=0)
                     cprediction_b = np.take(cprediction, indices, axis=0)
                     scores.append(metric(solution_b, cprediction_b))
+                if return_all_boot_scores:
+                    return scores
                 score = np.mean(scores)
             else:
                 score = metric(solution, cprediction)
@@ -423,6 +426,8 @@ def calculate_score(
                     solution_b = np.take(solution, indices, axis=0)
                     prediction_b = np.take(prediction, indices, axis=0)
                     scores.append(metric(solution_b, prediction_b))
+                if return_all_boot_scores:
+                    return scores
                 score = np.mean(scores)
             else:
                 score = metric(solution, prediction)

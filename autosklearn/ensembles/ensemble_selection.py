@@ -20,6 +20,7 @@ class EnsembleSelection(AbstractEnsemble):
         bagging: bool = False,
         mode: str = 'fast',
         bootstrap_indices: Optional[List[List[int]]] = None,
+        bbc_cv_strategy=None,
     ) -> None:
         self.ensemble_size = ensemble_size
         self.task_type = task_type
@@ -28,6 +29,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.mode = mode
         self.random_state = random_state
         self.bootstrap_indices = bootstrap_indices
+        self.bbc_cv_strategy = bbc_cv_strategy
         print(f"bootstrap_indices = {bootstrap_indices}")
 
     def __getstate__(self) -> Dict[str, Any]:
@@ -73,7 +75,6 @@ class EnsembleSelection(AbstractEnsemble):
             # The final ensemble is then the average of this N ensembles and this is done
             # in bagging
             self._calculate_weights()
-        print(f"the final weights are={self.weights_}")
         return self
 
     def _fit(
@@ -83,16 +84,151 @@ class EnsembleSelection(AbstractEnsemble):
         indices = None,
     ) -> AbstractEnsemble:
         if self.mode == 'fast':
-            self._fast(predictions, labels, indices)
+            if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleMAX':
+                # We only select the maximum per Bag
+                self.ensemble_size = 1
+                order = []
+                for b, boot_indices in enumerate(self.bootstrap_indices):
+                    order.extend(
+                        self._fast(predictions, labels, indices, bootstrap_indices=[boot_indices])
+                    )
+                self.indices_ = order
+            elif self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleMAXWinner':
+                self._fast_winner(predictions, labels, indices, bootstrap_indices=None)
+            else:
+                self._fast(predictions, labels, indices, bootstrap_indices=None)
         else:
             self._slow(predictions, labels)
         return self
+
+    def _fast_winner(
+        self,
+        predictions: List[np.ndarray],
+        labels: np.ndarray,
+        indices=None,
+        bootstrap_indices=None,
+    ) -> None:
+        """Fast version of Rich Caruana's ensemble selection method."""
+        self.num_input_models_ = len(predictions)
+
+        ensemble = []  # type: List[np.ndarray]
+        trajectory = []
+        order = []
+
+        ensemble_size = self.ensemble_size
+
+        if indices is None:
+            # IF not bagging, can use all predictions
+            indices = list(range(len(predictions)))
+
+        weighted_ensemble_prediction = np.zeros(
+            predictions[0].shape,
+            dtype=np.float64,
+        )
+        fant_ensemble_prediction = np.zeros(
+            weighted_ensemble_prediction.shape,
+            dtype=np.float64,
+        )
+        for i in range(ensemble_size):
+            # We fill a wins matrix with a score per bootstrap, so we have a
+            # #predictions times number of bags array. This wins matrix will allow us
+            # to get the most frequent winner which we will add to bootstrap
+            wins = np.zeros(
+                (len(predictions), len(self.bootstrap_indices)),
+                dtype=np.float64,
+            )
+            s = len(ensemble)
+            if s == 0:
+                weighted_ensemble_prediction.fill(0.0)
+            else:
+                weighted_ensemble_prediction.fill(0.0)
+                for pred in ensemble:
+                    np.add(
+                        weighted_ensemble_prediction,
+                        pred,
+                        out=weighted_ensemble_prediction,
+                    )
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    1/s,
+                    out=weighted_ensemble_prediction,
+                )
+                np.multiply(
+                    weighted_ensemble_prediction,
+                    (s / float(s + 1)),
+                    out=weighted_ensemble_prediction,
+                )
+
+            # Memory-efficient averaging!
+            for j in indices:
+                pred = predictions[j]
+                # TODO: this could potentially be vectorized! - let's profile
+                # the script first!
+                fant_ensemble_prediction.fill(0.0)
+                np.add(
+                    fant_ensemble_prediction,
+                    weighted_ensemble_prediction,
+                    out=fant_ensemble_prediction
+                )
+                np.add(
+                    fant_ensemble_prediction,
+                    (1. / float(s + 1)) * pred,
+                    out=fant_ensemble_prediction
+                )
+
+                # Calculate score is versatile and can return a dict of score
+                # when all_scoring_functions=False, we know it will be a float
+                calculated_scores = cast(
+                    float,
+                    calculate_score(
+                        solution=labels,
+                        prediction=fant_ensemble_prediction,
+                        task_type=self.task_type,
+                        metric=self.metric,
+                        all_scoring_functions=False,
+                        # bootstrap_indices is a way to provide which indices we want to use directly
+                        # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                        bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                        # The construction of the ensemble should use the bootstrap prediction
+                        # That is because there is noise there which act as a regularization,
+                        # Noise coming from repetition in the indices, which is not there in the
+                        # OOB
+                        oob=False,
+                        return_all_boot_scores=True,
+                    )
+                )
+                #scores[j] = self.metric._optimum - calculated_score
+                # Convert each calculated score to a minimum to be consistent
+                scores = [(self.metric._optimum - score) for score in calculated_scores]
+                # So each row of wins belong to a candidate predicitons
+                # Then, each column is a bootstrap
+                wins[j, :] = scores
+
+            #all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
+            # Then here we get the most frequent winner and that's who we add
+            winner_per_boot = np.bincount(np.argmin(wins, axis=0))
+            best = self.random_state.choice(np.argwhere(winner_per_boot == np.amax(winner_per_boot)).flatten().tolist())
+            print(f"{i} bincount={winner_per_boot} with best={best}")
+            # --> do not select always the firs tone best = np.argmax(winner_per_boot)
+            ensemble.append(predictions[best])
+            trajectory.append(np.mean(wins[best, :]))
+            order.append(best)
+
+            # Handle special case
+            if len(predictions) == 1:
+                break
+
+        self.indices_ = order
+        self.trajectory_ = trajectory
+        self.train_score_ = trajectory[-1]
+        return order
 
     def _fast(
         self,
         predictions: List[np.ndarray],
         labels: np.ndarray,
         indices=None,
+        bootstrap_indices=None,
     ) -> None:
         """Fast version of Rich Caruana's ensemble selection method."""
         self.num_input_models_ = len(predictions)
@@ -167,23 +303,55 @@ class EnsembleSelection(AbstractEnsemble):
 
                 # Calculate score is versatile and can return a dict of score
                 # when all_scoring_functions=False, we know it will be a float
-                calculated_score = cast(
-                    float,
-                    calculate_score(
-                        solution=labels,
-                        prediction=fant_ensemble_prediction,
-                        task_type=self.task_type,
-                        metric=self.metric,
-                        all_scoring_functions=False,
-                        bootstrap_indices=self.bootstrap_indices,
-                        # The construction of the ensemble should use the bootstrap prediction
-                        # That is because there is noise there which act as a regularization,
-                        # Noise coming from repetition in the indices, which is not there in the
-                        # OOB
-                        oob=False,
+                if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleAVGMDEV':
+                    # We substract the std deviation as a mechanism to make sure that
+                    # the certainty per bootstrap is guaranteed. That is, if we are pesimistic
+                    # and only add a model if the worst case scenario of adding such model
+                    # improves over the worst case scenario of others
+                    calculated_scores = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=False,
+                            return_all_boot_scores=True,
+                        )
                     )
-                )
-                scores[j] = self.metric._optimum - calculated_score
+                    min_scores = [(self.metric._optimum - score) for score in calculated_scores]
+
+                    # Notice the + because we are minimizing, the worst case scenario is a +
+                    print(f"[{j}] corrected score from {np.mean(min_scores)} to {np.mean(min_scores) + np.std(min_scores)}")
+                    scores[j] = np.mean(min_scores) + np.std(min_scores)
+                else:
+                    calculated_score = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=False,
+                        )
+                    )
+                    scores[j] = self.metric._optimum - calculated_score
 
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
             best = self.random_state.choice(all_best)
@@ -198,6 +366,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.indices_ = order
         self.trajectory_ = trajectory
         self.train_score_ = trajectory[-1]
+        return order
 
     def _slow(
         self,
@@ -270,7 +439,6 @@ class EnsembleSelection(AbstractEnsemble):
         )
         if self.bagging:
             total = sum([b for a, b in ensemble_members])
-            print(f"Using total of = {total}")
             for ensemble_member in ensemble_members:
                 weight = float(ensemble_member[1]) / total
                 weights[ensemble_member[0]] = weight
@@ -299,7 +467,7 @@ class EnsembleSelection(AbstractEnsemble):
         order_of_each_bag = []
         for j in range(n_bags):
             # Bagging a set of models
-            indices = sorted(np.random.choice(list(range(0, n_models)), bag_size).tolist())
+            indices = sorted(self.random_state.choice(list(range(0, n_models)), bag_size).tolist())
             self._fit(predictions, labels, indices=indices)
             self._calculate_weights()
             # Calculate the weights for this case
@@ -307,11 +475,9 @@ class EnsembleSelection(AbstractEnsemble):
             weights_of_each_bag.append(np.expand_dims(self.weights_, axis=0))
 
         self.indices_ = order_of_each_bag
-        print(f"BEFORE created indices are ={order_of_each_bag} with weights={weights_of_each_bag}")
         self.weights_ = np.mean(np.array(np.concatenate(weights_of_each_bag, axis=0)), axis=0)
         if np.sum(self.weights_) < 1:
             self.weights_ = self.weights_ / np.sum(self.weights_)
-        print(f"created indices are ={order_of_each_bag} with weights={weights_of_each_bag}")
 
         # Correct the number of input models at the end
         self.num_input_models_ = len(predictions)

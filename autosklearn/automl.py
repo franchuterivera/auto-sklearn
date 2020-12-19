@@ -188,10 +188,16 @@ class AutoML(BaseEstimator):
         if self.bbc_cv_strategy not in [
                 None,
                 'autosklearnBBCScoreEnsemble',
+                'autosklearnBBCScoreEnsembleMAX',
+                'autosklearnBBCScoreEnsembleMAXWinner',
+                'autosklearnBBCScoreEnsembleAVGMDEV',
                 'autosklearnBBCEnsembleSelection',
+                'autosklearnBBCEnsembleSelectionFULL',
                 'autosklearnBBCEnsembleSelectionNoPreSelect',
                 'autosklearnBBCSMBOAndEnsembleSelection',
                 'autosklearnBBCEnsembleSelectionPreSelectInES',
+                'autosklearnBBCEnsembleSelectionPreSelectInESRegularizedEnd',
+                'autosklearnBBCEnsembleSelectionPreSelectInESRegularizedES',
                 'bagging',
         ]:
             raise NotImplementedError(self.bbc_cv_strategy)
