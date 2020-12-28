@@ -376,7 +376,10 @@ class AbstractEvaluator(object):
             return None, {}
 
         # Abort in case of shape misalignment
-        if self.Y_optimization.shape[0] != Y_optimization_pred.shape[0]:
+        # Because we output partial CV predictions now, this is no longer valid
+        # he Y_optimization will have the length of the whole data and the prediciton
+        # will be for a single fold
+        if self.Y_optimization.shape[0] != Y_optimization_pred.shape[0] and False:
             return (
                 1.0,
                 {

@@ -635,6 +635,7 @@ class TrainEvaluator(AbstractEvaluator):
             raise NotImplementedError()
 
         y = _get_y_array(self.Y_train, self.task_type)
+
         for i, (train_split, test_split) in enumerate(self.splitter.split(
                 self.X_train, y,
                 groups=self.resampling_strategy_args.get('groups')
@@ -644,6 +645,12 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 break
 
+        # we want to make sure that the Y optimization is always the size of the
+        # whole train data. So this partial cv run will only output a single fold
+        # OOF prediction, but what we can do is have the ensemble reconstruct that
+        # as possible
+        # Leave this here for iterative fit, but the fix/implementation is done for the
+        # second part of upcoming else -- for self._partial_fit_and_predict_standard
         if self.num_cv_folds > 1:
             self.Y_optimization = self.Y_train[test_split]
             self.Y_actual_train = self.Y_train[train_split]
@@ -676,17 +683,53 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 status = StatusType.SUCCESS
 
+            if self.num_cv_folds > 1:
+                for i, (train_split, test_split) in enumerate(self.splitter.split(
+                        self.X_train, y,
+                        groups=self.resampling_strategy_args.get('groups')
+                )):
+                    self.Y_targets[i] = self.Y_train[test_split]
+
+                Y_targets = np.concatenate([self.Y_targets[i] for i in range(self.num_cv_folds)
+                                            if self.Y_targets[i] is not None])
+
+                # So here, the ensemble predictions are for the whole data
+                # honoring the order of the splitter above. This is inportant
+                # as the ensemble builder will
+                self.Y_optimization = Y_targets
+
+            self.logger.debug(f"I think I finished a run with loss={loss} {self.Y_optimization.shape} train_loss={train_loss} opt_pred={opt_pred.shape} status={status}")
             self.finish_up(
                 loss=loss,
                 train_loss=train_loss,
                 opt_pred=opt_pred,
                 valid_pred=valid_pred,
                 test_pred=test_pred,
-                file_output=False,
+                file_output=True,
                 final_call=True,
                 additional_run_info=None,
                 status=status
             )
+            # How to solve the problem of predicting in the OOF
+            # To make ensemble builder work
+            # I think the best approach is to output predictions
+            # Here. Then we will have the OOF predictions per fold,
+            # not like in traditional cv that we have the predictions for all
+            # folds in a single file. This means ensemble builder will have to
+            # take this into account and build up the ensemble based on the amount of folds
+            # available
+            #self.finish_up(
+            #    loss=opt_loss,
+            #    train_loss=train_loss,
+            #    opt_indices=opt_indices,
+            #    opt_pred=Y_optimization_pred,
+            #    valid_pred=Y_valid_pred,
+            #    test_pred=Y_test_pred,
+            #    additional_run_info=additional_run_info,
+            #    file_output=True,
+            #    final_call=True,
+            #    status=status,
+            #)
 
     def _partial_fit_and_predict_iterative(self, fold, train_indices, test_indices,
                                            add_model_to_self):
