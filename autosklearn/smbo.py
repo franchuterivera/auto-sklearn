@@ -281,6 +281,7 @@ class AutoMLSMBO(object):
                 name=logger_name,
                 port=self.port,
             )
+        self.start_time = time.time()
 
     def _send_warnings_to_log(self, message, category, filename, lineno,
                               file=None, line=None):
@@ -454,7 +455,8 @@ class AutoMLSMBO(object):
         )
         ta = ExecuteTaFuncWithQueue
 
-        startup_time = self.watcher.wall_elapsed(self.dataset_name)
+        #startup_time = self.watcher.wall_elapsed(self.dataset_name)
+        startup_time = time.time() - self.start_time
         total_walltime_limit = self.total_walltime_limit - startup_time - 5
         scenario_dict = {
             'abort_on_first_run_crash': False,
