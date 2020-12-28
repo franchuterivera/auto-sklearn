@@ -280,7 +280,7 @@ class AbstractEvaluator(object):
         return err
 
     def finish_up(self, loss, train_loss,  opt_pred, valid_pred, test_pred,
-                  additional_run_info, file_output, final_call, status, opt_indices=None):
+                  additional_run_info, file_output, final_call, status, opt_indices=None, fold=None):
         """This function does everything necessary after the fitting is done:
 
         * predicting
@@ -293,7 +293,7 @@ class AbstractEvaluator(object):
 
         if file_output:
             loss_, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred, opt_indices,
+                opt_pred, valid_pred, test_pred, opt_indices, fold,
             )
         else:
             loss_ = None
@@ -368,6 +368,7 @@ class AbstractEvaluator(object):
             Y_valid_pred,
             Y_test_pred,
             opt_indices,
+            fold,
     ):
         # Abort if self.Y_optimization is None
         # self.Y_optimization can be None if we use partial-cv, then,
@@ -420,7 +421,10 @@ class AbstractEvaluator(object):
         # This file can be written independently of the others down bellow
         if ('y_optimization' not in self.disable_file_output):
             if self.output_y_hat_optimization:
-                self.backend.save_targets_ensemble(self.Y_optimization)
+                # OPT indices is a tricky thing that I have to clean up.
+                # in the case of partial cross validation it will be the indices in a list of list fashion
+                # whereas in the case of normal cross validation it is simply a numpy array with the flattened indices
+                self.backend.save_targets_ensemble(self.Y_optimization, opt_indices)
 
         if hasattr(self, 'models') and len(self.models) > 0 and self.models[0] is not None:
             if ('models' not in self.disable_file_output):
@@ -463,8 +467,14 @@ class AbstractEvaluator(object):
             test_predictions=(
                 Y_test_pred if 'y_test' not in self.disable_file_output else None
             ),
-            opt_indices=opt_indices,
+            #opt_indices=opt_indices,
+            # This opt indices is a nice way to print out the ORDERED OOF predictions. So fundamentally
+            # the ensemble predictions are sorted once with opt_indices to match the X_train/y_train indices, so we can
+            # nicely implement stacking. This is not possible if the size of the ensemble predictions do not match the size of the GT
+            # which can happen in partial cv
+            opt_indices=opt_indices if Y_optimization_pred is not None and Y_optimization_pred.shape[0] == self.Y_optimization.shape[0] else None,
             original_test_predictions=original_test_predictions,
+            fold=fold,
         )
 
         return None, {}

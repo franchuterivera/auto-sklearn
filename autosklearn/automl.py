@@ -32,6 +32,7 @@ import scipy.sparse
 from sklearn.metrics._classification import type_of_target
 from sklearn.utils.validation import check_is_fitted
 from sklearn.dummy import DummyClassifier, DummyRegressor
+from sklearn.ensemble import VotingClassifier, VotingRegressor
 
 from autosklearn.metrics import Scorer
 from autosklearn.data.xy_data_manager import XYDataManager
@@ -369,10 +370,12 @@ class AutoML(BaseEstimator):
 
     def _do_dummy_prediction(self, datamanager, num_run, level=1):
 
+        # Well now it makes sense because we are gonna stack the predictions
+        # from the Y optimization as needed
         # When using partial-cv it makes no sense to do dummy predictions
-        if self._resampling_strategy in ['partial-cv',
-                                         'partial-cv-iterative-fit']:
-            return num_run
+        #if self._resampling_strategy in ['partial-cv',
+        #                                 'partial-cv-iterative-fit']:
+        #    return num_run
 
         self._logger.info("Starting to create dummy predictions.")
 
@@ -856,6 +859,23 @@ class AutoML(BaseEstimator):
 
         return stacked_datamanager
 
+    def get_expected_folds(self):
+        """
+        I need to think of the best posisble way to deal with missing folds
+        This means account for configurations who are not complete -- which could
+        means simply ignoring this configuration, but really make sense to try to use it
+        by taking the average of the other predictions, which will render the missing folds
+        as not changing the group prediction but also giving criteria on the available folds
+
+        But more importantly, how to handle progressive folds? Do we even care about this? The thing is
+        many configurations will not have fold 4/4, because maybe hyperband in partial cv tought this configuration
+        was useless, but maybe in ensemble it works. I think I will go with a fill up missing folds by average approach in the
+        case of partial cv
+
+        the problem tho is the inference -- I need to think on something better therer
+        """
+        raise NotImplementedError()
+
     def selectLevelPredictionsAndConcat(self, datamanager, level):
 
         # The original data
@@ -867,7 +887,13 @@ class AutoML(BaseEstimator):
             X_test = datamanager.data['X_test']
             y_test = datamanager.data['Y_test']
 
-        y_hat, y_test_hat = self._backend.load_level_predictions(level, self._seed)
+        y_hat, y_test_hat = self._backend.load_level_predictions(
+            level,
+            self._seed,
+            # In the case of partial cv, we have to re-order the OOF predictions, because
+            # sadly they are broken to folds. So backend stiches them AND orders them
+            None if self._resampling_strategy not in ['partial-cv'] else self.get_expected_folds(),
+        )
 
         y_hat = np.concatenate(y_hat, axis=1)
         if X_test is not None:
@@ -951,6 +977,8 @@ class AutoML(BaseEstimator):
         random_state = np.random.RandomState(self._seed)
         for identifier in self.models_:
             model = self.models_[identifier]
+            if isinstance(model, (list, VotingClassifier, VotingRegressor)):
+                raise ValueError(f"In the case of partial cv, we can have a list of models")
             # this updates the model inplace, it can then later be used in
             # predict method
 
@@ -1067,6 +1095,8 @@ class AutoML(BaseEstimator):
             )
             base_models = self._backend.load_models_by_level(self._max_stacking_levels-1,
                                                              self._seed, cv)
+            if self._resampling_strategy == 'partial-cv':
+                base_models = self._model_dict_list_to_voter(base_models)
 
             all_base_predictions = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(_model_predict)(
@@ -1161,6 +1191,18 @@ class AutoML(BaseEstimator):
         self._close_dask_client()
         return self
 
+    def _model_dict_list_to_voter(self, model_dict):
+        for identifier, model in model_dict.items():
+            if isinstance(model, list):
+                if self._task in CLASSIFICATION_TASKS:
+                    models = VotingClassifier(estimators=None, voting='soft', )
+                else:
+                    models = VotingRegressor(estimators=None)
+                models.estimators_ = model
+            model_dict[identifier] = models
+        return model_dict
+
+
     def _load_models(self):
         self.ensemble_ = self._backend.load_ensemble(self._seed)
 
@@ -1171,13 +1213,18 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
+            if self._resampling_strategy == 'partial-cv':
+                self.models_ = self._model_dict_list_to_voter(self.models_)
+
             if self._resampling_strategy in ('cv', 'cv-iterative-fit'):
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(identifiers)
             else:
                 self.cv_models_ = None
             if (
                 len(self.models_) == 0 and
-                self._resampling_strategy not in ['partial-cv', 'partial-cv-iterative-fit']
+                # and self._resampling_strategy not in ['partial-cv', 'partial-cv-iterative-fit']
+                # Adding support for partial cv ensemble builder
+                self._resampling_strategy not in ['partial-cv-iterative-fit']
             ):
                 raise ValueError('No models fitted!')
             if (
@@ -1189,7 +1236,7 @@ class AutoML(BaseEstimator):
         elif self._disable_evaluator_output is False or \
                 (isinstance(self._disable_evaluator_output, list) and
                  'model' not in self._disable_evaluator_output):
-            model_names = self._backend.list_all_models(self._seed)
+            model_names = self._backend.list_all_models(self._max_stacking_levels, self._seed)
 
             if len(model_names) == 0 and self._resampling_strategy not in \
                     ['partial-cv', 'partial-cv-iterative-fit']:

@@ -684,11 +684,13 @@ class TrainEvaluator(AbstractEvaluator):
                 status = StatusType.SUCCESS
 
             if self.num_cv_folds > 1:
+                opt_indices = []
                 for i, (train_split, test_split) in enumerate(self.splitter.split(
                         self.X_train, y,
                         groups=self.resampling_strategy_args.get('groups')
                 )):
                     self.Y_targets[i] = self.Y_train[test_split]
+                    opt_indices.append(test_split)
 
                 Y_targets = np.concatenate([self.Y_targets[i] for i in range(self.num_cv_folds)
                                             if self.Y_targets[i] is not None])
@@ -698,7 +700,7 @@ class TrainEvaluator(AbstractEvaluator):
                 # as the ensemble builder will
                 self.Y_optimization = Y_targets
 
-            self.logger.debug(f"I think I finished a run with loss={loss} {self.Y_optimization.shape} train_loss={train_loss} opt_pred={opt_pred.shape} status={status}")
+            self.logger.critical(f"I think I finished a run with num_run={self.num_run} fold={fold} loss={loss} {self.Y_optimization.shape} train_loss={train_loss} opt_pred={opt_pred.shape} status={status}")
             self.finish_up(
                 loss=loss,
                 train_loss=train_loss,
@@ -708,7 +710,15 @@ class TrainEvaluator(AbstractEvaluator):
                 file_output=True,
                 final_call=True,
                 additional_run_info=None,
-                status=status
+                status=status,
+                # Tag the file names with
+                # a fold to identify them for ensemling
+                # By default fold is None which means we have the same
+                # default behaviour without this fold param ever existing
+                fold=fold,
+                # This list of list will be pickled so that in the future we
+                # can reorder predictions for stacking
+                opt_indices=opt_indices,
             )
             # How to solve the problem of predicting in the OOF
             # To make ensemble builder work
@@ -1199,7 +1209,12 @@ def eval_partial_cv(
     if budget_type is not None:
         raise NotImplementedError()
     instance = json.loads(instance) if instance is not None else {}
-    fold = instance['fold']
+
+    # In case of dummy classifier, we will not have a fold as instance
+    # as a mock scenario is used. Also, dummy classifier is used as a way
+    # to print the ensemble ground truths.
+    #fold = instance['fold']
+    fold = instance.get('fold', 0)
 
     evaluator = TrainEvaluator(
         backend=backend,
@@ -1213,7 +1228,8 @@ def eval_partial_cv(
         seed=seed,
         num_run=num_run,
         scoring_functions=scoring_functions,
-        output_y_hat_optimization=False,
+        #output_y_hat_optimization=False,
+        output_y_hat_optimization=True,
         include=include,
         exclude=exclude,
         disable_file_output=disable_file_output,

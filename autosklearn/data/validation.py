@@ -586,7 +586,6 @@ class InputValidator:
                     type(y_test)
                 )
             )
-
         if isinstance(y, pd.DataFrame):
             # The have to have the same columns and types
             if y.columns != y_test.columns:
@@ -622,7 +621,7 @@ class InputValidator:
             # No functionality impact.
             return y
         else:
-            raise ValueError("Unsupported input type y={type(y)}. Auto-Sklearn supports "
+            raise ValueError(f"Unsupported input type y={type(y)}. Auto-Sklearn supports "
                              "Pandas DataFrames, numpy arrays, scipy csr  or  python lists. "
                              "Kindly cast your targets to a supported type."
                              )

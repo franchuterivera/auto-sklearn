@@ -1,3 +1,4 @@
+import fcntl
 import glob
 import os
 import pickle
@@ -23,6 +24,38 @@ __all__ = [
 ]
 
 MODEL_FN_RE = r'([0-9]*)\.([0-9]*)\.([0-9]*)\.([0-9]{1,3}\.[0-9]*)\.model'
+
+
+class LockDirectory(object):
+    def __init__(self, directory):
+        assert os.path.exists(directory)
+        self.directory = directory
+        self.start = time.time()
+        self.tolerance = 5
+
+    def __enter__(self):
+
+        # If the file exist, no problem
+        if os.path.exists(self.directory):
+            return self
+
+        self.dir_fd = os.open(self.directory, os.O_WRONLY)
+        try:
+            fcntl.flock(self.dir_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError as ex:
+            #raise Exception('Somebody else is locking %r - quitting.' % self.directory)
+            while(time.time() - self.start < self.tolerance):
+                try:
+                    fcntl.flock(self.dir_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except IOError as ex:
+                    time.sleep(1)
+                    pass
+            raise Exception('Somebody else is locking %r - quitting.' % self.directory)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        fcntl.flock(self.dir_fd, fcntl.LOCK_UN)
+        os.close(self.dir_fd)
 
 
 def create(
@@ -260,7 +293,11 @@ class Backend(object):
         return os.path.join(self.internals_directory,
                             "true_targets_ensemble.npy")
 
-    def save_targets_ensemble(self, targets: np.ndarray) -> str:
+    def _get_targets_indices_filename(self) -> str:
+        return os.path.join(self.internals_directory,
+                            "true_targets_indices.pkl")
+
+    def save_targets_ensemble(self, targets: np.ndarray, indices: Optional[List[int]] = None) -> str:
         self._make_internals_directory()
         if not isinstance(targets, np.ndarray):
             raise ValueError('Targets must be of type np.ndarray, but is %s' %
@@ -288,13 +325,37 @@ class Backend(object):
 
         os.rename(tempname, filepath)
 
+        if indices is not None:
+            filepath_indices = self._get_targets_indices_filename()
+            with tempfile.NamedTemporaryFile('wb', dir=os.path.dirname(
+                    filepath_indices), delete=False) as fh_w:
+                pickle.dump(indices, fh_w, -1)
+                tempname = fh_w.name
+
+            os.rename(tempname, filepath_indices)
+
         return filepath
 
-    def load_targets_ensemble(self) -> np.ndarray:
+    def load_targets_indices(self):
+        filepath = self._get_targets_indices_filename()
+        with open(filepath, 'rb') as fh:
+            return pickle.load(fh)
+
+    def load_targets_ensemble(self, folds: Optional[List[int]] = None) -> np.ndarray:
         filepath = self._get_targets_ensemble_filename()
 
         with open(filepath, 'rb') as fh:
             targets = np.load(fh, allow_pickle=True)
+
+        if folds is not None:
+            indices_len = [len(fold) for fold in self.load_targets_indices()]
+            targets_folds = []
+            for fold in folds:
+                prev_index = sum([idx_len for i, idx_len in enumerate(indices_len) if i < fold])
+                # Only append the desired folds to the targets of the ensemble
+                # Like this in theory will allow to just build and ensemble of fold 0 for instance
+                targets_folds.append(targets[prev_index:prev_index+indices_len[fold]])
+            return np.concatenate(targets_folds)
 
         return targets
 
@@ -326,11 +387,17 @@ class Backend(object):
     def get_numrun_directory(self, level: int, seed: int, num_run: int, budget: float) -> str:
         return os.path.join(self.internals_directory, 'runs', '%d_%d_%d_%s' % (level, seed, num_run, budget))
 
-    def get_model_filename(self, level: int, seed: int, idx: int, budget: float) -> str:
-        return '%s.%s.%s.%s.model' % (level, seed, idx, budget)
+    def get_model_filename(self, level: int, seed: int, idx: int, budget: float, fold: Optional[int] = None) -> str:
+        if fold is not None:
+            return '%s.%s.%s.%s.%s.model' % (level, seed, idx, budget, fold)
+        else:
+            return '%s.%s.%s.%s.model' % (level, seed, idx, budget)
 
-    def get_cv_model_filename(self, level: int, seed: int, idx: int, budget: float) -> str:
-        return '%s.%s.%s.%s.cv_model' % (level, seed, idx, budget)
+    def get_cv_model_filename(self, level: int, seed: int, idx: int, budget: float, fold: Optional[int] = None) -> str:
+        if fold is not None:
+            return '%s.%s.%s.%s.%s.cv_model' % (level, seed, idx, budget, fold)
+        else:
+            return '%s.%s.%s.%s.cv_model' % (level, seed, idx, budget)
 
     def list_all_models(self, level: int, seed: int) -> List[str]:
         runs_directory = self.get_runs_directory()
@@ -361,8 +428,18 @@ class Backend(object):
 
         model_file_name = '%s.%s.%s.%s.model' % (level, seed, idx, budget)
         model_file_path = os.path.join(model_directory, model_file_name)
-        with open(model_file_path, 'rb') as fh:
-            return pickle.load(fh)
+
+        # Try to find a normal model else try a partial version
+        if os.path.exists(model_file_path):
+            with open(model_file_path, 'rb') as fh:
+                return pickle.load(fh)
+        else:
+            model_file_name_pattern = '%s.%s.%s.%s*.model' % (level, seed, idx, budget)
+            models = []
+            for model_file_path in glob.glob(os.path.join(model_directory, model_file_name_pattern)):
+                with open(model_file_path, 'rb') as fh:
+                    models.append(pickle.load(fh))
+            return models
 
     def load_cv_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float]]
                                       ) -> Dict:
@@ -393,18 +470,20 @@ class Backend(object):
                                                              level: int,
                                                              seed: int,
                                                              idx: int,
-                                                             budget: float
+                                                             budget: float,
+                                                             fold: Optional[int] = None,
                                                              ) -> Pipeline:
         filename = os.path.join(
             self.get_numrun_directory(level, seed, idx, budget),
-            self.get_prediction_filename(subset, level, seed, idx, budget)
+            self.get_prediction_filename(subset, level, seed, idx, budget, fold)
         )
         return np.load(filename, allow_pickle=True)
 
     def get_model_identifiers_for_level(self, level: int, seed: int):
         model_file_names = [os.path.basename(m) for m in self.list_all_models(level, seed)]
-        identifiers = []
-        model_fn_re = re.compile(r'([0-9]*).([0-9]*).([0-9]*).([0-9]{1,3}\.[0-9]*)\.model')
+        identifiers = {}
+        #model_fn_re = re.compile(r'([0-9]*).([0-9]*).([0-9]*).([0-9]{1,3}\.[0-9]*)\.model')
+        model_fn_re = re.compile(r'([0-9]*).([0-9]*).([0-9]*).([0-9]{1,3}\.[0-9]*)(\.[0-9]+)*\.model')
         for model_name in model_file_names:
             match = model_fn_re.search(model_name)
             if match:
@@ -412,11 +491,18 @@ class Backend(object):
                 seed = int(match.group(2))
                 num_run = int(match.group(3))
                 budget = float(match.group(4))
-                identifiers.append((level, seed, num_run, budget))
+                if (level, seed, num_run, budget) not in identifiers:
+                    identifiers[(level, seed, num_run, budget)] = 0
+                identifiers[(level, seed, num_run, budget)] += 1
             else:
                 raise ValueError(f"Could not understand model_name={model_name}")
 
-        return sorted(identifiers)
+        # In the case of partial we expect multiple models. Incomplete models,
+        # that is models not having all folds, are not considered
+        highest_num_folds = max([value for value in identifiers.values()])
+        [identifiers.pop(key) for key, value in identifiers.items() if value < highest_num_folds]
+
+        return sorted(list(identifiers.keys()))
 
     def load_models_by_level(self, level: int, seed: int, cv: bool = False):
         model_identifiers = self.get_model_identifiers_for_level(level, seed)
@@ -425,13 +511,40 @@ class Backend(object):
         else:
             return self.load_models_by_identifiers(model_identifiers)
 
-    def load_level_predictions(self, level, seed):
+    def load_level_predictions(self, level, seed, folds: Optional[int] = None):
 
         model_identifiers = self.get_model_identifiers_for_level(level, seed)
 
-        y_hat = [self.load_predictions_by_level_and_seed_and_id_and_budget(
-            'orig_train', level, seed, idx, budget
-        ) for level, seed, idx, budget in model_identifiers]
+        if folds is None:
+            y_hat = [self.load_predictions_by_level_and_seed_and_id_and_budget(
+                'orig_train', level, seed, idx, budget
+            ) for level, seed, idx, budget in model_identifiers]
+        else:
+            # Folds to load tell us how many folds to load
+            y_hat = []
+            for level, seed, idx, budget in model_identifiers:
+                # Here, the predictions from the base layers are constructed
+                # by stacking the fold predictions AND sorting them, so they have the same
+                # index as the train data
+                indices = self.load_targets_indices()
+                predictions_train_data = np.fill(np.nan, size=load_targets_ensemble().shape)
+
+                for fold in folds:
+                    predictions_train_data[indices[fold]] = self.load_predictions_by_level_and_seed_and_id_and_budget(
+                        'ensemble', level, seed, idx, budget, fold)
+
+                # For now, crash if there are NANs
+                if np.any(np.isnan(predictions_train_data)):
+                    raise ValueError(f"NaNs are not expected yet not supported. Run into {predictions_train_data} for level={level} seed={seed} idx={idx}")
+                    #Obtain mean of columns as you need, nanmean is convenient.
+                    col_mean = np.nanmean(predictions_train_data, axis=0)
+
+                    #Find indices that you need to replace
+                    inds = np.where(np.isnan(predictions_train_data))
+
+                    #Place column means in the indices. Align the arrays using take
+                    predictions_train_data[inds] = np.take(col_mean, inds[1])
+                y_hat.append(predictions_train_data)
 
         runs_directory = self.get_runs_directory()
         test_prediction_files = sorted(glob.glob(
@@ -440,9 +553,12 @@ class Backend(object):
 
         y_test = None
         if test_prediction_files:
-            y_test = [self.load_predictions_by_level_and_seed_and_id_and_budget(
-                'orig_test', level, seed, idx, budget
-            ) for level, seed, idx, budget in model_identifiers]
+            if folds is None:
+                y_test = [self.load_predictions_by_level_and_seed_and_id_and_budget(
+                    'orig_test', level, seed, idx, budget
+                ) for level, seed, idx, budget in model_identifiers]
+            else:
+                y_test = [np.mean([self.load_predictions_by_level_and_seed_and_id_and_budget('orig_test', level, seed, idx, budget, fold) for fold in folds], axis=0) for level, seed, idx, budget in model_identifiers]
 
         return y_hat, y_test
 
@@ -451,15 +567,27 @@ class Backend(object):
         cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
         opt_indices: Optional[np.array], original_test_predictions: Optional[np.array],
+        fold: Optional[int] = None,
     ) -> None:
         runs_directory = self.get_runs_directory()
-        tmpdir = tempfile.mkdtemp(dir=runs_directory)
+        if fold is not None:
+            # We expect to write multiple times to a directory.
+            # if fold is provided -- this is a mechanism to write out
+            # the files created by partial cross validation
+            # Also, all my runs are single process so, no need for this YET
+            tmpdir = self.get_numrun_directory(level, seed, idx, budget)
+            #with LockDirectory(tmpdir) as lock:
+            #    os.makedirs(tmpdir, exist_ok=True)
+            os.makedirs(tmpdir, exist_ok=True)
+        else:
+            tmpdir = tempfile.mkdtemp(dir=runs_directory)
         if model is not None:
-            file_path = os.path.join(tmpdir, self.get_model_filename(level, seed, idx, budget))
+            file_path = os.path.join(tmpdir, self.get_model_filename(level, seed, idx, budget, fold))
             with open(file_path, 'wb') as fh:
                 pickle.dump(model, fh, -1)
 
         if cv_model is not None:
+            assert fold is None, f"It does not make sense to have this case. Fold is something during partial cv. cv_mode is true on cv, not partial cv"
             file_path = os.path.join(tmpdir, self.get_cv_model_filename(level, seed, idx, budget))
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
@@ -473,16 +601,23 @@ class Backend(object):
             # It is just fundamentally sorting the OOF predictions to match the
             # original train data. It will be better to just sort and use
             # ensemble_prediction but I don't want to put noise in the eq
-            (ensemble_predictions[np.argsort(np.array(opt_indices))], 'orig_train'),
+            (ensemble_predictions[np.argsort(np.array(opt_indices))] if opt_indices is not None else None, 'orig_train'),
             (original_test_predictions, 'orig_test'),
         ):
             if preds is not None:
                 file_path = os.path.join(
                     tmpdir,
-                    self.get_prediction_filename(subset, level, seed, idx, budget)
+                    self.get_prediction_filename(subset, level, seed, idx, budget, fold)
                 )
                 with open(file_path, 'wb') as fh:
                     pickle.dump(preds.astype(np.float32), fh, -1)
+
+        # If fold is provided no need to rename. Ask Matthias why 2
+        # runs can write to the same num run instance budget?
+        # Maybe on iterative runs, but not something we are looking for right now
+        if fold is not None:
+            return
+
         try:
             os.rename(tmpdir, self.get_numrun_directory(level, seed, idx, budget))
         except OSError:
@@ -540,9 +675,13 @@ class Backend(object):
                                 level: int,
                                 automl_seed: Union[str, int],
                                 idx: int,
-                                budget: float
+                                budget: float,
+                                fold: Optional[int] = None,
                                 ) -> str:
-        return 'predictions_%s_%s_%s_%s_%s.npy' % (subset, level, automl_seed, idx, budget)
+        if fold is not None:
+            return 'predictions_%s_%s_%s_%s_%s.%s.npy' % (subset, level, automl_seed, idx, budget, fold)
+        else:
+            return 'predictions_%s_%s_%s_%s_%s.npy' % (subset, level, automl_seed, idx, budget)
 
     def save_predictions_as_txt(self,
                                 predictions: np.ndarray,
