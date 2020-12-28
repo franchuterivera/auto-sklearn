@@ -671,6 +671,7 @@ class AutoML(BaseEstimator):
                 metric=self._metric,
                 ensemble_size=self._ensemble_size,
                 ensemble_nbest=self._ensemble_nbest,
+                max_stacking_levels=self._max_stacking_levels,
                 max_models_on_disc=self._max_models_on_disc,
                 seed=self._seed,
                 precision=self.precision,
@@ -683,22 +684,37 @@ class AutoML(BaseEstimator):
 
         self._stopwatch.stop_task(ensemble_task_name)
 
-        self.setup_and_run_smac_job(datamanager=datamanager, num_run=num_run, level=self._max_stacking_levels)
+        self.setup_and_run_smac_job(
+            datamanager=datamanager,
+            num_run=num_run, level=self._max_stacking_levels,
+            ensemble_callback=proc_ensemble
+        )
 
         # Wait until the ensemble process is finished to avoid shutting down
         # while the ensemble builder tries to access the data
-        if self._proc_ensemble is not None and self._ensemble_size > 0:
-            self._proc_ensemble.join()
-            self.ensemble_performance_history = self._proc_ensemble.get_ensemble_history()
+        if proc_ensemble is not None:
+            self.ensemble_performance_history = list(proc_ensemble.history)
 
-        self._proc_ensemble = None
+            # save the ensemble performance history file
+            if len(self.ensemble_performance_history) > 0:
+                pd.DataFrame(self.ensemble_performance_history).to_json(
+                        os.path.join(self._backend.internals_directory, 'ensemble_history.json'))
+
+            if len(proc_ensemble.futures) > 0:
+                future = proc_ensemble.futures.pop()
+                future.result()
 
         if load_models:
             self._load_models()
+        self._close_dask_client()
+
+        # Clean up the logger
+        self._clean_logger()
 
         return self
 
-    def setup_and_run_smac_job(self, datamanager, num_run, level, fraction_time_for_this_smbo=1.0):
+    def setup_and_run_smac_job(self, datamanager, num_run, level, fraction_time_for_this_smbo=1.0,
+                               ensemble_callback=None):
 
         # kill the datamanager as it will be re-loaded anyways from sub processes
         try:
@@ -707,7 +723,7 @@ class AutoML(BaseEstimator):
             pass
 
         # => RUN SMAC
-        smac_task_name = 'runSMAC'
+        smac_task_name = 'runSMAC' + str(level)
         self._stopwatch.start_task(smac_task_name)
         elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
         self._logger.info(f"As of now elapsed_time={elapsed_time} and self._time_for_task={self._time_for_task}")
@@ -776,7 +792,7 @@ class AutoML(BaseEstimator):
                 smac_scenario_args=self._smac_scenario_args,
                 scoring_functions=self._scoring_functions,
                 port=self._logger_port,
-                ensemble_callback=proc_ensemble,
+                ensemble_callback=ensemble_callback,
             )
 
             try:
@@ -796,6 +812,9 @@ class AutoML(BaseEstimator):
                 self._logger.exception(e)
                 raise
 
+        # Register termination
+        self._stopwatch.stop_task(smac_task_name)
+
     def feature_enrichment(self, datamanager):
 
         self._stopwatch.start_task('feature_enrichment_' + self._dataset_name)
@@ -811,7 +830,13 @@ class AutoML(BaseEstimator):
             raise NotImplementedError("Need OOF to build stack!!")
 
         self._backend.save_datamanager(datamanager, level=1)
-        self.setup_and_run_smac_job(datamanager, num_run=1, level=1, fraction_time_for_this_smbo=self._fraction_time_for_this_smbo)
+        self.setup_and_run_smac_job(
+            datamanager,
+            num_run=1,
+            level=1,
+            fraction_time_for_this_smbo=self._fraction_time_for_this_smbo,
+            ensemble_callback=None,
+        )
 
         # Build a stacked prediction for the next level
         X, y, X_test, y_test, new_features = self.selectLevelPredictionsAndConcat(
@@ -842,7 +867,7 @@ class AutoML(BaseEstimator):
             X_test = datamanager.data['X_test']
             y_test = datamanager.data['Y_test']
 
-        y_hat, y_test_hat = self._backend.load_level_predictions(level, dim=y.shape)
+        y_hat, y_test_hat = self._backend.load_level_predictions(level, self._seed)
 
         y_hat = np.concatenate(y_hat, axis=1)
         if X_test is not None:
@@ -1021,12 +1046,28 @@ class AutoML(BaseEstimator):
 
         # We first need all predictions form the lower stacking layers if any
         cv = 'cv' in self._resampling_strategy
-        base_models = self._backend.load_all_models(self._seed, self._max_stacking_levels-1, cv)
         assert self._max_stacking_levels <= 2
+
+        # We provide the base predictions to the joblib in case we already computed them
+        # So the ensemble can be at any level, so the selected identifiers in
+        # self.ensemble_.get_selected_model_identifiers might be needed in this
+        # base level prediction and in the upper level prediction
         all_base_predictions = None
         lower_level_identifiers = []
+
         if self._max_stacking_levels > 1:
-            lower_level_identifiers = self._backend.get_model_identifiers_for_level(self._seed, self._max_stacking_levels-1, cv)
+
+            # get_model_identifiers_for_level will return the keys of base_models down below
+            # But get_model_identifiers_for_level is the one function that decide how
+            # is the order of model predictions which is fundamental to have in a single
+            # place. Train and test need consistency on how predictions are read
+            lower_level_identifiers = self._backend.get_model_identifiers_for_level(
+                self._max_stacking_levels-1,
+                self._seed,
+            )
+            base_models = self._backend.load_models_by_level(self._max_stacking_levels-1,
+                                                             self._seed, cv)
+
             all_base_predictions = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(_model_predict)(
                     base_models[identifier], X, batch_size, self._logger, self._task, identifier
@@ -1034,10 +1075,16 @@ class AutoML(BaseEstimator):
                 for identifier in lower_level_identifiers
             )
 
-
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(_model_predict)(
-                models[identifier], X, batch_size, self._logger, self._task, identifier, all_base_predictions,  lower_level_identifiers.index(identifier) if identifier in lower_level_identifiers else None
+                models[identifier],
+                X,
+                batch_size,
+                self._logger,
+                self._task,
+                identifier,
+                all_base_predictions,
+                lower_level_identifiers.index(identifier) if identifier in lower_level_identifiers else None
             )
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )

@@ -317,31 +317,11 @@ class Backend(object):
 
     def load_datamanager(self, level: int) -> AbstractDataManager:
         filepath = self._get_datamanager_pickle_filename(level)
-        with lockfile.LockFile(filepath):
-            with open(filepath, 'rb') as fh:
-                return pickle.load(fh)
+        with open(filepath, 'rb') as fh:
+            return pickle.load(fh)
 
     def get_runs_directory(self) -> str:
         return os.path.join(self.internals_directory, 'runs')
-
-    def load_level_predictions(self, level, dim):
-        train_prediction_files = sorted(glob.glob(os.path.join(
-            self._get_prediction_output_dir('orig_train'),
-            '*npy'
-        )))
-        y_hat = [np.load(f, allow_pickle=True) for f in train_prediction_files]
-
-        test_prediction_files = sorted(glob.glob(os.path.join(
-            self._get_prediction_output_dir('orig_test'),
-            '*npy'
-        )))
-        y_test = None
-        if test_prediction_files:
-            y_test = [np.load(f, allow_pickle=True) for f in test_prediction_files]
-        return y_hat, y_test
-
-    def get_model_dir(self) -> str:
-        return os.path.join(self.internals_directory, 'models')
 
     def get_numrun_directory(self, level: int, seed: int, num_run: int, budget: float) -> str:
         return os.path.join(self.internals_directory, 'runs', '%d_%d_%d_%s' % (level, seed, num_run, budget))
@@ -487,7 +467,14 @@ class Backend(object):
         for preds, subset in (
             (ensemble_predictions, 'ensemble'),
             (valid_predictions, 'valid'),
-            (test_predictions, 'test')
+            (test_predictions, 'test'),
+            # Search for a better name? This fundamentally are the OOF
+            # predictions from level N-1 that are gonna be used in level N
+            # It is just fundamentally sorting the OOF predictions to match the
+            # original train data. It will be better to just sort and use
+            # ensemble_prediction but I don't want to put noise in the eq
+            (ensemble_predictions[np.argsort(np.array(opt_indices))], 'orig_train'),
+            (original_test_predictions, 'orig_test'),
         ):
             if preds is not None:
                 file_path = os.path.join(

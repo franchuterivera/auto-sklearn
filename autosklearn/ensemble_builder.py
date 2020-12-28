@@ -373,25 +373,23 @@ def fit_and_return_ensemble(
 
 class EnsembleBuilder(object):
     def __init__(
-            self,
-            backend: Backend,
-            dataset_name: str,
-            task_type: int,
-            metric: Scorer,
-            limit: int,
-            ensemble_size: int = 10,
-            ensemble_nbest: int = 100,
-            max_models_on_disc: int = 100,
-            performance_range_threshold: float = 0,
-            max_stacking_levels: int =1,
-            seed: int = 1,
-            max_iterations: int = None,
-            precision: int = 32,
-            sleep_duration: int = 2,
-            memory_limit: Optional[int] = 1024,
-            read_at_most: int = 5,
-            random_state: Optional[Union[int, np.random.RandomState]] = None,
-            queue: multiprocessing.Queue = None
+        self,
+        backend: Backend,
+        dataset_name: str,
+        task_type: int,
+        metric: Scorer,
+        ensemble_size: int = 10,
+        ensemble_nbest: int = 100,
+        max_models_on_disc: int = 100,
+        performance_range_threshold: float = 0,
+        max_stacking_levels: int =1,
+        seed: int = 1,
+        precision: int = 32,
+        memory_limit: Optional[int] = 1024,
+        read_at_most: int = 5,
+        random_state: Optional[Union[int, np.random.RandomState]] = None,
+        logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+        unit_test: bool = False,
     ):
         """
             Constructor
