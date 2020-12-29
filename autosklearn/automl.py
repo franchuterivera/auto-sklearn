@@ -695,17 +695,20 @@ class AutoML(BaseEstimator):
 
         # Wait until the ensemble process is finished to avoid shutting down
         # while the ensemble builder tries to access the data
+        print(f"at this point proc_ensemble={proc_ensemble}")
         if proc_ensemble is not None:
             self.ensemble_performance_history = list(proc_ensemble.history)
+
+            if len(proc_ensemble.futures) > 0:
+                result = proc_ensemble.futures.pop().result()
+                if result:
+                    ensemble_history, _, _, _, _ = result
+                    self.ensemble_performance_history.extend(ensemble_history)
 
             # save the ensemble performance history file
             if len(self.ensemble_performance_history) > 0:
                 pd.DataFrame(self.ensemble_performance_history).to_json(
                         os.path.join(self._backend.internals_directory, 'ensemble_history.json'))
-
-            if len(proc_ensemble.futures) > 0:
-                future = proc_ensemble.futures.pop()
-                future.result()
 
         if load_models:
             self._load_models()

@@ -592,6 +592,21 @@ class Backend(object):
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
 
+        # Reformat the original train predictions
+        original_train_predictions = None
+        if opt_indices is not None:
+            opt_indices = np.array(opt_indices)
+            repeats = np.count_nonzero(opt_indices == 1)
+            if repeats == 1:
+                original_train_predictions = ensemble_predictions[np.argsort(np.array(opt_indices))]
+            else:
+                # There is a repeated kfold so sadly split and average
+                indices = [np.concatenate([np.argsort(split) + i * split.shape[0] for i, split in enumerate(
+                        np.split(opt_indices, repeats))])]
+                original_train_predictions = np.mean( np.split(ensemble_predictions[indices], repeats), axis=0)
+
+        (ensemble_predictions[np.argsort(np.array(opt_indices))] if opt_indices is not None else None, 'orig_train'),
+
         for preds, subset in (
             (ensemble_predictions, 'ensemble'),
             (valid_predictions, 'valid'),
@@ -601,7 +616,7 @@ class Backend(object):
             # It is just fundamentally sorting the OOF predictions to match the
             # original train data. It will be better to just sort and use
             # ensemble_prediction but I don't want to put noise in the eq
-            (ensemble_predictions[np.argsort(np.array(opt_indices))] if opt_indices is not None else None, 'orig_train'),
+            (original_train_predictions, 'orig_train'),
             (original_test_predictions, 'orig_test'),
         ):
             if preds is not None:
