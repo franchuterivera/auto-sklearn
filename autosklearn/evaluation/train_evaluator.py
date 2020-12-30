@@ -4,7 +4,7 @@ import json
 import numpy as np
 from smac.tae import TAEAbortException, StatusType
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit, KFold, \
-    StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit
+    StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit, RepeatedStratifiedKFold, RepeatedKFold
 from sklearn.model_selection._split import _RepeatedSplits, BaseShuffleSplit
 
 from autosklearn.evaluation.abstract_evaluator import (
@@ -967,6 +967,7 @@ class TrainEvaluator(AbstractEvaluator):
 
         y = D.data['Y_train']
         shuffle = self.resampling_strategy_args.get('shuffle', True)
+        repeats = self.resampling_strategy_args.get('repeats', None)
         train_size = 0.67
         if self.resampling_strategy_args:
             train_size = self.resampling_strategy_args.get('train_size',
@@ -1001,12 +1002,24 @@ class TrainEvaluator(AbstractEvaluator):
             elif self.resampling_strategy in ['cv', 'cv-iterative-fit', 'partial-cv',
                                               'partial-cv-iterative-fit']:
                 if shuffle:
-                    cv = StratifiedKFold(
-                        n_splits=self.resampling_strategy_args['folds'],
-                        shuffle=shuffle, random_state=1)
+                    if repeats is not None:
+                        # Notice, no shuffle here because oviously for repeat that happens
+                        cv = RepeatedStratifiedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            n_repeats=repeats,
+                            random_state=1)
+                    else:
+                        cv = StratifiedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            shuffle=shuffle, random_state=1)
                 else:
-                    cv = KFold(n_splits=self.resampling_strategy_args['folds'],
-                               shuffle=shuffle)
+                    if repeats is not None:
+                        cv = RepeatedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            n_repeats=repeats,
+                            shuffle=shuffle)
+                    else:
+                        cv = KFold(n_splits=self.resampling_strategy_args['folds'])
             else:
                 raise ValueError(self.resampling_strategy)
         else:
