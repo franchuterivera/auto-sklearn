@@ -38,7 +38,7 @@ Y_TEST = 2
 
 # _level_seed_idx_budget.budget
 # Change to import this from backend
-MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)\.npy'
+MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)(\.[0-9]+)*\.npy'
 
 
 class EnsembleBuilderManager(IncorporateRunResultCallback):
@@ -61,6 +61,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         ensemble_memory_limit: Optional[int],
         random_state: int,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+        folds_to_use: Optional[List] = None,
     ):
         """ SMAC callback to handle ensemble building
 
@@ -132,6 +133,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_memory_limit = ensemble_memory_limit
         self.random_state = random_state
         self.logger_port = logger_port
+        self.folds_to_use = folds_to_use
 
         # Store something similar to SMAC's runhistory
         self.history = []
@@ -236,6 +238,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     priority=100,
                     pynisher_context=pynisher_context,
                     logger_port=self.logger_port,
+                    folds_to_use=self.folds_to_use,
                     unit_test=unit_test,
                 ))
 
@@ -276,6 +279,7 @@ def fit_and_return_ensemble(
     return_predictions: bool,
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    folds_to_use: Optional[List] = None,
     unit_test: bool = False,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
@@ -367,6 +371,7 @@ def fit_and_return_ensemble(
         iteration=iteration,
         return_predictions=return_predictions,
         pynisher_context=pynisher_context,
+        folds_to_use=folds_to_use,
     )
     return result
 
@@ -577,6 +582,12 @@ class EnsembleBuilder(object):
         del datamanager
         self.ensemble_history = []
 
+        # In case of partial cross validation for experimentation purposes
+        # we are flexible in the regards of what folds to use to build the ensemble
+        # In this case, the ensemble printed to disc will note which folds of which models
+        # where use, so that we also use the corresponding model for that fold
+        self.folds_to_use = None
+
     def run(
         self,
         iteration: int,
@@ -585,6 +596,7 @@ class EnsembleBuilder(object):
         time_buffer=5,
         return_predictions: bool = False,
         pynisher_context: str = 'spawn',  # only change for unit testing!
+        folds_to_use = None,
     ):
 
         if time_left is None and end_at is None:
@@ -621,7 +633,7 @@ class EnsembleBuilder(object):
                 logger=self.logger,
                 context=context,
             )(self.main)
-            safe_ensemble_script(time_left, iteration, return_predictions)
+            safe_ensemble_script(time_left, iteration, return_predictions, folds_to_use)
             if safe_ensemble_script.exit_status is pynisher.MemorylimitException:
                 # if ensemble script died because of memory error,
                 # reduce nbest to reduce memory consumption and try it again
@@ -663,7 +675,31 @@ class EnsembleBuilder(object):
 
         return [], self.ensemble_nbest, None, None, None
 
-    def main(self, time_left, iteration, return_predictions):
+    def main(self, time_left: float, iteration: int, return_predictions: bool,
+             folds_to_use: Optional[List[int]] = None,
+             ) -> Tuple[List, int, np.array, np.array, np.array]:
+        """
+        Parameters
+        ----------
+            time_left: float
+                How much time is left for the current iteration
+            iteration: int
+                Current iteration of ensemble building
+            return_prediction: bool
+                Whether return the predictions of this iteration or not
+            folds_to_use: List[int]
+                If this value is not None, it is assumed that the folds are split,
+                and in this sense, we are using a partial resampling strategy.
+                When a list is provided, ONLY the folds provided are considered for ensemble
+                building
+        Returns
+        -------
+        """
+        if folds_to_use is not None:
+            if folds_to_use != self.folds_to_use:
+                # Dropping the predictions as they were made with other folds
+                self.read_preds = {}
+            self.folds_to_use = folds_to_use
 
         # Pynisher jobs inside dask 'forget'
         # the logger configuration. So we have to set it up
@@ -684,7 +720,7 @@ class EnsembleBuilder(object):
         )
 
         # populates self.read_preds and self.read_scores
-        if not self.score_ensemble_preds():
+        if not self.score_ensemble_preds(folds_to_use):
             if return_predictions:
                 return self.ensemble_history, self.ensemble_nbest, train_pred, valid_pred, test_pred
             else:
@@ -692,7 +728,7 @@ class EnsembleBuilder(object):
 
         # Only the models with the n_best predictions are candidates
         # to be in the ensemble
-        candidate_models = self.get_n_best_preds()
+        candidate_models = self.get_n_best_preds(folds_to_use)
         if not candidate_models:  # no candidates yet
             if return_predictions:
                 return self.ensemble_history, self.ensemble_nbest, train_pred, valid_pred, test_pred
@@ -702,7 +738,7 @@ class EnsembleBuilder(object):
         # populates predictions in self.read_preds
         # reduces selected models if file reading failed
         n_sel_valid, n_sel_test = self. \
-            get_valid_test_preds(selected_keys=candidate_models)
+            get_valid_test_preds(selected_keys=candidate_models, folds_to_use=folds_to_use)
 
         # If valid/test predictions loaded, then reduce candidate models to this set
         if len(n_sel_test) != 0 and len(n_sel_valid) != 0 \
@@ -749,7 +785,7 @@ class EnsembleBuilder(object):
         # Delete files of non-candidate models - can only be done after fitting the ensemble and
         # saving it to disc so we do not accidentally delete models in the previous ensemble
         if self.max_resident_models is not None:
-            self._delete_excess_models(selected_keys=candidate_models)
+            self._delete_excess_models(selected_keys=candidate_models, folds_to_use=folds_to_use)
 
         # Save the read scores status for the next iteration
         with open(self.ensemble_score_file, "wb") as memory:
@@ -797,25 +833,26 @@ class EnsembleBuilder(object):
         gets the cost of a model being on disc
         """
 
-        match = self.model_fn_re.search(pred_path)
-        if not match:
-            raise ValueError("Invalid path format %s" % pred_path)
-        _level = int(match.group(1))
-        _seed = int(match.group(2))
-        _num_run = int(match.group(3))
-        _budget = float(match.group(4))
+        #match = self.model_fn_re.search(pred_path)
+        #if not match:
+        #    raise ValueError("Invalid path format %s" % pred_path)
+        #_level = int(match.group(1))
+        #_seed = int(match.group(2))
+        #_num_run = int(match.group(3))
+        #_budget = float(match.group(4))
 
-        stored_files_for_run = os.listdir(
-            self.backend.get_numrun_directory(_level, _seed, _num_run, _budget))
-        stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(_level, _seed, _num_run, _budget), file_name)
-            for file_name in stored_files_for_run]
+        #stored_files_for_run = os.listdir(
+        #    self.backend.get_numrun_directory(_level, _seed, _num_run, _budget))
+        # Now the pred path is the num run directory
+        stored_files_for_run = os.listdir(pred_path)
+        stored_files_for_run = [os.path.join(pred_path, file_name)
+                                for file_name in stored_files_for_run]
         this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
         # get the megabytes
         return round(this_model_cost / math.pow(1024, 2), 2)
 
-    def score_ensemble_preds(self):
+    def score_ensemble_preds(self, folds_to_use = None):
         """
             score predictions on ensemble building data set;
             populates self.read_preds and self.read_scores
@@ -823,9 +860,14 @@ class EnsembleBuilder(object):
 
         self.logger.debug("Read ensemble data set predictions")
 
-        if self.y_true_ensemble is None:
+        if self.y_true_ensemble is None or folds_to_use is not None:
+            if folds_to_use is not None:
+                self.logger.warning(f"TODO: It might not be efficient to always load the targets"
+                                    "ensemble, but we need to read the folds dynamically to try"
+                                    "different strategies. Enhance this in the future"
+                                    )
             try:
-                self.y_true_ensemble = self.backend.load_targets_ensemble()
+                self.y_true_ensemble = self.backend.load_targets_ensemble(folds=folds_to_use)
             except FileNotFoundError:
                 self.logger.debug(
                     "Could not find true targets on ensemble data set: %s",
@@ -836,11 +878,16 @@ class EnsembleBuilder(object):
         pred_path = os.path.join(
             glob.escape(self.backend.get_runs_directory()),
             '*_%d_*_*' % self.seed,
-            'predictions_ensemble_*_%s_*_*.npy*' % self.seed,
         )
         y_ens_files = glob.glob(pred_path)
-        y_ens_files = [y_ens_file for y_ens_file in y_ens_files
-                       if y_ens_file.endswith('.npy') or y_ens_file.endswith('.npy.gz')]
+
+        # Move to use directory name so we can load the desired
+        # predictions regardless of the resampling strategy
+
+        # y_ens_files = [os.path.dirname(y_ens_file) for y_ens_file in y_ens_files
+        #               if y_ens_file.endswith('.npy') or y_ens_file.endswith('.npy.gz')]
+
+
         self.y_ens_files = y_ens_files
         # no validation predictions so far -- no files
         if len(self.y_ens_files) == 0:
@@ -851,29 +898,34 @@ class EnsembleBuilder(object):
         # First sort files chronologically
         to_read = []
         for y_ens_fn in self.y_ens_files:
-            match = self.model_fn_re.search(y_ens_fn)
-            _level = int(match.group(1))
-            _seed = int(match.group(2))
-            _num_run = int(match.group(3))
-            _budget = float(match.group(4))
+            _level, _seed, _num_run, _budget = os.path.basename(y_ens_fn).split('_')
+            #match = self.model_fn_re.search(y_ens_fn)
+            #_level = int(match.group(1))
+            #_seed = int(match.group(2))
+            #_num_run = int(match.group(3))
+            #_budget = float(match.group(4))
             mtime = os.path.getmtime(y_ens_fn)
 
-            to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, mtime])
+            if folds_to_use is not None and not self._is_rundir_complete(numrun_dir=y_ens_fn, folds_to_use=folds_to_use):
+                # There are missing folds for this run
+                self.logger.debug(f"Ignoring run {y_ens_fn} as there are missing folds {folds_to_use}")
+                continue
+            to_read.append([y_ens_fn, int(_level), int(_seed), int(_num_run), float(_budget), mtime])
 
         n_read_files = 0
         # Now read file wrt to num_run
-        for y_ens_fn, match, _level, _seed, _num_run, _budget, mtime in \
+        for y_ens_fn, _level, _seed, _num_run, _budget, mtime in \
                 sorted(to_read, key=lambda x: x[5]):
             if self.read_at_most and n_read_files >= self.read_at_most:
                 # limit the number of files that will be read
                 # to limit memory consumption
                 break
 
-            if not y_ens_fn.endswith(".npy") and not y_ens_fn.endswith(".npy.gz"):
-                self.logger.info('Error loading file (not .npy or .npy.gz): %s', y_ens_fn)
-                continue
+            #if not y_ens_fn.endswith(".npy") and not y_ens_fn.endswith(".npy.gz"):
+            #    self.logger.info('Error loading file (not .npy or .npy.gz): %s', y_ens_fn)
+            #    continue
 
-            if not self.read_scores.get(y_ens_fn):
+            if not self.read_scores.get(y_ens_fn) or self.read_scores[y_ens_fn]["folds_to_use"] != folds_to_use:
                 self.read_scores[y_ens_fn] = {
                     "ens_score": -np.inf,
                     "mtime_ens": 0,
@@ -884,6 +936,7 @@ class EnsembleBuilder(object):
                     "num_run": _num_run,
                     "budget": _budget,
                     "disc_space_cost_mb": None,
+                    "folds_to_use": folds_to_use,
                     # Lazy keys so far:
                     # 0 - not loaded
                     # 1 - loaded and in memory
@@ -904,12 +957,14 @@ class EnsembleBuilder(object):
 
             # actually read the predictions and score them
             try:
-                y_ensemble = self._read_np_fn(y_ens_fn)
+                y_ensemble = self.read_np_fn(y_ens_fn, folds_to_use, 'ensemble')
                 score = calculate_score(solution=self.y_true_ensemble,
                                         prediction=y_ensemble,
                                         task_type=self.task_type,
                                         metric=self.metric,
                                         scoring_functions=None)
+
+                self.logger.critical(f"Added {y_ens_fn} with score={score}")
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
                     self.logger.debug(
@@ -948,9 +1003,10 @@ class EnsembleBuilder(object):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_scores.values()])
         )
+        self.logger.critical(f"self.read_scores={self.read_scores}")
         return True
 
-    def get_n_best_preds(self):
+    def get_n_best_preds(self, folds_to_use):
         """
             get best n predictions (i.e., keys of self.read_scores)
             according to score on "ensemble set"
@@ -1104,7 +1160,7 @@ class EnsembleBuilder(object):
                 )
                 and self.read_scores[k]['loaded'] != 3
             ):
-                self.read_preds[k][Y_ENSEMBLE] = self._read_np_fn(k)
+                self.read_preds[k][Y_ENSEMBLE] = self.read_np_fn(k, folds_to_use, 'ensemble')
                 # No need to load valid and test here because they are loaded
                 #  only if the model ends up in the ensemble
                 self.read_scores[k]['loaded'] = 1
@@ -1112,7 +1168,7 @@ class EnsembleBuilder(object):
         # return best scored keys of self.read_scores
         return sorted_keys[:ensemble_n_best]
 
-    def get_valid_test_preds(self, selected_keys: List[str]) -> Tuple[List[str], List[str]]:
+    def get_valid_test_preds(self, selected_keys: List[str], folds_to_use) -> Tuple[List[str], List[str]]:
         """
         get valid and test predictions from disc
         and store them in self.read_preds
@@ -1141,7 +1197,7 @@ class EnsembleBuilder(object):
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"],
                     ),
-                    'predictions_valid_%d_%d_%d_%s.npy*' % (
+                    'predictions_valid_%d_%d_%d_%s*.npy*' % (
                         self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
@@ -1159,7 +1215,7 @@ class EnsembleBuilder(object):
                         self.read_scores[k]["num_run"],
                         self.read_scores[k]["budget"],
                     ),
-                    'predictions_test_%d_%d_%d_%s.npy*' % (
+                    'predictions_test_%d_%d_%d_%s*.npy*' % (
                         self.read_scores[k]["level"],
                         self.read_scores[k]["seed"],
                         self.read_scores[k]["num_run"],
@@ -1175,7 +1231,7 @@ class EnsembleBuilder(object):
                 #                   "%s" % valid_fn)
                 pass
             else:
-                valid_fn = valid_fn[0]
+                valid_fn = os.path.dirname(valid_fn[0])
                 if (
                     self.read_scores[k]["mtime_valid"] == os.path.getmtime(valid_fn)
                     and k in self.read_preds
@@ -1184,7 +1240,7 @@ class EnsembleBuilder(object):
                     success_keys_valid.append(k)
                     continue
                 try:
-                    y_valid = self._read_np_fn(valid_fn)
+                    y_valid = self.read_np_fn(valid_fn, folds_to_use, subset='valid')
                     self.read_preds[k][Y_VALID] = y_valid
                     success_keys_valid.append(k)
                     self.read_scores[k]["mtime_valid"] = os.path.getmtime(valid_fn)
@@ -1198,7 +1254,7 @@ class EnsembleBuilder(object):
                 #                   test_fn)
                 pass
             else:
-                test_fn = test_fn[0]
+                test_fn = os.path.dirname(test_fn[0])
                 if (
                     self.read_scores[k]["mtime_test"] == os.path.getmtime(test_fn)
                     and k in self.read_preds
@@ -1207,7 +1263,7 @@ class EnsembleBuilder(object):
                     success_keys_test.append(k)
                     continue
                 try:
-                    y_test = self._read_np_fn(test_fn)
+                    y_test = self.read_np_fn(test_fn, folds_to_use, subset='test')
                     self.read_preds[k][Y_TEST] = y_test
                     success_keys_test.append(k)
                     self.read_scores[k]["mtime_test"] = os.path.getmtime(test_fn)
@@ -1217,7 +1273,7 @@ class EnsembleBuilder(object):
 
         return success_keys_valid, success_keys_test
 
-    def fit_ensemble(self, selected_keys: list):
+    def fit_ensemble(self, selected_keys: list, folds_to_use=None):
         """
             fit ensemble
 
@@ -1265,7 +1321,10 @@ class EnsembleBuilder(object):
             task_type=self.task_type,
             metric=self.metric,
             random_state=self.random_state,
+            folds=folds_to_use,
         )
+
+        self.logger.critical(f"The shape of solution for fit ensemble is {self.y_true_ensemble.shape} and {[np.shape(p) for p in predictions_train]}")
 
         try:
             self.logger.debug(
@@ -1445,7 +1504,17 @@ class EnsembleBuilder(object):
         sorted_keys = list(reversed(sorted(sorted_keys, key=lambda x: x[1])))
         return sorted_keys
 
-    def _delete_excess_models(self, selected_keys: List[str]):
+    def _is_rundir_complete(self, numrun_dir: str, folds_to_use: Optional[List[int]]) -> bool:
+        if folds_to_use is None:
+            return True
+        _level, _seed, _num_run, _budget = os.path.basename(numrun_dir).split('_')
+        expected = [os.path.join(numrun_dir, "predictions_ensemble_{}_{}_{}_{}.{}.npy".format(_level, _seed, _num_run, _budget, fold)) for fold in folds_to_use]
+
+        if any([not os.path.exists(name) for name in expected]):
+            return False
+        return True
+
+    def _delete_excess_models(self, selected_keys: List[str], folds_to_use: Optional[List]):
         """
             Deletes models excess models on disc. self.max_models_on_disc
             defines the upper limit on how many models to keep.
@@ -1455,41 +1524,71 @@ class EnsembleBuilder(object):
         """
 
         # Loop through the files currently in the directory
-        for pred_path in self.y_ens_files:
+        for numrun_dir in self.y_ens_files:
 
             # Do not delete candidates
-            if pred_path in selected_keys:
+            if numrun_dir in selected_keys:
                 continue
 
-            if pred_path in self._has_been_candidate:
+            # Do not delete incomplete runs for partial cv
+            if self.folds_to_use is not None and not self._is_rundir_complete(numrun_dir, self.folds_to_use):
                 continue
 
-            match = self.model_fn_re.search(pred_path)
-            _level = int(match.group(1))
-            _seed = int(match.group(2))
-            _num_run = int(match.group(3))
-            _budget = float(match.group(4))
+            if numrun_dir in self._has_been_candidate:
+                continue
+
+            _level, _seed, _num_run, _budget = os.path.basename(numrun_dir).split('_')
+            #match = self.model_fn_re.search(pred_path)
+            #_level = int(match.group(1))
+            #_seed = int(match.group(2))
+            #_num_run = int(match.group(3))
+            #_budget = float(match.group(4))
 
             # Do not delete the dummy prediction
-            if _num_run == 1:
+            if int(_num_run) == 1:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget)
+            #numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget)
             # Only delete the last stack level predictions
             if int(_level) != self.max_stacking_levels:
                 continue
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
                 shutil.rmtree(numrun_dir + '.old')
-                self.logger.info("Deleted files of non-candidate model %s", pred_path)
-                self.read_scores[pred_path]["disc_space_cost_mb"] = None
-                self.read_scores[pred_path]["loaded"] = 3
-                self.read_scores[pred_path]["ens_score"] = -np.inf
+                self.logger.info("Deleted files of non-candidate model %s", numrun_dir)
+                self.read_scores[numrun_dir]["disc_space_cost_mb"] = None
+                self.read_scores[numrun_dir]["loaded"] = 3
+                self.read_scores[numrun_dir]["ens_score"] = -np.inf
             except Exception as e:
                 self.logger.error(
-                    "Failed to delete files of non-candidate model %s due"
-                    " to error %s", pred_path, e
+                    "Failed to delete files of non-candidate model"
+                    " %s due to error %s", (numrun_dir, e),
                 )
+
+    def read_np_fn(self, path, folds_to_use=None, subset='ensemble'):
+        """Wrapper over _read_np_fn to read partial cv if needed"""
+        level_seed_id_budget = os.path.basename(path)
+        paths = glob.glob(os.path.join(
+            path,
+            f"predictions_{subset}*{level_seed_id_budget}*.npy"
+        ))
+        if folds_to_use is None:
+            assert len(paths) == 1, f"It should not happen that more than 1 ensemble prediction is found for non partial cv run subset={subset} path={path} {paths}"
+            return self._read_np_fn(paths[0])
+        else:
+            predictions_to_return = []
+            for fold in folds_to_use:
+                filename = [name for name in paths if f".{fold}.npy" in name]
+                assert len(filename) == 1, f"{paths} for fold {fold} is not unique"
+                prediction = self._read_np_fn(filename[0])
+                if len(folds_to_use) == 1:
+                    return prediction
+                predictions_to_return.append(prediction)
+            if 'ensemble' in subset:
+                return np.concatenate(predictions_to_return, axis=0)
+            else:
+                # Average all test and valid predictions
+                return np.mean(predictions_to_return, axis=0)
 
     def _read_np_fn(self, path):
 

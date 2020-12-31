@@ -1,6 +1,6 @@
 import random
 from collections import Counter
-from typing import Any, Dict, List, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 
@@ -19,6 +19,7 @@ class EnsembleSelection(AbstractEnsemble):
         random_state: np.random.RandomState,
         bagging: bool = False,
         mode: str = 'fast',
+        folds: Optional[List[int]] = None,
     ) -> None:
         self.ensemble_size = ensemble_size
         self.task_type = task_type
@@ -26,6 +27,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.bagging = bagging
         self.mode = mode
         self.random_state = random_state
+        self.folds = folds
 
     def __getstate__(self) -> Dict[str, Any]:
         # Cannot serialize a metric if

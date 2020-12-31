@@ -176,12 +176,12 @@ class AutoML(BaseEstimator):
             raise ValueError('Illegal resampling strategy: %s' %
                              self._resampling_strategy)
 
-        if self._resampling_strategy in ['partial-cv',
-                                         'partial-cv-iterative-fit',
-                                         ] \
-           and self._ensemble_size != 0:
-            raise ValueError("Resampling strategy %s cannot be used "
-                             "together with ensembles." % self._resampling_strategy)
+        #if self._resampling_strategy in ['partial-cv',
+        #                                 'partial-cv-iterative-fit',
+        #                                 ] \
+        #   and self._ensemble_size != 0:
+        #    raise ValueError("Resampling strategy %s cannot be used "
+        #                     "together with ensembles." % self._resampling_strategy)
         if self._resampling_strategy in ['partial-cv',
                                          'cv',
                                          'cv-iterative-fit',
@@ -189,6 +189,10 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
+
+        self._folds_to_use = None
+        if self._resampling_strategy in ['partial-cv']:
+            self._folds_to_use = self._resampling_strategy_arguments.get('folds_to_use', list(range(self._resampling_strategy_arguments['folds'])))
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 
@@ -368,7 +372,7 @@ class AutoML(BaseEstimator):
                     (basename, time_left_after_reading))
         return time_for_load_data
 
-    def _do_dummy_prediction(self, datamanager, num_run, level=1):
+    def _do_dummy_prediction(self, datamanager, num_run, level=1, instance=None):
 
         # Well now it makes sense because we are gonna stack the predictions
         # from the Y optimization as needed
@@ -403,7 +407,8 @@ class AutoML(BaseEstimator):
                                     port=self._logger_port,
                                     **self._resampling_strategy_arguments)
 
-        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task)
+        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task,
+                                                        instance=instance)
         if status == StatusType.SUCCESS:
             self._logger.info("Finished creating dummy predictions.")
         else:
@@ -640,7 +645,17 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         num_run = 1
-        self._do_dummy_prediction(datamanager, num_run, level=self._max_stacking_levels)
+        if self._resampling_strategy in ['partial-cv']:
+            # In the case of partial CV, we need a dummy prediction per fold
+            num_folds = self._resampling_strategy_arguments['folds']
+            instances = [json.dumps({'task_id': dataset_name,
+                                     'fold': fold_number})
+                         for fold_number in range(num_folds)]
+            for instance in instances:
+                self._do_dummy_prediction(datamanager, num_run, level=self._max_stacking_levels,
+                                          instance=instance)
+        else:
+            self._do_dummy_prediction(datamanager, num_run, level=self._max_stacking_levels)
 
         # == RUN ensemble builder
         # Do this before calculating the meta-features to make sure that the
@@ -683,6 +698,7 @@ class AutoML(BaseEstimator):
                 ensemble_memory_limit=self._memory_limit,
                 random_state=self._seed,
                 logger_port=self._logger_port,
+                folds_to_use=None if self._resampling_strategy not in ['partial-cv'] else self._folds_to_use,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -822,12 +838,14 @@ class AutoML(BaseEstimator):
         self._stopwatch.stop_task(smac_task_name)
 
     def feature_enrichment(self, datamanager):
-
         self._stopwatch.start_task('feature_enrichment_' + self._dataset_name)
         # If Just 1 stacking, perform the traditional 1 level
         # models and 1 ensemble selection
         if self._max_stacking_levels < 2:
             return datamanager
+
+        if self._resampling_strategy in ['partial-cv']:
+            raise NotImplementedError()
 
         if self._max_stacking_levels != 2:
             raise NotImplementedError("Can support right now at max 2 levels!")
@@ -1034,7 +1052,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'partial-cv')
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -1060,6 +1078,8 @@ class AutoML(BaseEstimator):
             for i, tmp_model in enumerate(self.models_.values()):
                 if isinstance(tmp_model, (DummyRegressor, DummyClassifier)):
                     check_is_fitted(tmp_model)
+                elif isinstance(tmp_model, (VotingClassifier, VotingRegressor)):
+                    [check_is_fitted(estimator.steps[-1][-1]) for estimator in tmp_model.estimators_]
                 else:
                     check_is_fitted(tmp_model.steps[-1][-1])
             models = self.models_
@@ -1180,6 +1200,7 @@ class AutoML(BaseEstimator):
             ensemble_memory_limit=self._memory_limit,
             random_state=self._seed,
             logger_port=self._logger_port,
+            folds_to_use=None if self._resampling_strategy not in ['partial-cv'] else [0],
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()
@@ -1198,13 +1219,11 @@ class AutoML(BaseEstimator):
         for identifier, model in model_dict.items():
             if isinstance(model, list):
                 if self._task in CLASSIFICATION_TASKS:
-                    models = VotingClassifier(estimators=None, voting='soft', )
+                    model_dict[identifier] = VotingClassifier(estimators=None, voting='soft', )
                 else:
-                    models = VotingRegressor(estimators=None)
-                models.estimators_ = model
-            model_dict[identifier] = models
+                    model_dict[identifier] = VotingRegressor(estimators=None)
+                model_dict[identifier].estimators_ = model
         return model_dict
-
 
     def _load_models(self):
         self.ensemble_ = self._backend.load_ensemble(self._seed)
@@ -1327,8 +1346,8 @@ class AutoML(BaseEstimator):
         # TODO: add those arguments
 
         # TODO remove this restriction!
-        if self._resampling_strategy in ['partial-cv', 'partial-cv-iterative-fit']:
-            raise ValueError('Cannot call cv_results when using partial-cv!')
+        #if self._resampling_strategy in ['partial-cv', 'partial-cv-iterative-fit']:
+        #    raise ValueError('Cannot call cv_results when using partial-cv!')
 
         parameter_dictionaries = dict()
         masks = dict()
@@ -1476,7 +1495,10 @@ class AutoML(BaseEstimator):
         with io.StringIO() as sio:
             sio.write("[")
             for weight, model in models_with_weights:
-                sio.write("(%f, %s),\n" % (weight, model))
+                if isinstance(model, (VotingClassifier, VotingRegressor)):
+                    sio.write("(%f, %s),\n" % (weight, model.estimators_))
+                else:
+                    sio.write("(%f, %s),\n" % (weight, model))
             sio.write("]")
 
             return sio.getvalue()
