@@ -192,7 +192,8 @@ class AutoML(BaseEstimator):
 
         self._folds_to_use = None
         if self._resampling_strategy in ['partial-cv']:
-            self._folds_to_use = self._resampling_strategy_arguments.get('folds_to_use', list(range(self._resampling_strategy_arguments['folds'])))
+            #self._folds_to_use = self._resampling_strategy_arguments.get('folds_to_use', list(range(self._resampling_strategy_arguments['folds'])))
+            self._folds_to_use = self._resampling_strategy_arguments.get('folds_to_use', 'highest_fold_available')
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 
@@ -1234,7 +1235,8 @@ class AutoML(BaseEstimator):
 
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
-            self.models_ = self._backend.load_models_by_identifiers(identifiers)
+            folds_to_use = self.ensemble_.folds
+            self.models_ = self._backend.load_models_by_identifiers(identifiers, folds_to_use)
             if self._resampling_strategy == 'partial-cv':
                 self.models_ = self._model_dict_list_to_voter(self.models_)
 

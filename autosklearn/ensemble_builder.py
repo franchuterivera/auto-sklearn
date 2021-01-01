@@ -695,11 +695,6 @@ class EnsembleBuilder(object):
         Returns
         -------
         """
-        if folds_to_use is not None:
-            if folds_to_use != self.folds_to_use:
-                # Dropping the predictions as they were made with other folds
-                self.read_preds = {}
-            self.folds_to_use = folds_to_use
 
         # Pynisher jobs inside dask 'forget'
         # the logger configuration. So we have to set it up
@@ -718,6 +713,27 @@ class EnsembleBuilder(object):
             iteration,
             time_left - used_time,
         )
+
+        if folds_to_use is not None:
+
+            if folds_to_use == 'highest_fold_available':
+                highest_fold = self.get_highest_fold_avaliable()
+                self.logger.critical(f"Found the highest fold to be {highest_fold}")
+                if highest_fold is None:
+                    # No fold available yet!
+                    if return_predictions:
+                        return self.ensemble_history, self.ensemble_nbest, train_pred, valid_pred, test_pred
+                    else:
+                        return self.ensemble_history, self.ensemble_nbest, None, None, None
+                folds_to_use = list(range(highest_fold + 1))
+            elif isinstance(folds_to_use, list):
+                pass
+            else:
+                raise NotImplementedError(f"{folds_to_use}")
+            if folds_to_use != self.folds_to_use:
+                # Dropping the predictions as they were made with other folds
+                self.read_preds = {}
+            self.folds_to_use = folds_to_use
 
         # populates self.read_preds and self.read_scores
         if not self.score_ensemble_preds(folds_to_use):
@@ -776,7 +792,7 @@ class EnsembleBuilder(object):
                 self._has_been_candidate.add(candidate)
 
         # train ensemble
-        ensemble = self.fit_ensemble(selected_keys=candidate_models)
+        ensemble = self.fit_ensemble(selected_keys=candidate_models, folds_to_use=folds_to_use)
 
         # Save the ensemble for later use in the main auto-sklearn module!
         if ensemble is not None and self.SAVE2DISC:
@@ -1019,7 +1035,7 @@ class EnsembleBuilder(object):
                   if max models in disc is exceeded.
         """
 
-        sorted_keys = self._get_list_of_sorted_preds()
+        sorted_keys = self._get_list_of_sorted_preds(folds_to_use)
 
         # number of models available
         num_keys = len(sorted_keys)
@@ -1478,7 +1494,7 @@ class EnsembleBuilder(object):
 
         self.ensemble_history.append(performance_stamp)
 
-    def _get_list_of_sorted_preds(self):
+    def _get_list_of_sorted_preds(self, folds_to_use: Optional[List[int]]):
         """
             Returns a list of sorted predictions in descending order
             Scores are taken from self.read_scores.
@@ -1496,7 +1512,11 @@ class EnsembleBuilder(object):
         sorted_keys = list(reversed(sorted(
             [
                 (k, v["ens_score"], v["num_run"])
-                for k, v in self.read_scores.items()
+                # Only use runs for the desired fold
+                # We could delete the old runs, on lower fold, but
+                # maybe we need this in the future?
+                # TODO: Desire what is best later
+                for k, v in self.read_scores.items() if v['folds_to_use']==folds_to_use
             ],
             key=lambda x: x[2],
         )))
@@ -1579,7 +1599,7 @@ class EnsembleBuilder(object):
             predictions_to_return = []
             for fold in folds_to_use:
                 filename = [name for name in paths if f".{fold}.npy" in name]
-                assert len(filename) == 1, f"{paths} for fold {fold} is not unique"
+                assert len(filename) == 1, f"{paths} for fold {fold} is not unique {self._is_rundir_complete(os.path.basename(paths[0]), self.folds_to_use)}"
                 prediction = self._read_np_fn(filename[0])
                 if len(folds_to_use) == 1:
                     return prediction
@@ -1617,3 +1637,19 @@ class EnsembleBuilder(object):
             else:
                 predictions = np.load(fp, allow_pickle=True)
             return predictions
+
+    def get_highest_fold_avaliable(self) -> Optional[int]:
+        """
+        Return the highest fold available in a run area
+        """
+        numrun_dir = self.backend.get_runs_directory()
+        all_files = glob.glob(os.path.join(numrun_dir, '*', "predictions_ensemble*.npy"))
+
+        # Ignore the dummy configuration which will always be complete
+        all_files = [path for path in all_files if re.search(r'predictions_ensemble_[0-9]_[0-9]+_1_', path) is None]
+
+        if len(all_files) < 1:
+            return None
+        file_names = [os.path.basename(path).replace('.gz', '') for path in all_files]
+        folds = [int(path.split('.')[-2]) for path in file_names]
+        return max(folds)

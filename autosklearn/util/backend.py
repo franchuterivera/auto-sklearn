@@ -354,7 +354,10 @@ class Backend(object):
                 prev_index = sum([idx_len for i, idx_len in enumerate(indices_len) if i < fold])
                 # Only append the desired folds to the targets of the ensemble
                 # Like this in theory will allow to just build and ensemble of fold 0 for instance
-                targets_folds.append(targets[prev_index:prev_index+indices_len[fold]])
+                gt = targets[prev_index:prev_index+indices_len[fold]]
+                if len(folds) == 1:
+                    return gt
+                targets_folds.append(gt)
             return np.concatenate(targets_folds)
 
         return targets
@@ -407,14 +410,15 @@ class Backend(object):
         )
         return model_files
 
-    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float]]
+    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float]],
+                                   folds_to_use: Optional[List[int]] = None,
                                    ) -> Dict:
         models = dict()
 
         for identifier in identifiers:
             level, seed, idx, budget = identifier
             models[identifier] = self.load_model_by_level_and_seed_and_id_and_budget(
-                level, seed, idx, budget)
+                level, seed, idx, budget, folds_to_use)
 
         return models
 
@@ -422,7 +426,8 @@ class Backend(object):
                                                        level: int,
                                                        seed: int,
                                                        idx: int,
-                                                       budget: float
+                                                       budget: float,
+                                                       folds_to_use: Optional[List[int]] = None,
                                                        ) -> Pipeline:
         model_directory = self.get_numrun_directory(level, seed, idx, budget)
 
@@ -430,13 +435,14 @@ class Backend(object):
         model_file_path = os.path.join(model_directory, model_file_name)
 
         # Try to find a normal model else try a partial version
-        if os.path.exists(model_file_path):
+        if folds_to_use is None:
             with open(model_file_path, 'rb') as fh:
                 return pickle.load(fh)
         else:
-            model_file_name_pattern = '%s.%s.%s.%s*.model' % (level, seed, idx, budget)
             models = []
-            for model_file_path in glob.glob(os.path.join(model_directory, model_file_name_pattern)):
+            for fold in folds_to_use:
+                model_file_name = '%s.%s.%s.%s.%s.model' % (level, seed, idx, budget, fold)
+                model_file_path = os.path.join(model_directory, model_file_name)
                 with open(model_file_path, 'rb') as fh:
                     models.append(pickle.load(fh))
             return models
