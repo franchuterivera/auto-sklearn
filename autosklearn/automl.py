@@ -649,9 +649,10 @@ class AutoML(BaseEstimator):
         if self._resampling_strategy in ['partial-cv']:
             # In the case of partial CV, we need a dummy prediction per fold
             num_folds = self._resampling_strategy_arguments['folds']
+            repeats = self._resampling_strategy_arguments.get('repeats', 1)
             instances = [json.dumps({'task_id': dataset_name,
                                      'fold': fold_number})
-                         for fold_number in range(num_folds)]
+                         for fold_number in range(num_folds*repeats)]
             for instance in instances:
                 self._do_dummy_prediction(datamanager, num_run, level=self._max_stacking_levels,
                                           instance=instance)

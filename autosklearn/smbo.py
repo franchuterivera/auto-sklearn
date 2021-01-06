@@ -400,9 +400,10 @@ class AutoMLSMBO(object):
         if self.resampling_strategy in ['partial-cv',
                                         'partial-cv-iterative-fit']:
             num_folds = self.resampling_strategy_args['folds']
+            repeats = self.resampling_strategy_args.get('repeats', 1)
             instances = [[json.dumps({'task_id': self.dataset_name,
                                       'fold': fold_number})]
-                         for fold_number in range(num_folds)]
+                         for fold_number in range(num_folds * repeats)]
         else:
             instances = [[json.dumps({'task_id': self.dataset_name})]]
 

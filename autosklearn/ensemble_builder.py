@@ -718,7 +718,6 @@ class EnsembleBuilder(object):
 
             if folds_to_use == 'highest_fold_available':
                 highest_fold = self.get_highest_fold_avaliable()
-                self.logger.critical(f"Found the highest fold to be {highest_fold}")
                 if highest_fold is None:
                     # No fold available yet!
                     if return_predictions:
@@ -979,8 +978,6 @@ class EnsembleBuilder(object):
                                         task_type=self.task_type,
                                         metric=self.metric,
                                         scoring_functions=None)
-
-                self.logger.critical(f"Added {y_ens_fn} with score={score}")
 
                 if np.isfinite(self.read_scores[y_ens_fn]["ens_score"]):
                     self.logger.debug(
@@ -1339,8 +1336,6 @@ class EnsembleBuilder(object):
             random_state=self.random_state,
             folds=folds_to_use,
         )
-
-        self.logger.critical(f"The shape of solution for fit ensemble is {self.y_true_ensemble.shape} and {[np.shape(p) for p in predictions_train]}")
 
         try:
             self.logger.debug(
