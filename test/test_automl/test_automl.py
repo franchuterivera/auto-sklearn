@@ -561,9 +561,9 @@ def test_exceptions_inside_log_in_smbo(smbo_run_mock, backend, dask_client):
     # make sure that the logfile was created
     logger_name = 'AutoML(%d):%s' % (1, dataset_name)
     logfile = os.path.join(backend.temporary_directory, logger_name + '.log')
-    assert os.path.exists(logfile), automl._clean_logger()
+    assert os.path.exists(logfile), print_debug_information(auto) + str(automl._clean_logger())
     with open(logfile) as f:
-        assert message in f.read(), automl._clean_logger()
+        assert message in f.read(), print_debug_information(auto) + str(automl._clean_logger())
 
     # Speed up the closing after forced crash
     automl._clean_logger()

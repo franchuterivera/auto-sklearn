@@ -757,7 +757,7 @@ class AutoML(BaseEstimator):
                 with open(trajectory_filename, 'w') as fh:
                     json.dump(saveable_trajectory, fh)
             except Exception as e:
-                self._logger.exception(e)
+                self._logger.critical(e)
                 raise
 
         self._logger.info("Starting shutdown...")
