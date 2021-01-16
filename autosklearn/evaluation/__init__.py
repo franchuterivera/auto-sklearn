@@ -119,6 +119,8 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
                 )
              ):
             eval_function = autosklearn.evaluation.train_evaluator.eval_cv
+        elif resampling_strategy == 'intensifier-cv':
+            eval_function = autosklearn.evaluation.train_evaluator.eval_intensifier_cv
         elif resampling_strategy == 'partial-cv':
             eval_function = autosklearn.evaluation.train_evaluator.eval_partial_cv
         elif resampling_strategy == 'partial-cv-iterative-fit':

@@ -121,6 +121,7 @@ class AbstractEvaluator(object):
                  seed=1,
                  output_y_hat_optimization=True,
                  num_run=None,
+                 instance=None,
                  include=None,
                  exclude=None,
                  disable_file_output=False,
@@ -208,6 +209,10 @@ class AbstractEvaluator(object):
 
         self.budget = budget
         self.budget_type = budget_type
+        if instance is None or not isinstance(instance, int):
+            self.instance = 0
+        else:
+            self.instance = instance
 
     def _get_model(self):
         if not isinstance(self.configuration, Configuration):
@@ -427,6 +432,7 @@ class AbstractEvaluator(object):
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,
+            instance=self.instance,
             model=self.model if 'model' not in self.disable_file_output else None,
             cv_model=models if 'cv_model' not in self.disable_file_output else None,
             ensemble_predictions=(
