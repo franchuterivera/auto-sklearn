@@ -14,7 +14,7 @@ import unittest.mock
 import warnings
 import tempfile
 
-from ConfigSpace.configuration_space import Configuration
+from ConfigSpace import Configuration
 from ConfigSpace.read_and_write import json as cs_json
 import dask
 import dask.distributed
@@ -76,31 +76,45 @@ from autosklearn.pipeline.components.data_preprocessing.rescaling import Rescali
 from autosklearn.util.single_thread_client import SingleThreadedClient
 
 
-def _model_predict(model, X, batch_size, logger, task):
+def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, identifier):
     def send_warnings_to_log(
             message, category, filename, lineno, file=None, line=None):
         logger.debug('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
         return
     X_ = X.copy()
+    if len(lower_level_predictions) > 0:
+        X_ = np.concatenate([X_] + lower_level_predictions, axis=1)
     with warnings.catch_warnings():
-        warnings.showwarning = send_warnings_to_log
-        if task in REGRESSION_TASKS:
-            if hasattr(model, 'batch_size'):
-                prediction = model.predict(X_, batch_size=batch_size)
+        try:
+            warnings.showwarning = send_warnings_to_log
+            if task in REGRESSION_TASKS:
+                if hasattr(model, 'batch_size'):
+                    prediction = model.predict(X_, batch_size=batch_size)
+                else:
+                    prediction = model.predict(X_)
             else:
-                prediction = model.predict(X_)
-        else:
-            if hasattr(model, 'batch_size'):
-                prediction = model.predict_proba(X_, batch_size=batch_size)
-            else:
-                prediction = model.predict_proba(X_)
+                if hasattr(model, 'batch_size'):
+                    prediction = model.predict_proba(X_, batch_size=batch_size)
+                else:
+                    prediction = model.predict_proba(X_)
 
-            # Check that all probability values lie between 0 and 1.
-            assert(
-                (prediction >= 0).all() and (prediction <= 1).all()
-            ), "For {}, prediction probability not within [0, 1]!".format(
-                model
-            )
+                # Check that all probability values lie between 0 and 1.
+                if not ((prediction >= 0).all() and (prediction <= 1).all()):
+                    estimators = 'N/A'
+                    if hasattr(model, 'estimators'):
+                        estimators = model.estimators
+                    elif hasattr(model, 'steps'):
+                        estimators = model.steps
+
+                    raise ValueError(
+                        "For {}/{}, prediction probability not within [0, 1]!".format(
+                            model,
+                            estimators
+                        )
+                    )
+        except Exception as e:
+            logger.error(f"Failure on {identifier}")
+            raise e
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
             X_.shape[0] < 1 or prediction.shape[0] != X_.shape[0]:
@@ -122,6 +136,8 @@ class AutoML(BaseEstimator):
                  ensemble_nbest=1,
                  max_models_on_disc=1,
                  seed=1,
+                 max_stacking_level=1,
+                 stacking_strategy=None,
                  memory_limit=3072,
                  metadata_directory=None,
                  debug_mode=False,
@@ -139,7 +155,9 @@ class AutoML(BaseEstimator):
                  smac_scenario_args=None,
                  logging_config=None,
                  metric=None,
-                 scoring_functions=None
+                 scoring_functions=None,
+                 ensemble_folds=None,
+                 warmstart_with_initial_configurations=False,
                  ):
         super(AutoML, self).__init__()
         self.configuration_space = None
@@ -154,6 +172,14 @@ class AutoML(BaseEstimator):
         self._ensemble_nbest = ensemble_nbest
         self._max_models_on_disc = max_models_on_disc
         self._seed = seed
+        self._max_stacking_level = max_stacking_level
+        self._stacking_strategy = stacking_strategy
+        if self._max_stacking_level > 1 and self._stacking_strategy not in [
+            'time_split',
+            'instances_anyasbase',
+            'instances_selfasbase',
+        ]:
+            raise ValueError(f"Unsupported stacking strategy {self._max_stacking_level}")
         self._memory_limit = memory_limit
         self._data_memory_limit = None
         self._metadata_directory = metadata_directory
@@ -169,6 +195,7 @@ class AutoML(BaseEstimator):
                                              'holdout-iterative-fit',
                                              'cv',
                                              'cv-iterative-fit',
+                                             'intensifier-cv',
                                              'partial-cv',
                                              'partial-cv-iterative-fit',
                                              ] \
@@ -191,6 +218,13 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
+        if self._resampling_strategy in ['intensifier-cv']:
+            if 'repeats' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['repeats'] = 5
+            if 'repetition_as_individual_models' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['repetition_as_individual_models'] = False
+            if self._max_stacking_level > 1:
+                self._resampling_strategy_arguments['stacking_strategy'] = self._stacking_strategy
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 
@@ -253,6 +287,8 @@ class AutoML(BaseEstimator):
 
         # By default try to use the TCP logging port or get a new port
         self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
+        self._ensemble_folds = ensemble_folds
+        self._warmstart_with_initial_configurations = warmstart_with_initial_configurations
 
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
@@ -386,7 +422,8 @@ class AutoML(BaseEstimator):
                     (basename, time_left_after_reading))
         return time_for_load_data
 
-    def _do_dummy_prediction(self, datamanager: XYDataManager, num_run: int) -> int:
+    def _do_dummy_prediction(self, datamanager: XYDataManager, num_run: int,
+                             instance: Optional[str] = None) -> int:
 
         # When using partial-cv it makes no sense to do dummy predictions
         if self._resampling_strategy in ['partial-cv',
@@ -419,7 +456,8 @@ class AutoML(BaseEstimator):
                                     pynisher_context=self._multiprocessing_context,
                                     **self._resampling_strategy_arguments)
 
-        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task)
+        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task,
+                                                        instance=instance)
         if status == StatusType.SUCCESS:
             self._logger.info("Finished creating dummy predictions.")
         else:
@@ -453,6 +491,37 @@ class AutoML(BaseEstimator):
                     % (str(status), str(additional_info))
                 )
         return num_run
+
+    def get_initial_configurations(
+        self,
+        configuration_space,
+        datamanager,
+    ):
+        """
+        Creates a set of robust configurations to warm start smac and create diverse model not
+        only for ensemble selection, which need a good diversity of robust models,
+        but also take into account that we need good models like autogluon's one that consistently
+        give a decent performance and improve with repetitions
+        """
+        initial_configurations = []
+        for include_estimator in ['lgbm', 'xgboost', 'random_forest', 'extra_trees', 'mlp',
+                                  'k_nearest_neighbors', 'passive_aggressive',
+                                  'liblinear_svc', 'sgd']:
+            cs, cp = self._create_search_space(
+                None,
+                self._backend,
+                datamanager,
+                include_estimators=[include_estimator],
+                exclude_estimators=self._exclude_estimators,
+                include_preprocessors=self._include_preprocessors,
+                exclude_preprocessors=self._exclude_preprocessors,
+            )
+            initial_configurations.append(
+                Configuration(configuration_space, values=cs.get_default_configuration())
+            )
+        self._logger.critical("Warmstarting smac with {}".format(
+            "\n".join([str(i) for i in initial_configurations])))
+        return initial_configurations
 
     def fit(
         self,
@@ -585,6 +654,11 @@ class AutoML(BaseEstimator):
         self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
+        self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
+        self._logger.debug("  warmstart_with_initial_configurations: {}".format(
+            self._warmstart_with_initial_configurations))
+        self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
+        self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
         self._logger.debug('  metadata_directory: %s', self._metadata_directory)
         self._logger.debug('  debug_mode: %s', self._debug_mode)
@@ -662,7 +736,17 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         # Dummy prediction always have num_run set to 1
-        self.num_run += self._do_dummy_prediction(datamanager, num_run=1)
+        if self._resampling_strategy in ['intensifier-cv']:
+            # In the case of intensifier CV, we need a dummy prediction per repetition
+            num_repeats = self._resampling_strategy_arguments['repeats']
+            instances = [json.dumps({'task_id': self._dataset_name,
+                                     'repeats': repeat})
+                         for repeat in range(num_repeats)]
+            for instance in instances:
+                self._do_dummy_prediction(datamanager, num_run=1, instance=instance)
+            self.num_run += 1
+        else:
+            self.num_run += self._do_dummy_prediction(datamanager, num_run=1)
 
         # == RUN ensemble builder
         # Do this before calculating the meta-features to make sure that the
@@ -689,6 +773,7 @@ class AutoML(BaseEstimator):
 
             proc_ensemble = EnsembleBuilderManager(
                 start_time=time.time(),
+                max_stacking_level=self._max_stacking_level,
                 time_left_for_ensembles=time_left_for_ensembles,
                 backend=copy.deepcopy(self._backend),
                 dataset_name=dataset_name,
@@ -705,6 +790,7 @@ class AutoML(BaseEstimator):
                 random_state=self._seed,
                 logger_port=self._logger_port,
                 pynisher_context=self._multiprocessing_context,
+                ensemble_folds=self._ensemble_folds,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -718,8 +804,70 @@ class AutoML(BaseEstimator):
         # => RUN SMAC
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
-        elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
-        time_left_for_smac = max(0, self._time_for_task - elapsed_time)
+
+        initial_configurations = []
+        if self._warmstart_with_initial_configurations:
+            initial_configurations = self.get_initial_configurations(
+                self.configuration_space,
+                datamanager,
+            )
+
+        self.started_registered_time = time.time()
+        if 'time_split' in self._stacking_strategy:
+            # Calculate the time each smac should last. This elapsed time here
+            # makes the overhead up to this point which is usually less than 0.5 seconds
+            # and is substracted from all smac runs to be safe
+            elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
+            time_left_for_smac = max(
+                0,
+                self._time_for_task - elapsed_time) / self._max_stacking_level
+            extra_overhead = 0
+            for level in range(1, self._max_stacking_level + 1):
+                start_time = self._stopwatch.wall_elapsed(self._dataset_name)
+                self.run_smac(level,
+                              time_left_for_smac - extra_overhead,
+                              proc_ensemble, initial_configurations)
+                end_time = self._stopwatch.wall_elapsed(self._dataset_name)
+                extra_overhead = end_time - (start_time + time_left_for_smac)
+        else:
+            elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
+            time_left_for_smac = max(0, self._time_for_task - elapsed_time)
+            self.run_smac(self._max_stacking_level,
+                          time_left_for_smac, proc_ensemble, initial_configurations)
+
+        self._logger.info("Starting shutdown...")
+        # Wait until the ensemble process is finished to avoid shutting down
+        # while the ensemble builder tries to access the data
+        if proc_ensemble is not None:
+            self.ensemble_performance_history = list(proc_ensemble.history)
+
+            if len(proc_ensemble.futures) > 0:
+                # Now we need to wait for the future to return as it cannot be cancelled while it
+                # is running: https://stackoverflow.com/a/49203129
+                self._logger.info("Ensemble script still running, waiting for it to finish.")
+                result = proc_ensemble.futures.pop().result()
+                if result:
+                    ensemble_history, _, _, _, _ = result
+                    self.ensemble_performance_history.extend(ensemble_history)
+                self._logger.info("Ensemble script finished, continue shutdown.")
+
+            # save the ensemble performance history file
+            if len(self.ensemble_performance_history) > 0:
+                pd.DataFrame(self.ensemble_performance_history).to_json(
+                        os.path.join(self._backend.internals_directory, 'ensemble_history.json'))
+
+        if load_models:
+            self._logger.info("Loading models...")
+            self._load_models()
+            self._logger.info("Finished loading models...")
+
+        self._fit_cleanup()
+
+        return self
+
+    def run_smac(self, level, time_left_for_smac, proc_ensemble,
+                 initial_configurations) -> 'AutoML':
+        run_id = level + self._seed
 
         if self._logger:
             self._logger.info(
@@ -764,9 +912,17 @@ class AutoML(BaseEstimator):
                 n_jobs=self._n_jobs,
                 dask_client=self._dask_client,
                 start_num_run=self.num_run,
-                num_metalearning_cfgs=self._initial_configurations_via_metalearning,
-                config_file=configspace_path,
+                num_metalearning_cfgs=0 if (
+                    'time_split' in self._stacking_strategy and level > 1
+                ) else self._initial_configurations_via_metalearning,
+                initial_configurations=initial_configurations,
                 seed=self._seed,
+                # levels will also be part of the seed/instance/budget paradigm
+                # here the stacking levels will be converted as part of the instances,
+                # so that evaluator closures can decide what to do with this
+                stacking_levels=list(
+                    range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
+                run_id=run_id,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,
                 resampling_strategy=self._resampling_strategy,
@@ -788,7 +944,7 @@ class AutoML(BaseEstimator):
                 self.runhistory_, self.trajectory_, self._budget_type = \
                     _proc_smac.run_smbo()
                 trajectory_filename = os.path.join(
-                    self._backend.get_smac_output_directory_for_run(self._seed),
+                    self._backend.get_smac_output_directory_for_run(run_id),
                     'trajectory.json')
                 saveable_trajectory = \
                     [list(entry[:2]) + [entry[2].get_dictionary()] + list(entry[3:])
@@ -799,33 +955,9 @@ class AutoML(BaseEstimator):
                 self._logger.exception(e)
                 raise
 
-        self._logger.info("Starting shutdown...")
-        # Wait until the ensemble process is finished to avoid shutting down
-        # while the ensemble builder tries to access the data
-        if proc_ensemble is not None:
-            self.ensemble_performance_history = list(proc_ensemble.history)
-
-            if len(proc_ensemble.futures) > 0:
-                # Now we need to wait for the future to return as it cannot be cancelled while it
-                # is running: https://stackoverflow.com/a/49203129
-                self._logger.info("Ensemble script still running, waiting for it to finish.")
-                result = proc_ensemble.futures.pop().result()
-                if result:
-                    ensemble_history, _, _, _, _ = result
-                    self.ensemble_performance_history.extend(ensemble_history)
-                self._logger.info("Ensemble script finished, continue shutdown.")
-
-            # save the ensemble performance history file
-            if len(self.ensemble_performance_history) > 0:
-                pd.DataFrame(self.ensemble_performance_history).to_json(
-                        os.path.join(self._backend.internals_directory, 'ensemble_history.json'))
-
-        if load_models:
-            self._logger.info("Loading models...")
-            self._load_models()
-            self._logger.info("Finished loading models...")
-
-        self._fit_cleanup()
+        # Get the new num_run from the history
+        if len(self.runhistory_.data) > 0:
+            self.num_run = max([key.config_id for key in self.runhistory_.data.keys()])
 
         return self
 
@@ -1102,6 +1234,16 @@ class AutoML(BaseEstimator):
 
         return pipeline, run_info, run_value
 
+    def get_base_model_predictions(self, estimator: BaseEstimator,
+                                   base_model_predictions: Dict,
+                                   identifier) -> List:
+        if not hasattr(estimator, 'base_models_'):
+            print(f"For model {identifier} no base prediction is needed")
+            self._logger.critical(f"For model {identifier} no base prediction is needed")
+            return []
+        base = [base_model_predictions[idx] for idx in estimator.base_models_]
+        return base
+
     def predict(self, X, batch_size=None, n_jobs=1):
         """predict.
 
@@ -1120,7 +1262,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv')
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -1164,10 +1306,30 @@ class AutoML(BaseEstimator):
             except sklearn.exceptions.NotFittedError:
                 raise ValueError('Found no fitted models!')
 
+        base_model_predictions = {}
+        for level_ in range(1, self._max_stacking_level + 1):
+            identifiers = [(level, seed, num_run, budget, instance)
+                           for level, seed, num_run, budget, instance in models.keys()
+                           if level == level_]
+            predictions = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(_model_predict)(
+                    models[identifier], X, batch_size, self._logger, self._task,
+                    self.get_base_model_predictions(models[identifier],
+                                                    base_model_predictions, identifier),
+                    identifier,
+                ) for identifier in identifiers)
+            for indentifier, prediction in zip(identifiers, predictions):
+                base_model_predictions[indentifier] = prediction
+
+        identity = lambda x: x  # noqa
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(_model_predict)(
-                models[identifier], X, batch_size, self._logger, self._task
-            )
+                models[identifier], X, batch_size, self._logger, self._task,
+                self.get_base_model_predictions(
+                    models[identifier], base_model_predictions, identifier),
+                identifier,
+            ) if identifier not in base_model_predictions else joblib.delayed(identity)(
+                base_model_predictions[identifier])
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )
 
@@ -1215,6 +1377,7 @@ class AutoML(BaseEstimator):
         # builder in the provide dask client
         manager = EnsembleBuilderManager(
             start_time=time.time(),
+            max_stacking_level=self._max_stacking_level,
             time_left_for_ensembles=self._time_for_task,
             backend=copy.deepcopy(self._backend),
             dataset_name=dataset_name if dataset_name else self._dataset_name,
@@ -1231,6 +1394,7 @@ class AutoML(BaseEstimator):
             random_state=self._seed,
             logger_port=self._logger_port,
             pynisher_context=self._multiprocessing_context,
+            ensemble_folds=self._ensemble_folds,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()
@@ -1254,8 +1418,14 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
-            if self._resampling_strategy in ('cv', 'cv-iterative-fit'):
-                self.cv_models_ = self._backend.load_cv_models_by_identifiers(identifiers)
+            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv'):
+                include_base_models = False
+                if self._resampling_strategy == 'intensifier-cv' and self._max_stacking_level > 1:
+                    include_base_models = True
+                self.cv_models_ = self._backend.load_cv_models_by_identifiers(
+                    identifiers,
+                    include_base_models=include_base_models,
+                )
             else:
                 self.cv_models_ = None
             if (
@@ -1264,7 +1434,7 @@ class AutoML(BaseEstimator):
             ):
                 raise ValueError('No models fitted!')
             if (
-                self._resampling_strategy in ['cv', 'cv-iterative-fit']
+                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv']
                 and len(self.cv_models_) == 0
             ):
                 raise ValueError('No models fitted!')
@@ -1272,7 +1442,7 @@ class AutoML(BaseEstimator):
         elif self._disable_evaluator_output is False or \
                 (isinstance(self._disable_evaluator_output, list) and
                  'model' not in self._disable_evaluator_output):
-            model_names = self._backend.list_all_models(self._seed)
+            model_names = self._backend.list_all_models(self._max_stacking_level, self._seed)
 
             if len(model_names) == 0 and self._resampling_strategy not in \
                     ['partial-cv', 'partial-cv-iterative-fit']:
@@ -1524,7 +1694,6 @@ class AutoML(BaseEstimator):
         task_name = 'CreateConfigSpace'
 
         self._stopwatch.start_task(task_name)
-        configspace_path = os.path.join(tmp_dir, 'space.json')
         configuration_space = pipeline.get_configuration_space(
             datamanager.info,
             include_estimators=include_estimators,
@@ -1533,12 +1702,16 @@ class AutoML(BaseEstimator):
             exclude_preprocessors=exclude_preprocessors)
         configuration_space = self.configuration_space_created_hook(
             datamanager, configuration_space)
-        backend.write_txt_file(
-            configspace_path,
-            cs_json.write(configuration_space),
-            'Configuration space'
-        )
-        self._stopwatch.stop_task(task_name)
+
+        configspace_path = None
+        if tmp_dir is not None:
+            configspace_path = os.path.join(tmp_dir, 'space.json')
+            backend.write_txt_file(
+                configspace_path,
+                cs_json.write(configuration_space),
+                'Configuration space'
+            )
+            self._stopwatch.stop_task(task_name)
 
         return configuration_space, configspace_path
 

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import copy
 import json
+import typing
 
 from ConfigSpace import Configuration
 
@@ -12,7 +13,7 @@ from smac.tae import TAEAbortException, StatusType
 
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit, KFold, \
-    StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit
+    StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit, RepeatedStratifiedKFold, RepeatedKFold
 from sklearn.model_selection._split import _RepeatedSplits, BaseShuffleSplit
 
 from autosklearn.evaluation.abstract_evaluator import (
@@ -34,7 +35,7 @@ from autosklearn.util.logging_ import PicklableClientLogger
 
 
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
-           'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative']
+           'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative', 'eval_intensifier_cv']
 
 baseCrossValidator_defaults: Dict[str, Dict[str, Optional[Union[int, float, str]]]] = {
     'GroupKFold': {'n_splits': 3},
@@ -183,6 +184,7 @@ class TrainEvaluator(AbstractEvaluator):
                                             _RepeatedSplits, BaseShuffleSplit]] = None,
         resampling_strategy_args: Optional[Dict[str, Optional[Union[float, int, str]]]] = None,
         num_run: Optional[int] = None,
+        instance: Optional[int] = None,
         budget: Optional[float] = None,
         budget_type: Optional[str] = None,
         keep_models: bool = False,
@@ -208,6 +210,7 @@ class TrainEvaluator(AbstractEvaluator):
             init_params=init_params,
             budget=budget,
             budget_type=budget_type,
+            instance=instance,
         )
 
         self.resampling_strategy = resampling_strategy
@@ -234,7 +237,8 @@ class TrainEvaluator(AbstractEvaluator):
         self.partial = True
         self.keep_models = keep_models
 
-    def fit_predict_and_loss(self, iterative: bool = False) -> None:
+    def fit_predict_and_loss(self, iterative: bool = False,
+                             training_folds: typing.List[int] = None) -> None:
         """Fit, predict and compute the loss for cross-validation and
         holdout (both iterative and non-iterative)"""
 
@@ -474,6 +478,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.partial = False
 
+            opt_indices = []
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
@@ -494,7 +499,10 @@ class TrainEvaluator(AbstractEvaluator):
                     self.X_train, y,
                     groups=self.resampling_strategy_args.get('groups')
             )):
+                if training_folds is not None and i not in training_folds:
+                    continue
 
+                opt_indices.extend(test_split)
                 # TODO add check that split is actually an integer array,
                 # not a boolean array (to allow indexed assignement of
                 # training data later).
@@ -564,6 +572,10 @@ class TrainEvaluator(AbstractEvaluator):
                 # the average.
                 opt_fold_weights.append(len(test_split))
 
+            # Any prediction/GT saved to disk most be sorted to be able to compare predictions
+            # in ensemble selection
+            sort_indices = np.argsort(opt_indices)
+
             # Compute weights of each fold based on the number of samples in each
             # fold.
             train_fold_weights = [w / sum(train_fold_weights) for w in train_fold_weights]
@@ -597,6 +609,7 @@ class TrainEvaluator(AbstractEvaluator):
             Y_optimization_pred = np.concatenate(
                 [Y_optimization_pred[i] for i in range(self.num_cv_folds)
                  if Y_optimization_pred[i] is not None])
+            Y_optimization_pred = Y_optimization_pred[sort_indices]
             Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
                                         if Y_targets[i] is not None])
 
@@ -616,8 +629,8 @@ class TrainEvaluator(AbstractEvaluator):
                 if len(np.shape(Y_test_pred)) == 3:
                     Y_test_pred = np.nanmean(Y_test_pred, axis=0)
 
-            self.Y_optimization = Y_targets
-            self.Y_actual_train = Y_train_targets
+            self.Y_optimization = Y_targets[sort_indices]
+            self.Y_actual_train = Y_train_targets[sort_indices]
 
             if self.num_cv_folds > 1:
                 self.model = self._get_model()
@@ -649,6 +662,10 @@ class TrainEvaluator(AbstractEvaluator):
                         status = StatusType.SUCCESS
                 else:
                     status = StatusType.SUCCESS
+
+            # We do not train all folds :) -- because instances indicate what
+            # repetition from the repeats*folds we use
+            self.models = [model for model in self.models if model is not None]
 
             self.finish_up(
                 loss=opt_loss,
@@ -1027,6 +1044,7 @@ class TrainEvaluator(AbstractEvaluator):
 
         y = D.data['Y_train']
         shuffle = self.resampling_strategy_args.get('shuffle', True)
+        repeats = self.resampling_strategy_args.get('repeats', None)
         train_size = 0.67
         if self.resampling_strategy_args:
             train_size_from_user = self.resampling_strategy_args.get('train_size')
@@ -1060,14 +1078,26 @@ class TrainEvaluator(AbstractEvaluator):
                     cv = PredefinedSplit(test_fold=test_fold)
                     cv.n_splits = 1  # As sklearn is inconsistent here
             elif self.resampling_strategy in ['cv', 'cv-iterative-fit', 'partial-cv',
-                                              'partial-cv-iterative-fit']:
+                                              'partial-cv-iterative-fit', 'intensifier-cv']:
                 if shuffle:
-                    cv = StratifiedKFold(
-                        n_splits=self.resampling_strategy_args['folds'],
-                        shuffle=shuffle, random_state=1)
+                    if repeats is not None:
+                        # Notice, no shuffle here because obviously for repeat that happens
+                        cv = RepeatedStratifiedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            n_repeats=repeats,
+                            random_state=1)
+                    else:
+                        cv = StratifiedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            shuffle=shuffle, random_state=1)
                 else:
-                    cv = KFold(n_splits=self.resampling_strategy_args['folds'],
-                               shuffle=shuffle)
+                    if repeats is not None:
+                        cv = RepeatedKFold(
+                            n_splits=self.resampling_strategy_args['folds'],
+                            n_repeats=repeats,
+                            shuffle=shuffle)
+                    else:
+                        cv = KFold(n_splits=self.resampling_strategy_args['folds'])
             else:
                 raise ValueError(self.resampling_strategy)
         else:
@@ -1086,11 +1116,17 @@ class TrainEvaluator(AbstractEvaluator):
             elif self.resampling_strategy in ['cv', 'partial-cv',
                                               'partial-cv-iterative-fit']:
                 random_state = 1 if shuffle else None
-                cv = KFold(
-                    n_splits=self.resampling_strategy_args['folds'],
-                    shuffle=shuffle,
-                    random_state=random_state,
-                )
+                if repeats is not None:
+                    cv = RepeatedKFold(
+                        n_splits=self.resampling_strategy_args['folds'],
+                        n_repeats=repeats,
+                        shuffle=shuffle)
+                else:
+                    cv = KFold(
+                        n_splits=self.resampling_strategy_args['folds'],
+                        shuffle=shuffle,
+                        random_state=random_state,
+                    )
             else:
                 raise ValueError(self.resampling_strategy)
         return cv
@@ -1362,3 +1398,60 @@ def eval_iterative_cv(
         iterative=iterative,
         instance=instance,
     )
+
+
+# create closure for evaluating an algorithm
+def eval_intensifier_cv(
+        queue,
+        config,
+        backend,
+        resampling_strategy,
+        resampling_strategy_args,
+        metric,
+        seed,
+        num_run,
+        instance,
+        scoring_functions,
+        output_y_hat_optimization,
+        include,
+        exclude,
+        disable_file_output,
+        port,
+        init_params=None,
+        budget=None,
+        budget_type=None,
+        iterative=False,
+):
+    # Instances in this context are repetitions to be selected from the evaluator
+    instance_dict = json.loads(instance) if instance is not None else {}
+    instance = instance_dict.get('repeats', 0)
+
+    evaluator = TrainEvaluator(
+        backend=backend,
+        port=port,
+        queue=queue,
+        metric=metric,
+        configuration=config,
+        seed=seed,
+        num_run=num_run,
+        resampling_strategy=resampling_strategy,
+        resampling_strategy_args=resampling_strategy_args,
+        scoring_functions=scoring_functions,
+        output_y_hat_optimization=output_y_hat_optimization,
+        include=include,
+        exclude=exclude,
+        disable_file_output=disable_file_output,
+        init_params=init_params,
+        budget=budget,
+        budget_type=budget_type,
+        instance=instance,
+    )
+    # Bellow says what folds the current instance has access two.
+    # By default we have repeats * folds splits to train. Splits not in training_folds
+    # will be None and ignored by the code. All data written to disk is sorted as the training
+    # data for EnsembleBuilder
+    # repeats = resampling_strategy_args.get('repeats')
+    folds = resampling_strategy_args.get('folds')
+    training_folds = list(range(folds * instance, folds * (instance + 1)))
+
+    evaluator.fit_predict_and_loss(iterative=iterative, training_folds=training_folds)

@@ -316,14 +316,14 @@ class Backend(object):
     def get_runs_directory(self) -> str:
         return os.path.join(self.internals_directory, 'runs')
 
-    def get_numrun_directory(self, seed: int, num_run: int, budget: float) -> str:
-        return os.path.join(self.internals_directory, 'runs', '%d_%d_%s' % (seed, num_run, budget))
+    def get_numrun_directory(self, seed: int, num_run: int, budget: float, instance: int) -> str:
+        return os.path.join(self.internals_directory, 'runs', '%d_%d_%s_%s' % (seed, num_run, budget, instance))
 
-    def get_model_filename(self, seed: int, idx: int, budget: float) -> str:
-        return '%s.%s.%s.model' % (seed, idx, budget)
+    def get_model_filename(self, seed: int, idx: int, budget: float, instance: int) -> str:
+        return '%s.%s.%s.%s.model' % (seed, idx, budget, instance)
 
-    def get_cv_model_filename(self, seed: int, idx: int, budget: float) -> str:
-        return '%s.%s.%s.cv_model' % (seed, idx, budget)
+    def get_cv_model_filename(self, seed: int, idx: int, budget: float, instance: int) -> str:
+        return '%s.%s.%s.%s.cv_model' % (seed, idx, budget, instance)
 
     def list_all_models(self, seed: int) -> List[str]:
         runs_directory = self.get_runs_directory()
@@ -337,19 +337,20 @@ class Backend(object):
         models = dict()
 
         for identifier in identifiers:
-            seed, idx, budget = identifier
-            models[identifier] = self.load_model_by_seed_and_id_and_budget(
-                seed, idx, budget)
+            seed, idx, budget, instance = identifier
+            models[identifier] = self.load_model_by_seed_and_id_and_budget_and_instance(
+                seed, idx, budget, instance)
 
         return models
 
-    def load_model_by_seed_and_id_and_budget(self, seed: int,
-                                             idx: int,
-                                             budget: float
-                                             ) -> Pipeline:
-        model_directory = self.get_numrun_directory(seed, idx, budget)
+    def load_model_by_seed_and_id_and_budget_and_instance(self, seed: int,
+                                                          idx: int,
+                                                          budget: float,
+                                                          instance: int,
+                                                          ) -> Pipeline:
+        model_directory = self.get_numrun_directory(seed, idx, budget, instance)
 
-        model_file_name = '%s.%s.%s.model' % (seed, idx, budget)
+        model_file_name = '%s.%s.%s.%s.model' % (seed, idx, budget, instance)
         model_file_path = os.path.join(model_directory, model_file_name)
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
@@ -359,38 +360,39 @@ class Backend(object):
         models = dict()
 
         for identifier in identifiers:
-            seed, idx, budget = identifier
-            models[identifier] = self.load_cv_model_by_seed_and_id_and_budget(
-                seed, idx, budget)
+            seed, idx, budget, instance = identifier
+            models[identifier] = self.load_cv_model_by_seed_and_id_and_budget_and_instance(
+                seed, idx, budget, instance)
 
         return models
 
-    def load_cv_model_by_seed_and_id_and_budget(self,
-                                                seed: int,
-                                                idx: int,
-                                                budget: float
-                                                ) -> Pipeline:
-        model_directory = self.get_numrun_directory(seed, idx, budget)
+    def load_cv_model_by_seed_and_id_and_budget_and_instance(self,
+                                                             seed: int,
+                                                             idx: int,
+                                                             budget: float,
+                                                             instance: int,
+                                                             ) -> Pipeline:
+        model_directory = self.get_numrun_directory(seed, idx, budget, instance)
 
-        model_file_name = '%s.%s.%s.cv_model' % (seed, idx, budget)
+        model_file_name = '%s.%s.%s.%s.cv_model' % (seed, idx, budget, instance)
         model_file_path = os.path.join(model_directory, model_file_name)
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
 
     def save_numrun_to_dir(
-        self, seed: int, idx: int, budget: float, model: Optional[Pipeline],
+        self, seed: int, idx: int, budget: float, instance: int, model: Optional[Pipeline],
         cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
     ) -> None:
         runs_directory = self.get_runs_directory()
         tmpdir = tempfile.mkdtemp(dir=runs_directory)
         if model is not None:
-            file_path = os.path.join(tmpdir, self.get_model_filename(seed, idx, budget))
+            file_path = os.path.join(tmpdir, self.get_model_filename(seed, idx, budget, instance))
             with open(file_path, 'wb') as fh:
                 pickle.dump(model, fh, -1)
 
         if cv_model is not None:
-            file_path = os.path.join(tmpdir, self.get_cv_model_filename(seed, idx, budget))
+            file_path = os.path.join(tmpdir, self.get_cv_model_filename(seed, idx, budget, instance))
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
 
@@ -402,17 +404,17 @@ class Backend(object):
             if preds is not None:
                 file_path = os.path.join(
                     tmpdir,
-                    self.get_prediction_filename(subset, seed, idx, budget)
+                    self.get_prediction_filename(subset, seed, idx, budget, instance)
                 )
                 with open(file_path, 'wb') as fh:
                     pickle.dump(preds.astype(np.float32), fh, -1)
         try:
-            os.rename(tmpdir, self.get_numrun_directory(seed, idx, budget))
+            os.rename(tmpdir, self.get_numrun_directory(seed, idx, budget, instance))
         except OSError:
-            if os.path.exists(self.get_numrun_directory(seed, idx, budget)):
-                os.rename(self.get_numrun_directory(seed, idx, budget),
+            if os.path.exists(self.get_numrun_directory(seed, idx, budget, instance)):
+                os.rename(self.get_numrun_directory(seed, idx, budget, instance),
                           os.path.join(runs_directory, tmpdir + '.old'))
-                os.rename(tmpdir, self.get_numrun_directory(seed, idx, budget))
+                os.rename(tmpdir, self.get_numrun_directory(seed, idx, budget, instance))
                 shutil.rmtree(os.path.join(runs_directory, tmpdir + '.old'))
 
     def get_ensemble_dir(self) -> str:
@@ -462,9 +464,10 @@ class Backend(object):
     def get_prediction_filename(self, subset: str,
                                 automl_seed: Union[str, int],
                                 idx: int,
-                                budget: float
+                                budget: float,
+                                instance: int,
                                 ) -> str:
-        return 'predictions_%s_%s_%s_%s.npy' % (subset, automl_seed, idx, budget)
+        return 'predictions_%s_%s_%s_%s_%s.npy' % (subset, automl_seed, idx, budget, instance)
 
     def save_predictions_as_txt(self,
                                 predictions: np.ndarray,
