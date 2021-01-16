@@ -179,6 +179,7 @@ class AbstractEvaluator(object):
         seed: int = 1,
         output_y_hat_optimization: bool = True,
         num_run: Optional[int] = None,
+        instance: Optional[int] = None,
         include: Optional[List[str]] = None,
         exclude: Optional[List[str]] = None,
         disable_file_output: Union[bool, List[str]] = False,
@@ -267,6 +268,10 @@ class AbstractEvaluator(object):
 
         self.budget = budget
         self.budget_type = budget_type
+        if instance is None or not isinstance(instance, int):
+            self.instance = 0
+        else:
+            self.instance = instance
 
         # Please mypy to prevent not defined attr
         self.model = self._get_model()
@@ -497,6 +502,7 @@ class AbstractEvaluator(object):
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,
+            instance=self.instance,
             model=self.model if 'model' not in self.disable_file_output else None,
             cv_model=models if 'cv_model' not in self.disable_file_output else None,
             ensemble_predictions=(

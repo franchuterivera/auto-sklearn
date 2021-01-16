@@ -37,7 +37,7 @@ Y_ENSEMBLE = 0
 Y_VALID = 1
 Y_TEST = 2
 
-MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)\.npy'
+MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)_([0-9]*)\.npy'
 
 
 class EnsembleBuilderManager(IncorporateRunResultCallback):
@@ -797,11 +797,12 @@ class EnsembleBuilder(object):
         _seed = int(match.group(1))
         _num_run = int(match.group(2))
         _budget = float(match.group(3))
+        _instance = int(match.group(4))
 
         stored_files_for_run = os.listdir(
-            self.backend.get_numrun_directory(_seed, _num_run, _budget))
+            self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance))
         stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(_seed, _num_run, _budget), file_name)
+            os.path.join(self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance), file_name)
             for file_name in stored_files_for_run]
         this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
@@ -829,7 +830,7 @@ class EnsembleBuilder(object):
         pred_path = os.path.join(
             glob.escape(self.backend.get_runs_directory()),
             '%d_*_*' % self.seed,
-            'predictions_ensemble_%s_*_*.npy*' % self.seed,
+            'predictions_ensemble_%s_*_*_*.npy*' % self.seed,
         )
         y_ens_files = glob.glob(pred_path)
         y_ens_files = [y_ens_file for y_ens_file in y_ens_files
@@ -848,13 +849,14 @@ class EnsembleBuilder(object):
             _seed = int(match.group(1))
             _num_run = int(match.group(2))
             _budget = float(match.group(3))
+            _instance = int(match.group(4))
             mtime = os.path.getmtime(y_ens_fn)
 
-            to_read.append([y_ens_fn, match, _seed, _num_run, _budget, mtime])
+            to_read.append([y_ens_fn, match, _seed, _num_run, _budget, _instance, mtime])
 
         n_read_files = 0
         # Now read file wrt to num_run
-        for y_ens_fn, match, _seed, _num_run, _budget, mtime in \
+        for y_ens_fn, match, _seed, _num_run, _budget, _instance, mtime in \
                 sorted(to_read, key=lambda x: x[5]):
             if self.read_at_most and n_read_files >= self.read_at_most:
                 # limit the number of files that will be read
@@ -874,6 +876,7 @@ class EnsembleBuilder(object):
                     "seed": _seed,
                     "num_run": _num_run,
                     "budget": _budget,
+                    "instance": _instance,
                     "disc_space_cost_mb": None,
                     # Lazy keys so far:
                     # 0 - not loaded
@@ -984,7 +987,7 @@ class EnsembleBuilder(object):
                                     num_keys - 1,
                                     num_dummy)
             sorted_keys = [
-                (k, v["ens_loss"], v["num_run"]) for k, v in self.read_losses.items()
+                (k, v["ens_loss"], v["num_run"], v['instance']) for k, v in self.read_losses.items()
                 if v["seed"] == self.seed and v["num_run"] == 1
             ]
         # reload predictions if losses changed over time and a model is
@@ -1083,10 +1086,11 @@ class EnsembleBuilder(object):
                 self.read_preds[k][Y_TEST] = None
             if self.read_losses[k]['loaded'] == 1:
                 self.logger.debug(
-                    'Dropping model %s (%d,%d) with loss %f.',
+                    'Dropping model %s (%d,%d,%d) with loss %f.',
                     k,
                     self.read_losses[k]['seed'],
                     self.read_losses[k]['num_run'],
+                    self.read_losses[k]['instance'],
                     self.read_losses[k]['ens_loss'],
                 )
                 self.read_losses[k]['loaded'] = 2
@@ -1132,15 +1136,17 @@ class EnsembleBuilder(object):
             valid_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s' % (
+                    '%d_%d_%s_%d' % (
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
+                        self.read_losses[k]["instance"],
                     ),
-                    'predictions_valid_%d_%d_%s.npy*' % (
+                    'predictions_valid_%d_%d_%s_%d.npy*' % (
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
+                        self.read_losses[k]["instance"],
                     )
                 )
             )
@@ -1148,15 +1154,17 @@ class EnsembleBuilder(object):
             test_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s' % (
+                    '%d_%d_%s_%d' % (
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
+                        self.read_losses[k]["instance"],
                     ),
-                    'predictions_test_%d_%d_%s.npy*' % (
+                    'predictions_test_%d_%d_%s_%d.npy*' % (
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"]
+                        self.read_losses[k]["instance"],
                     )
                 )
             )
@@ -1234,6 +1242,7 @@ class EnsembleBuilder(object):
                 self.read_losses[k]["seed"],
                 self.read_losses[k]["num_run"],
                 self.read_losses[k]["budget"],
+                self.read_losses[k]["instance"],
             )
             for k in selected_keys]
 
@@ -1427,7 +1436,7 @@ class EnsembleBuilder(object):
         # Sort by loss - smaller is better!
         sorted_keys = list(sorted(
             [
-                (k, v["ens_loss"], v["num_run"])
+                (k, v["ens_loss"], v["num_run"], v["instance"])
                 for k, v in self.read_losses.items()
             ],
             # Sort by loss as priority 1 and then by num_run on a ascending order
@@ -1459,12 +1468,13 @@ class EnsembleBuilder(object):
             _seed = int(match.group(1))
             _num_run = int(match.group(2))
             _budget = float(match.group(3))
+            _instance = int(match.group(4))
 
             # Do not delete the dummy prediction
             if _num_run == 1:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(_seed, _num_run, _budget)
+            numrun_dir = self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance)
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
                 shutil.rmtree(numrun_dir + '.old')
