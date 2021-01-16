@@ -401,6 +401,11 @@ class AutoMLSMBO(object):
             instances = [[json.dumps({'task_id': self.dataset_name,
                                       'fold': fold_number})]
                          for fold_number in range(num_folds)]
+        elif self.resampling_strategy in ['intensifier-cv']:
+            num_repeats = self.resampling_strategy_args['repeats']
+            instances = [[json.dumps({'task_id': self.dataset_name,
+                                      'repeats': repeat})]
+                         for repeat in range(num_repeats)]
         else:
             instances = [[json.dumps({'task_id': self.dataset_name})]]
 
