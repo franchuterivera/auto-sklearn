@@ -169,6 +169,7 @@ class AutoML(BaseEstimator):
                                              'holdout-iterative-fit',
                                              'cv',
                                              'cv-iterative-fit',
+                                             'intensifier-cv',
                                              'partial-cv',
                                              'partial-cv-iterative-fit',
                                              ] \
@@ -191,6 +192,11 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
+        if self._resampling_strategy in ['intensifier-cv']:
+            if 'repeats' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['repeats'] = 5
+            if 'repetition_as_individual_models' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['repetition_as_individual_models'] = False
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 
@@ -386,7 +392,8 @@ class AutoML(BaseEstimator):
                     (basename, time_left_after_reading))
         return time_for_load_data
 
-    def _do_dummy_prediction(self, datamanager: XYDataManager, num_run: int) -> int:
+def _do_dummy_prediction(self, datamanager: XYDataManager, num_run: int,
+                         instance: Optional[str] = None) -> int:
 
         # When using partial-cv it makes no sense to do dummy predictions
         if self._resampling_strategy in ['partial-cv',
@@ -419,7 +426,8 @@ class AutoML(BaseEstimator):
                                     pynisher_context=self._multiprocessing_context,
                                     **self._resampling_strategy_arguments)
 
-        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task)
+        status, cost, runtime, additional_info = ta.run(num_run, cutoff=self._time_for_task,
+                                                        instance=instance)
         if status == StatusType.SUCCESS:
             self._logger.info("Finished creating dummy predictions.")
         else:
@@ -662,7 +670,17 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         # Dummy prediction always have num_run set to 1
-        self.num_run += self._do_dummy_prediction(datamanager, num_run=1)
+        if self._resampling_strategy in ['intensifier-cv']:
+            # In the case of intensifier CV, we need a dummy prediction per repetition
+            num_repeats = self._resampling_strategy_arguments['repeats']
+            instances = [json.dumps({'task_id': self._dataset_name,
+                                      'repeats': repeat})
+                         for repeat in range(num_repeats)]
+            for instance in instances:
+                self._do_dummy_prediction(datamanager, num_run=1, instance=instance)
+            self.num_run += 1
+        else:
+            self.num_run += self._do_dummy_prediction(datamanager, num_run=1)
 
         # == RUN ensemble builder
         # Do this before calculating the meta-features to make sure that the
@@ -1120,7 +1138,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv')
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -1254,7 +1272,7 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
-            if self._resampling_strategy in ('cv', 'cv-iterative-fit'):
+            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv'):
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(identifiers)
             else:
                 self.cv_models_ = None
@@ -1264,7 +1282,7 @@ class AutoML(BaseEstimator):
             ):
                 raise ValueError('No models fitted!')
             if (
-                self._resampling_strategy in ['cv', 'cv-iterative-fit']
+                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv']
                 and len(self.cv_models_) == 0
             ):
                 raise ValueError('No models fitted!')
