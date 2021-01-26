@@ -182,6 +182,7 @@ class AbstractEvaluator(object):
         port: Optional[int],
         configuration: Optional[Union[int, Configuration]] = None,
         scoring_functions: Optional[List[Scorer]] = None,
+        level: int = 1,
         seed: int = 1,
         output_y_hat_optimization: bool = True,
         num_run: Optional[int] = None,
@@ -212,6 +213,7 @@ class AbstractEvaluator(object):
 
         self.metric = metric
         self.task_type = self.datamanager.info['task']
+        self.level = level
         self.seed = seed
 
         self.output_y_hat_optimization = output_y_hat_optimization
@@ -393,6 +395,7 @@ class AbstractEvaluator(object):
         for metric_name, value in loss_.items():
             additional_run_info[metric_name] = value
         additional_run_info['duration'] = self.duration
+        additional_run_info['level'] = self.level
         additional_run_info['num_run'] = self.num_run
         if train_loss is not None:
             additional_run_info['train_loss'] = train_loss
@@ -510,8 +513,10 @@ class AbstractEvaluator(object):
                         models = VotingRegressor(estimators=None)
                     # Mypy cannot understand hasattr yet
                     models.estimators_ = self.models  # type: ignore[attr-defined]
+                    models.base_models_ = self.base_models_
 
         self.backend.save_numrun_to_dir(
+            level=self.level,
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,
