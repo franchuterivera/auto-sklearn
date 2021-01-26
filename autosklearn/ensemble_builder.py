@@ -37,13 +37,14 @@ Y_ENSEMBLE = 0
 Y_VALID = 1
 Y_TEST = 2
 
-MODEL_FN_RE = r'_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)_([0-9]*)\.npy'
+MODEL_FN_RE = r'([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)_([0-9]*)\.npy'
 
 
 class EnsembleBuilderManager(IncorporateRunResultCallback):
     def __init__(
         self,
         start_time: float,
+        max_stacking_level: int,
         time_left_for_ensembles: float,
         backend: Backend,
         dataset_name: str,
@@ -119,6 +120,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.start_time = start_time
         self.time_left_for_ensembles = time_left_for_ensembles
         self.backend = backend
+        self.max_stacking_level = max_stacking_level
         self.dataset_name = dataset_name
         self.task = task
         self.metric = metric
@@ -218,6 +220,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                 self.futures.append(dask_client.submit(
                     fit_and_return_ensemble,
                     backend=self.backend,
+                    max_stacking_level=self.max_stacking_level,
                     dataset_name=self.dataset_name,
                     task_type=self.task,
                     metric=self.metric,
@@ -258,6 +261,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
 
 def fit_and_return_ensemble(
     backend: Backend,
+    max_stacking_level: int,
     dataset_name: str,
     task_type: str,
     metric: Scorer,
@@ -346,6 +350,7 @@ def fit_and_return_ensemble(
     """
     result = EnsembleBuilder(
         backend=backend,
+        max_stacking_level=max_stacking_level,
         dataset_name=dataset_name,
         task_type=task_type,
         metric=metric,
@@ -372,6 +377,7 @@ class EnsembleBuilder(object):
     def __init__(
         self,
         backend: Backend,
+        max_stacking_level:int,
         dataset_name: str,
         task_type: int,
         metric: Scorer,
@@ -443,6 +449,7 @@ class EnsembleBuilder(object):
         super(EnsembleBuilder, self).__init__()
 
         self.backend = backend  # communication with filesystem
+        self.max_stacking_level = max_stacking_level
         self.dataset_name = dataset_name
         self.task_type = task_type
         self.metric = metric
@@ -794,15 +801,16 @@ class EnsembleBuilder(object):
         match = self.model_fn_re.search(pred_path)
         if not match:
             raise ValueError("Invalid path format %s" % pred_path)
-        _seed = int(match.group(1))
-        _num_run = int(match.group(2))
-        _budget = float(match.group(3))
-        _instance = int(match.group(4))
+        _level = int(match.group(1))
+        _seed = int(match.group(2))
+        _num_run = int(match.group(3))
+        _budget = float(match.group(4))
+        _instance = int(match.group(5))
 
         stored_files_for_run = os.listdir(
-            self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance))
+            self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance))
         stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance), file_name)
+            os.path.join(self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance), file_name)
             for file_name in stored_files_for_run]
         this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
@@ -829,8 +837,8 @@ class EnsembleBuilder(object):
 
         pred_path = os.path.join(
             glob.escape(self.backend.get_runs_directory()),
-            '%d_*_*' % self.seed,
-            'predictions_ensemble_%s_*_*_*.npy*' % self.seed,
+            '*_%d_*_*_*' % self.seed,
+            'predictions_ensemble_*_%s_*_*_*.npy*' % self.seed,
         )
         y_ens_files = glob.glob(pred_path)
         y_ens_files = [y_ens_file for y_ens_file in y_ens_files
@@ -846,17 +854,18 @@ class EnsembleBuilder(object):
         to_read = []
         for y_ens_fn in self.y_ens_files:
             match = self.model_fn_re.search(y_ens_fn)
-            _seed = int(match.group(1))
-            _num_run = int(match.group(2))
-            _budget = float(match.group(3))
-            _instance = int(match.group(4))
+            _level = int(match.group(1))
+            _seed = int(match.group(2))
+            _num_run = int(match.group(3))
+            _budget = float(match.group(4))
+            _instance = int(match.group(5))
             mtime = os.path.getmtime(y_ens_fn)
 
-            to_read.append([y_ens_fn, match, _seed, _num_run, _budget, _instance, mtime])
+            to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
 
         n_read_files = 0
         # Now read file wrt to num_run
-        for y_ens_fn, match, _seed, _num_run, _budget, _instance, mtime in \
+        for y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime in \
                 sorted(to_read, key=lambda x: x[5]):
             if self.read_at_most and n_read_files >= self.read_at_most:
                 # limit the number of files that will be read
@@ -873,6 +882,7 @@ class EnsembleBuilder(object):
                     "mtime_ens": 0,
                     "mtime_valid": 0,
                     "mtime_test": 0,
+                    "level": _level,
                     "seed": _seed,
                     "num_run": _num_run,
                     "budget": _budget,
@@ -986,10 +996,9 @@ class EnsembleBuilder(object):
                                     "Number of dummy models: %d",
                                     num_keys - 1,
                                     num_dummy)
-            sorted_keys = [
-                (k, v["ens_loss"], v["num_run"], v['instance']) for k, v in self.read_losses.items()
-                if v["seed"] == self.seed and v["num_run"] == 1
-            ]
+            sorted_keys = [(k, v["ens_loss"], v["num_run"], v['instance'], v['level'])
+                           for k, v in self.read_losses.items()
+                           if v["seed"] == self.seed and v["num_run"] == 1]
         # reload predictions if losses changed over time and a model is
         # considered to be in the top models again!
         if not isinstance(self.ensemble_nbest, numbers.Integral):
@@ -1086,8 +1095,9 @@ class EnsembleBuilder(object):
                 self.read_preds[k][Y_TEST] = None
             if self.read_losses[k]['loaded'] == 1:
                 self.logger.debug(
-                    'Dropping model %s (%d,%d,%d) with loss %f.',
+                    'Dropping model %s (%d,%d,%d,%d) with loss %f.',
                     k,
+                    self.read_losses[k]['level'],
                     self.read_losses[k]['seed'],
                     self.read_losses[k]['num_run'],
                     self.read_losses[k]['instance'],
@@ -1136,13 +1146,15 @@ class EnsembleBuilder(object):
             valid_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s_%d' % (
+                    '%d_%d_%d_%s_%d' % (
+                        self.read_losses[k]["level"],
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
                         self.read_losses[k]["instance"],
                     ),
-                    'predictions_valid_%d_%d_%s_%d.npy*' % (
+                    'predictions_valid_%d_%d_%d_%s_%d.npy*' % (
+                        self.read_losses[k]["level"],
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
@@ -1154,14 +1166,15 @@ class EnsembleBuilder(object):
             test_fn = glob.glob(
                 os.path.join(
                     glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%s_%d' % (
+                    '%d_%d_%d_%s_%d' % (
+                        self.read_losses[k]["level"],
                         self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"],
                         self.read_losses[k]["instance"],
                     ),
-                    'predictions_test_%d_%d_%s_%d.npy*' % (
-                        self.read_losses[k]["seed"],
+                    'predictions_test_%d_%d_%d_%s_%d.npy*' % (
+                        self.read_losses[k]["level"],
                         self.read_losses[k]["num_run"],
                         self.read_losses[k]["budget"]
                         self.read_losses[k]["instance"],
@@ -1239,6 +1252,7 @@ class EnsembleBuilder(object):
         predictions_train = [self.read_preds[k][Y_ENSEMBLE] for k in selected_keys]
         include_num_runs = [
             (
+                self.read_losses[k]["level"],
                 self.read_losses[k]["seed"],
                 self.read_losses[k]["num_run"],
                 self.read_losses[k]["budget"],
@@ -1436,7 +1450,9 @@ class EnsembleBuilder(object):
         # Sort by loss - smaller is better!
         sorted_keys = list(sorted(
             [
-                (k, v["ens_loss"], v["num_run"], v["instance"])
+                # NOTICE that we add level after numrun because
+                # the code relies on num_run to be in position 2
+                (k, v["ens_score"], v["num_run"], v["instance"], v["level"])
                 for k, v in self.read_losses.items()
             ],
             # Sort by loss as priority 1 and then by num_run on a ascending order
@@ -1463,10 +1479,11 @@ class EnsembleBuilder(object):
                 continue
 
             match = self.model_fn_re.search(pred_path)
-            _seed = int(match.group(1))
-            _num_run = int(match.group(2))
-            _budget = float(match.group(3))
-            _instance = int(match.group(4))
+            _level = int(match.group(1))
+            _seed = int(match.group(2))
+            _num_run = int(match.group(3))
+            _budget = float(match.group(4))
+            _instance = int(match.group(5))
             selected_num_runs.append(_num_run)
 
         for pred_path in self.y_ens_files:
@@ -1479,17 +1496,22 @@ class EnsembleBuilder(object):
                 continue
 
             match = self.model_fn_re.search(pred_path)
-            _seed = int(match.group(1))
-            _num_run = int(match.group(2))
-            _budget = float(match.group(3))
-            _instance = int(match.group(4))
+            _level = int(match.group(1))
+            _seed = int(match.group(2))
+            _num_run = int(match.group(3))
+            _budget = float(match.group(4))
+            _instance = int(match.group(5))
+
+            # Do not delete low level predictions
+            if self.max_stacking_level > 1 and _level < self.max_stacking_level:
+                continue
 
             # Do not delete the dummy prediction
             # preserve lower budgets for a promising comparisson
             if _num_run == 1 or _num_run in selected_num_runs:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance)
+            numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance)
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
                 shutil.rmtree(numrun_dir + '.old')
