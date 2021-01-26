@@ -146,6 +146,7 @@ class TrainEvaluator(AbstractEvaluator):
                  port,
                  configuration=None,
                  scoring_functions=None,
+                 level=1,
                  seed=1,
                  output_y_hat_optimization=True,
                  resampling_strategy=None,
@@ -166,6 +167,7 @@ class TrainEvaluator(AbstractEvaluator):
             configuration=configuration,
             metric=metric,
             scoring_functions=scoring_functions,
+            level=level,
             seed=seed,
             output_y_hat_optimization=output_y_hat_optimization,
             num_run=num_run,
@@ -189,6 +191,36 @@ class TrainEvaluator(AbstractEvaluator):
         )
         self.X_train = self.datamanager.data['X_train']
         self.Y_train = self.datamanager.data['Y_train']
+
+        self.base_models_ = []
+        if self.level > 1:
+            # For now I only want to use the higesht budget available
+            assert resampling_strategy == 'intensifier-cv'
+            idx2predict = self.backend.load_model_predictions(
+                # Ensemble correspond to the OOF prediction that have previously
+                # been pre-sorted to match X_train indices
+                subset='ensemble',
+                # Do not yet use the current level!
+                levels=list(range(1, level))
+            )
+            identifiers = [k for k in idx2predict.keys()]
+            self.base_models_ = identifiers
+            self.X_train = np.concatenate(
+                [self.X_train] + [idx2predict[k] for k in identifiers],
+                axis=1
+            )
+            # Notice how I use the same identifiers, in case a new config is there
+            idx2predict = self.backend.load_model_predictions(
+                # Ensemble correspond to the OOF prediction that have previously
+                # been pre-sorted to match X_train indices
+                subset='test',
+                levels=list(range(1, level + 1))
+            )
+            self.X_test = np.concatenate(
+                [self.X_test] + [idx2predict[k] for k in identifiers],
+                axis=1
+            )
+
         self.Y_optimization = None
         self.Y_targets = [None] * self.num_cv_folds
         self.Y_train_targets = np.ones(self.Y_train.shape) * np.NaN
@@ -626,8 +658,8 @@ class TrainEvaluator(AbstractEvaluator):
                 # Update the loss to reflect and average. Because we always have the same
                 # number of folds, we can do an average of average
                 try:
-                    past_opt_losses = self.backend.load_metadata_by_seed_and_id_and_budget_and_instance(
-                        seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
+                    past_opt_losses = self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                        level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
                     )['loss']
                     self.logger.debug(f"For instance {self.instance} loss is {opt_loss} and past loss are={past_opt_losses}")
                     # Because all repetitions have same number of folds, we can do average of average
@@ -641,8 +673,8 @@ class TrainEvaluator(AbstractEvaluator):
                     # Repeat 1: (        1*A     + B  )/2
                     # Repeat 2: (    2*(A + B)/2 + c  )/3
                     # Notice we NEED only repeat N-1 for N averaging
-                    lower_prediction = self.backend.load_prediction_by_seed_and_id_and_budget_and_instance(
-                        subset='ensemble', seed=self.seed, idx=self.num_run, budget=self.budget,
+                    lower_prediction = self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
                         instance=self.instance - 1,
                     )
                     # Remove the division from past iteration
@@ -663,8 +695,8 @@ class TrainEvaluator(AbstractEvaluator):
                         1/(self.instance + 1),
                         out=Y_optimization_pred,
                     )
-                    lower_prediction = self.backend.load_prediction_by_seed_and_id_and_budget_and_instance(
-                        subset='test', seed=self.seed, idx=self.num_run, budget=self.budget,
+                    lower_prediction = self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='test', level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
                         instance=self.instance - 1,
                     )
                     # Remove the division from past iteration
@@ -687,8 +719,8 @@ class TrainEvaluator(AbstractEvaluator):
                     )
 
                     # And then finally the model needs to be average
-                    old_voting_model = self.backend.load_cv_model_by_seed_and_id_and_budget_and_instance(
-                        seed=self.seed, idx=self.num_run, budget=self.budget,
+                    old_voting_model = self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                        level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
                         instance=self.instance - 1,
                     )
                     # voting estimator has fitted estimators in a list
@@ -1260,6 +1292,11 @@ def eval_partial_cv(
 ):
     if budget_type is not None:
         raise NotImplementedError()
+
+    if instance is not None:
+        instance_dict = json.loads(instance) if instance is not None else {}
+        level = instance_dict.get('level', 1)
+
     instance = json.loads(instance) if instance is not None else {}
     fold = instance['fold']
 
@@ -1271,6 +1308,7 @@ def eval_partial_cv(
         configuration=config,
         resampling_strategy=resampling_strategy,
         resampling_strategy_args=resampling_strategy_args,
+        level=level,
         seed=seed,
         num_run=num_run,
         scoring_functions=scoring_functions,
@@ -1308,6 +1346,11 @@ def eval_partial_cv_iterative(
 ):
     if budget_type is not None:
         raise NotImplementedError()
+
+    if instance is not None:
+        instance_dict = json.loads(instance) if instance is not None else {}
+        level = instance_dict.get('level', 1)
+
     return eval_partial_cv(
         queue=queue,
         config=config,
@@ -1315,6 +1358,7 @@ def eval_partial_cv_iterative(
         metric=metric,
         resampling_strategy=resampling_strategy,
         resampling_strategy_args=resampling_strategy_args,
+        level=level,
         seed=seed,
         port=port,
         num_run=num_run,
@@ -1351,12 +1395,17 @@ def eval_cv(
         budget_type=None,
         iterative=False,
 ):
+    if instance is not None:
+        instance_dict = json.loads(instance) if instance is not None else {}
+        level = instance_dict.get('level', 1)
+
     evaluator = TrainEvaluator(
         backend=backend,
         port=port,
         queue=queue,
         metric=metric,
         configuration=config,
+        level=level,
         seed=seed,
         num_run=num_run,
         resampling_strategy=resampling_strategy,
@@ -1395,11 +1444,16 @@ def eval_iterative_cv(
         budget_type=None,
         iterative=True,
 ):
+    if instance is not None:
+        instance_dict = json.loads(instance) if instance is not None else {}
+        level = instance_dict.get('level', 1)
+
     eval_cv(
         backend=backend,
         queue=queue,
         metric=metric,
         config=config,
+        level=level,
         seed=seed,
         num_run=num_run,
         resampling_strategy=resampling_strategy,
@@ -1443,6 +1497,7 @@ def eval_intensifier_cv(
     # Instances in this context are repetitions to be selected from the evaluator
     instance_dict = json.loads(instance) if instance is not None else {}
     instance = instance_dict.get('repeats', 0)
+    level = instance_dict.get('level', 1)
 
     evaluator = TrainEvaluator(
         backend=backend,
@@ -1451,6 +1506,7 @@ def eval_intensifier_cv(
         metric=metric,
         configuration=config,
         seed=seed,
+        level=level,
         num_run=num_run,
         resampling_strategy=resampling_strategy,
         resampling_strategy_args=resampling_strategy_args,

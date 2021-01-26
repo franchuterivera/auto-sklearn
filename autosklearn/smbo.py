@@ -163,6 +163,7 @@ def _print_debug_info_of_init_configuration(initial_configurations, basename,
 
 def get_smac_object(
     scenario_dict,
+    run_id,
     seed,
     ta,
     ta_kwargs,
@@ -189,7 +190,7 @@ def get_smac_object(
         tae_runner=ta,
         tae_runner_kwargs=ta_kwargs,
         initial_configurations=initial_configurations,
-        run_id=seed,
+        run_id=run_id,
         intensifier=intensifier,
         dask_client=dask_client,
         n_jobs=n_jobs,
@@ -208,11 +209,12 @@ class AutoMLSMBO(object):
                  n_jobs,
                  dask_client: dask.distributed.Client,
                  port: int,
+                 run_id: int,
                  start_num_run=1,
                  data_memory_limit=None,
                  num_metalearning_cfgs=25,
-                 config_file=None,
                  seed=1,
+                 stacking_levels=[1],
                  metadata_directory=None,
                  resampling_strategy='holdout',
                  resampling_strategy_args=None,
@@ -235,6 +237,7 @@ class AutoMLSMBO(object):
         self.task = None
         self.backend = backend
         self.port = port
+        self.run_id = run_id
 
         # the configuration space
         self.config_space = config_space
@@ -257,8 +260,8 @@ class AutoMLSMBO(object):
         self.data_memory_limit = data_memory_limit
         self.watcher = watcher
         self.num_metalearning_cfgs = num_metalearning_cfgs
-        self.config_file = config_file
         self.seed = seed
+        self.stacking_levels = stacking_levels
         self.metadata_directory = metadata_directory
         self.start_num_run = start_num_run
         self.include_estimators = include_estimators
@@ -283,6 +286,7 @@ class AutoMLSMBO(object):
                 name=logger_name,
                 port=self.port,
             )
+        self.start_time = time.time()
 
     def _send_warnings_to_log(self, message, category, filename, lineno,
                               file=None, line=None):
@@ -407,10 +411,11 @@ class AutoMLSMBO(object):
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
             instances = [[json.dumps({'task_id': self.dataset_name,
+                                      'level': level,
                                       'repeats': repeat})]
-                         for repeat in range(num_repeats)]
+                         for repeat in range(num_repeats) for level in self.stacking_levels]
         else:
-            instances = [[json.dumps({'task_id': self.dataset_name})]]
+            instances = [[json.dumps({'task_id': self.dataset_name, 'level': self.stacking_levels[-1]})]]
 
         # TODO rebuild target algorithm to be it's own target algorithm
         # evaluator, which takes into account that a run can be killed prior
@@ -461,7 +466,8 @@ class AutoMLSMBO(object):
         )
         ta = ExecuteTaFuncWithQueue
 
-        startup_time = self.watcher.wall_elapsed(self.dataset_name)
+        #startup_time = self.watcher.wall_elapsed(self.dataset_name)
+        startup_time = time.time() - self.start_time
         total_walltime_limit = self.total_walltime_limit - startup_time - 5
         scenario_dict = {
             'abort_on_first_run_crash': False,
@@ -505,6 +511,7 @@ class AutoMLSMBO(object):
             scenario_dict.update(self.smac_scenario_args)
 
         smac_args = {
+            'run_id': self.run_id,
             'scenario_dict': scenario_dict,
             'seed': seed,
             'ta': ta,

@@ -118,6 +118,7 @@ class AbstractEvaluator(object):
                  port: typing.Optional[int],
                  configuration=None,
                  scoring_functions=None,
+                 level=1,
                  seed=1,
                  output_y_hat_optimization=True,
                  num_run=None,
@@ -147,6 +148,7 @@ class AbstractEvaluator(object):
 
         self.metric = metric
         self.task_type = self.datamanager.info['task']
+        self.level = level
         self.seed = seed
 
         self.output_y_hat_optimization = output_y_hat_optimization
@@ -322,6 +324,7 @@ class AbstractEvaluator(object):
         for metric_name, value in loss_.items():
             additional_run_info[metric_name] = value
         additional_run_info['duration'] = self.duration
+        additional_run_info['level'] = self.level
         additional_run_info['num_run'] = self.num_run
         if train_loss is not None:
             additional_run_info['train_loss'] = train_loss
@@ -430,12 +433,14 @@ class AbstractEvaluator(object):
                 else:
                     models = VotingRegressor(estimators=None)
                 models.estimators_ = self.models
+                models.base_models_ = self.base_models_
             else:
                 models = None
         else:
             models = None
 
         self.backend.save_numrun_to_dir(
+            level=self.level,
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,

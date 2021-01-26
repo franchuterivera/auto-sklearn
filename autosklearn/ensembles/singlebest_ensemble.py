@@ -57,11 +57,13 @@ class SingleBest(AbstractEnsemble):
 
                 # Make sure that the individual best model actually exists
                 model_dir = self.backend.get_numrun_directory(
+                    run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
                 )
                 model_file_name = self.backend.get_model_filename(
+                    run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
@@ -71,6 +73,7 @@ class SingleBest(AbstractEnsemble):
                     continue
 
                 best_model_identifier = [(
+                    run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
