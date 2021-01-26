@@ -325,6 +325,9 @@ class Backend(object):
     def get_cv_model_filename(self, seed: int, idx: int, budget: float, instance: int) -> str:
         return '%s.%s.%s.%s.cv_model' % (seed, idx, budget, instance)
 
+    def get_metadata_filename(self, seed: int, idx: int, budget: float, instance: int) -> str:
+        return '%s.%s.%s.%s.metadata' % (seed, idx, budget, instance)
+
     def list_all_models(self, seed: int) -> List[str]:
         runs_directory = self.get_runs_directory()
         model_files = glob.glob(
@@ -379,10 +382,37 @@ class Backend(object):
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
 
+    def load_metadata_by_seed_and_id_and_budget_and_instance(self, seed: int,
+                                                             idx: int,
+                                                             budget: float,
+                                                             instance: int,
+                                                             ) -> Dict:
+        model_directory = self.get_numrun_directory(seed, idx, budget, instance)
+
+        filename = self.get_metadata_filename(seed, idx, budget, instance)
+        file_path = os.path.join(model_directory, filename)
+        with open(file_path, 'rb') as fh:
+            return pickle.load(fh)
+
+    def load_prediction_by_seed_and_id_and_budget_and_instance(self,
+                                                               subset: str,
+                                                               seed: int,
+                                                               idx: int,
+                                                               budget: float,
+                                                               instance: int,
+                                                               ) -> Dict:
+        model_directory = self.get_numrun_directory(seed, idx, budget, instance)
+
+        filename = self.get_prediction_filename(subset, seed, idx, budget, instance)
+        file_path = os.path.join(model_directory, filename)
+        with open(file_path, 'rb') as fh:
+            return pickle.load(fh)
+
     def save_numrun_to_dir(
         self, seed: int, idx: int, budget: float, instance: int, model: Optional[Pipeline],
         cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
+        run_metadata: Optional[Dict],
     ) -> None:
         runs_directory = self.get_runs_directory()
         tmpdir = tempfile.mkdtemp(dir=runs_directory)
@@ -395,6 +425,12 @@ class Backend(object):
             file_path = os.path.join(tmpdir, self.get_cv_model_filename(seed, idx, budget, instance))
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
+
+        # Write run metadata for multiple purposes,
+        # as we sadly do not have access YET to runhistory
+        file_path = os.path.join(tmpdir, self.get_metadata_filename(seed, idx, budget, instance))
+        with open(file_path, 'wb') as fh:
+            pickle.dump(run_metadata, fh, -1)
 
         for preds, subset in (
             (ensemble_predictions, 'ensemble'),

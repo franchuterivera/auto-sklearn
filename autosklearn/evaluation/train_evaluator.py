@@ -661,6 +661,86 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
+            avg_previous_repeats = self.resampling_strategy_args.get('avg_previous_repeats', False)
+            # We do averaging if requested AND if at least 2 repetition have passed
+            if self.resampling_strategy == 'intensifier-cv' and avg_previous_repeats and self.instance > 0:
+                # Update the loss to reflect and average. Because we always have the same
+                # number of folds, we can do an average of average
+                try:
+                    past_opt_losses = self.backend.load_metadata_by_seed_and_id_and_budget_and_instance(
+                        seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
+                    )['loss']
+                    self.logger.debug(f"For instance {self.instance} loss is {opt_loss} and past loss are={past_opt_losses}")
+                    # Because all repetitions have same number of folds, we can do average of average
+                    opt_loss = (past_opt_losses * self.instance + opt_loss) / (self.instance + 1)
+
+                    # Average predictions -- Ensemble
+                    # preditions are sorted to make things easy -- But what price are we paying
+
+                    # So that I remember: We want to average the predictions only with the past repetition as follows:
+                    # Repeat 0: A/1
+                    # Repeat 1: (        1*A     + B  )/2
+                    # Repeat 2: (    2*(A + B)/2 + c  )/3
+                    # Notice we NEED only repeat N-1 for N averaging
+                    lower_prediction = self.backend.load_prediction_by_seed_and_id_and_budget_and_instance(
+                        subset='ensemble', seed=self.seed, idx=self.num_run, budget=self.budget,
+                        instance=self.instance - 1,
+                    )
+                    # Remove the division from past iteration
+                    np.multiply(
+                        lower_prediction,
+                        self.instance,
+                        out=lower_prediction,
+                    )
+                    # Add them now that they are within the same range
+                    np.add(
+                        Y_optimization_pred,
+                        lower_prediction,
+                        out=Y_optimization_pred,
+                    )
+                    # Divide by total amount of repetitions
+                    np.multiply(
+                        Y_optimization_pred,
+                        1/(self.instance + 1),
+                        out=Y_optimization_pred,
+                    )
+                    lower_prediction = self.backend.load_prediction_by_seed_and_id_and_budget_and_instance(
+                        subset='test', seed=self.seed, idx=self.num_run, budget=self.budget,
+                        instance=self.instance - 1,
+                    )
+                    # Remove the division from past iteration
+                    np.multiply(
+                        lower_prediction,
+                        self.instance,
+                        out=lower_prediction,
+                    )
+                    # Add them now that they are within the same range
+                    np.add(
+                        Y_test_pred,
+                        lower_prediction,
+                        out=Y_test_pred,
+                    )
+                    # Divide by total amount of repetitions
+                    np.multiply(
+                        Y_test_pred,
+                        1/(self.instance + 1),
+                        out=Y_test_pred,
+                    )
+
+                    # And then finally the model needs to be average
+                    old_voting_model = self.backend.load_cv_model_by_seed_and_id_and_budget_and_instance(
+                        seed=self.seed, idx=self.num_run, budget=self.budget,
+                        instance=self.instance - 1,
+                    )
+                    # voting estimator has fitted estimators in a list
+                    # We expect from 0 to training_folds-1 to be taken from old models
+                    # then training_folds folds would be trained properly, and the rest of repetition should be none
+                    for i in range(len(old_voting_model.estimators_)):
+                        self.models[i] = old_voting_model.estimators_[i]
+                    assert i + 1 == training_folds[0], f"training_folds={training_folds} old_voting_model.estimators_={len(old_voting_model.estimators_)} instance={self.instance} i={i}"
+                except Exception as e:
+                    self.logger.error(f"Run into {e} while averaging instance={self.instance} for num_run={self.num_run} budget={self.budget}")
+
             # We do not train all folds :) -- because instances indicate what
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
