@@ -360,9 +360,15 @@ class AbstractEvaluator(object):
 
         self.duration = time.time() - self.starttime
 
+        run_metadata = {
+            'loss': loss,
+            'duration': self.duration,
+            'status': status,
+        }
+
         if file_output:
             file_out_loss, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                opt_pred, valid_pred, test_pred, run_metadata
             )
         else:
             file_out_loss = None
@@ -438,6 +444,7 @@ class AbstractEvaluator(object):
         Y_optimization_pred: np.ndarray,
         Y_valid_pred: np.ndarray,
         Y_test_pred: np.ndarray,
+        run_metadata: Dict[str, Any],
     ) -> Tuple[Optional[float], Dict[str, Union[str, int, float, List, Dict, Tuple]]]:
         # Abort if self.Y_optimization is None
         # self.Y_optimization can be None if we use partial-cv, then,
@@ -520,6 +527,7 @@ class AbstractEvaluator(object):
             test_predictions=(
                 Y_test_pred if 'y_test' not in self.disable_file_output else None
             ),
+            run_metadata=run_metadata,
         )
 
         return None, {}
