@@ -1449,6 +1449,20 @@ class EnsembleBuilder(object):
         """
 
         # Loop through the files currently in the directory
+        selected_num_runs = []
+        for pred_path in self.y_ens_files:
+
+            # Do not delete candidates
+            if pred_path not in selected_keys:
+                continue
+
+            match = self.model_fn_re.search(pred_path)
+            _seed = int(match.group(1))
+            _num_run = int(match.group(2))
+            _budget = float(match.group(3))
+            _instance = int(match.group(4))
+            selected_num_runs.append(_num_run)
+
         for pred_path in self.y_ens_files:
 
             # Do not delete candidates
@@ -1465,7 +1479,8 @@ class EnsembleBuilder(object):
             _instance = int(match.group(4))
 
             # Do not delete the dummy prediction
-            if _num_run == 1:
+            # preserve lower budgets for a promising comparisson
+            if _num_run == 1 or _num_run in selected_num_runs:
                 continue
 
             numrun_dir = self.backend.get_numrun_directory(_seed, _num_run, _budget, _instance)

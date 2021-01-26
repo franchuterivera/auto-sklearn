@@ -289,9 +289,15 @@ class AbstractEvaluator(object):
 
         self.duration = time.time() - self.starttime
 
+        run_metadata = {
+            'loss': loss,
+            'duration': self.duration,
+            'status': status,
+        }
+
         if file_output:
             loss_, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                opt_pred, valid_pred, test_pred, run_metadata
             )
         else:
             loss_ = None
@@ -335,7 +341,7 @@ class AbstractEvaluator(object):
     def calculate_auxiliary_losses(
         self,
         Y_valid_pred,
-        Y_test_pred
+        Y_test_pred,
     ):
         if Y_valid_pred is not None:
             if self.y_valid is not None:
@@ -363,7 +369,8 @@ class AbstractEvaluator(object):
             self,
             Y_optimization_pred,
             Y_valid_pred,
-            Y_test_pred
+            Y_test_pred,
+            run_metadata,
     ):
         # Abort if self.Y_optimization is None
         # self.Y_optimization can be None if we use partial-cv, then,
@@ -444,6 +451,7 @@ class AbstractEvaluator(object):
             test_predictions=(
                 Y_test_pred if 'y_test' not in self.disable_file_output else None
             ),
+            run_metadata=run_metadata,
         )
 
         return None, {}
