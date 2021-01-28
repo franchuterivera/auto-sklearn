@@ -61,6 +61,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         random_state: int,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         pynisher_context: str = 'fork',
+        ensemble_folds: Optional[str] = None,
     ):
         """ SMAC callback to handle ensemble building
 
@@ -134,6 +135,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_memory_limit = ensemble_memory_limit
         self.random_state = random_state
         self.logger_port = logger_port
+        self.ensemble_folds = ensemble_folds
         self.pynisher_context = pynisher_context
 
         # Store something similar to SMAC's runhistory
@@ -238,6 +240,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     priority=100,
                     pynisher_context=self.pynisher_context,
                     logger_port=self.logger_port,
+                    ensemble_folds=self.ensemble_folds,
                     unit_test=unit_test,
                 ))
 
@@ -278,6 +281,7 @@ def fit_and_return_ensemble(
     return_predictions: bool,
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+    ensemble_folds: str = None,
     unit_test: bool = False,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
@@ -363,6 +367,7 @@ def fit_and_return_ensemble(
         read_at_most=read_at_most,
         random_state=random_state,
         logger_port=logger_port,
+        ensemble_folds=ensemble_folds,
         unit_test=unit_test,
     ).run(
         end_at=end_at,
@@ -391,6 +396,7 @@ class EnsembleBuilder(object):
         read_at_most: int = 5,
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
+        ensemble_folds: str = None,
         unit_test: bool = False,
     ):
         """
@@ -491,6 +497,7 @@ class EnsembleBuilder(object):
             name='EnsembleBuilder',
             port=self.logger_port,
         )
+        self.ensemble_folds = ensemble_folds
 
         if ensemble_nbest == 1:
             self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
@@ -850,6 +857,17 @@ class EnsembleBuilder(object):
                               " %s" % pred_path)
             return False
 
+        # get the highest fold per num_run
+        runs_directory = self.backend.get_runs_directory()
+        runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*'))]
+        runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
+
+        highest_instance = {}
+        for level_, seed_, num_run_, budget_, instance_ in runs:
+            if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
+                highest_instance[num_run_] = instance_
+        max_instance = max(list(highest_instance.values()))
+
         # First sort files chronologically
         to_read = []
         for y_ens_fn in self.y_ens_files:
@@ -860,6 +878,12 @@ class EnsembleBuilder(object):
             _budget = float(match.group(4))
             _instance = int(match.group(5))
             mtime = os.path.getmtime(y_ens_fn)
+
+            if self.ensemble_folds is not None:
+                if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
+                    continue
+                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[num_run_]:
+                    continue
 
             to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
 
@@ -1504,6 +1528,13 @@ class EnsembleBuilder(object):
             # Do not delete the dummy prediction
             # preserve lower budgets for a promising comparisson
             if _num_run == 1 or _num_run in selected_num_runs:
+                continue
+
+            # If only using high folds, we can only delete low budget folds for the
+            # current selected models. We do NOT know if other configurations are going
+            # to used
+            # TODO: We can however delete super low performing configuration.
+            if self.ensemble_folds is not None and _num_run not in selected_num_runs:
                 continue
 
             numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance)
