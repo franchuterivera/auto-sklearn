@@ -142,7 +142,8 @@ class AutoML(BaseEstimator):
                  smac_scenario_args=None,
                  logging_config=None,
                  metric=None,
-                 scoring_functions=None
+                 scoring_functions=None,
+                 ensemble_folds=None,
                  ):
         super(AutoML, self).__init__()
         self.configuration_space = None
@@ -263,6 +264,7 @@ class AutoML(BaseEstimator):
 
         # By default try to use the TCP logging port or get a new port
         self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
+        self._ensemble_folds = ensemble_folds
 
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
@@ -729,6 +731,7 @@ class AutoML(BaseEstimator):
                 random_state=self._seed,
                 logger_port=self._logger_port,
                 pynisher_context=self._multiprocessing_context,
+                ensemble_folds=self._ensemble_folds,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -1299,6 +1302,7 @@ class AutoML(BaseEstimator):
             random_state=self._seed,
             logger_port=self._logger_port,
             pynisher_context=self._multiprocessing_context,
+            ensemble_folds=self._ensemble_folds,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()
