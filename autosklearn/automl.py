@@ -599,6 +599,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  ensemble_nbest: %f', self._ensemble_nbest)
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
+        self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
         self._logger.debug('  metadata_directory: %s', self._metadata_directory)
