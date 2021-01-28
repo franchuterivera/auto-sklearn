@@ -859,13 +859,17 @@ class EnsembleBuilder(object):
 
         # get the highest fold per num_run
         runs_directory = self.backend.get_runs_directory()
-        runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*'))]
+        # Added of if > 5 to ignore tmeporal runs not completely writen to disk
+        runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*')) if len(os.path.basename(path).split('_')) >=5]
         runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
 
         highest_instance = {}
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
                 highest_instance[num_run_] = instance_
+
+        if len(highest_instance) == 0:
+            raise ValueError(f"Failed to find data on {runs_directory}={glob.glob(os.path.join(runs_directory, '*')}")
         max_instance = max(list(highest_instance.values()))
 
         # First sort files chronologically
