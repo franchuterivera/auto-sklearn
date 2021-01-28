@@ -125,6 +125,7 @@ class AutoML(BaseEstimator):
                  max_models_on_disc=1,
                  seed=1,
                  max_stacking_level=1,
+                 stacking_strategy=None,
                  memory_limit=3072,
                  metadata_directory=None,
                  debug_mode=False,
@@ -159,6 +160,12 @@ class AutoML(BaseEstimator):
         self._max_models_on_disc = max_models_on_disc
         self._seed = seed
         self._max_stacking_level = max_stacking_level
+        self._stacking_strategy = stacking_strategy
+        if self._max_stacking_level > 1 and self._stacking_strategy not in [
+            'time_split',
+            'instances',
+        ]:
+            raise ValueError(f"Unsupported stacking strategy {self._max_stacking_level}")
         self._memory_limit = memory_limit
         self._data_memory_limit = None
         self._metadata_directory = metadata_directory
@@ -601,6 +608,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
+        self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
         self._logger.debug('  metadata_directory: %s', self._metadata_directory)
         self._logger.debug('  debug_mode: %s', self._debug_mode)
@@ -747,10 +755,16 @@ class AutoML(BaseEstimator):
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
 
-        for level in range(1, self._max_stacking_level + 1):
+        if 'time_split' in self._stacking_strategy:
+            for level in range(1, self._max_stacking_level + 1):
+                elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
+                time_left_for_smac = max(0, self._time_for_task - elapsed_time) / self._max_stacking_level
+                num_run = self.run_smac(level, time_left_for_smac, num_run, proc_ensemble)
+        else:
             elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
-            time_left_for_smac = max(0, self._time_for_task - elapsed_time) / self._max_stacking_level
+            time_left_for_smac = max(0, self._time_for_task - elapsed_time)
             self.run_smac(level, time_left_for_smac, proc_ensemble)
+            num_run = self.run_smac(self._max_stacking_level, time_left_for_smac, num_run, proc_ensemble)
 
         self._logger.info("Starting shutdown...")
         # Wait until the ensemble process is finished to avoid shutting down
@@ -839,7 +853,7 @@ class AutoML(BaseEstimator):
                 # levels will also be part of the seed/instance/budget paradigm
                 # here the stacking levels will be converted as part of the instances,
                 # so that evaluator closures can decide what to do with this
-                stacking_levels=[level],
+                stacking_levels=list(range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
                 run_id=run_id,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,
