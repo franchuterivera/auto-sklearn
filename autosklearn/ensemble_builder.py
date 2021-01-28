@@ -869,7 +869,7 @@ class EnsembleBuilder(object):
                 highest_instance[num_run_] = instance_
 
         if len(highest_instance) == 0:
-            raise ValueError(f"Failed to find data on {runs_directory}={glob.glob(os.path.join(runs_directory, '*')}")
+            raise ValueError(f"Failed to find data on {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
         max_instance = max(list(highest_instance.values()))
 
         # First sort files chronologically
