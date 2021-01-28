@@ -46,6 +46,7 @@ class AutoSklearnEstimator(BaseEstimator):
         metric=None,
         scoring_functions: Optional[List[Scorer]] = None,
         load_models: bool = True,
+        ensemble_folds: Optional[str] = None,
     ):
         """
         Parameters
@@ -274,6 +275,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self.metric = metric
         self.scoring_functions = scoring_functions
         self.load_models = load_models
+        self.ensemble_folds = ensemble_folds
 
         self.automl_ = None  # type: Optional[AutoML]
         # n_jobs after conversion to a number (b/c default is None)
@@ -332,6 +334,7 @@ class AutoSklearnEstimator(BaseEstimator):
             metadata_directory=self.metadata_directory,
             metric=self.metric,
             scoring_functions=self.scoring_functions
+            ensemble_folds=self.ensemble_folds,
         )
 
         return automl
