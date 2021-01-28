@@ -868,9 +868,10 @@ class EnsembleBuilder(object):
             if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
                 highest_instance[num_run_] = instance_
 
-        if len(highest_instance) == 0:
+        if len([v for k, v in highest_instance.items() if k > 1]) == 0:
             raise ValueError(f"Failed to find data on {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
-        max_instance = max(list(highest_instance.values()))
+        # k > 1 means that ignore dummy prediction for higest instance
+        max_instance = max([v for k, v in highest_instance.items() if k > 1])
 
         # First sort files chronologically
         to_read = []
@@ -883,15 +884,34 @@ class EnsembleBuilder(object):
             _instance = int(match.group(5))
             mtime = os.path.getmtime(y_ens_fn)
 
+            # For dummy prediction we only use the highes budget always
+            if _num_run == 1:
+                if _instance == highest_instance[_num_run]:
+                    to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
+                else:
+                    continue
+
             if self.ensemble_folds is not None:
                 if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
-                    self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
+                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
                     continue
-                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[num_run_]:
-                    self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat per run {highest_instance[num_run_]}")
+                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_num_run]:
+                    #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_num_run]}")
                     continue
 
             to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
+
+        # We cannot use old predictions when new ones are available at a higher number of repetitions
+        if self.ensemble_folds is not None:
+            for y_ens_fn, value in self.read_scores.items():
+                if value['num_run'] == 1:
+                    continue
+                if self.ensemble_folds == 'highest_repeat' and value['instance'] != max_instance and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
+                    self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
+                    self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
+                elif self.ensemble_folds == 'highest_repeat_per_run' and value['instance'] != highest_instance[self.read_scores[y_ens_fn]["num_run"]] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
+                    self.logger.debug(f"Invalidate old result for {y_ens_fn}({self.read_scores[y_ens_fn]['ens_score']}->{self.metric._worst_possible_result}) as {self.ensemble_folds}->{highest_instance[self.read_scores[y_ens_fn]['num_run']]}")
+                    self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
 
         n_read_files = 0
         # Now read file wrt to num_run
