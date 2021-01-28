@@ -881,8 +881,10 @@ class EnsembleBuilder(object):
 
             if self.ensemble_folds is not None:
                 if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
+                    self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
                     continue
                 elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[num_run_]:
+                    self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat per run {highest_instance[num_run_]}")
                     continue
 
             to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
