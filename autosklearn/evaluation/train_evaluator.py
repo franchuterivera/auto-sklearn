@@ -245,6 +245,7 @@ class TrainEvaluator(AbstractEvaluator):
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
+            self.logger.debug(f"For num_run={self.num_run} instance={self.instance} level={self.level} base_models->{self.base_models_}({len(self.base_models_)} self.X_train->{self.X_train.shape}")
             # Notice how I use the same identifiers, in case a new config is there
             idx2predict = self.backend.load_model_predictions(
                 # Ensemble correspond to the OOF prediction that have previously
