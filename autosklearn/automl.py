@@ -76,7 +76,7 @@ from autosklearn.pipeline.components.data_preprocessing.rescaling import Rescali
 from autosklearn.util.single_thread_client import SingleThreadedClient
 
 
-def _model_predict(model, X, batch_size, logger, task, lower_level_predictions):
+def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, identifier):
     def send_warnings_to_log(
             message, category, filename, lineno, file=None, line=None):
         logger.debug('%s:%s: %s:%s' % (filename, lineno, category.__name__, message))
@@ -85,24 +85,29 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions):
     if len(lower_level_predictions) > 0:
         X_ = np.concatenate([X_] + lower_level_predictions, axis=1)
     with warnings.catch_warnings():
-        warnings.showwarning = send_warnings_to_log
-        if task in REGRESSION_TASKS:
-            if hasattr(model, 'batch_size'):
-                prediction = model.predict(X_, batch_size=batch_size)
+        try:
+            warnings.showwarning = send_warnings_to_log
+            if task in REGRESSION_TASKS:
+                if hasattr(model, 'batch_size'):
+                    prediction = model.predict(X_, batch_size=batch_size)
+                else:
+                    prediction = model.predict(X_)
             else:
-                prediction = model.predict(X_)
-        else:
-            if hasattr(model, 'batch_size'):
-                prediction = model.predict_proba(X_, batch_size=batch_size)
-            else:
-                prediction = model.predict_proba(X_)
+                if hasattr(model, 'batch_size'):
+                    prediction = model.predict_proba(X_, batch_size=batch_size)
+                else:
+                    prediction = model.predict_proba(X_)
 
-            # Check that all probability values lie between 0 and 1.
-            assert(
-                (prediction >= 0).all() and (prediction <= 1).all()
-            ), "For {}, prediction probability not within [0, 1]!".format(
-                model
-            )
+                # Check that all probability values lie between 0 and 1.
+                assert(
+                    (prediction >= 0).all() and (prediction <= 1).all()
+                ), "For {}, prediction probability not within [0, 1]!".format(
+                    model
+                )
+        except Exception as e:
+            print(f"Failure on {identifier}")
+            print(f"model={model} X={np.shape(X)} lower_level_predictions={lower_level_predictions}")
+            raise e
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
             X_.shape[0] < 1 or prediction.shape[0] != X_.shape[0]:
@@ -1169,10 +1174,16 @@ class AutoML(BaseEstimator):
         return pipeline, run_info, run_value
 
     def get_base_model_predictions(self, estimator: BaseEstimator,
-                                   base_model_predictions: Dict) -> List:
+                                   base_model_predictions: Dict,
+                                   identifier) -> List:
         if not hasattr(estimator, 'base_models_'):
+            print(f"For model {identifier} no base prediction is needed")
+            self._logger.critical(f"For model {identifier} no base prediction is needed")
             return []
-        return [base_model_predictions[idx] for idx in estimator.base_models_]
+        base =  [base_model_predictions[idx] for idx in estimator.base_models_]
+        print(f"For model {identifier} {[np.shape(s) for s in base]} prediction is needed")
+        self._logger.critical(f"For model {identifier} {[np.shape(s) for s in base]} prediction is needed")
+        return base
 
     def predict(self, X, batch_size=None, n_jobs=1):
         """predict.
@@ -1242,7 +1253,8 @@ class AutoML(BaseEstimator):
             predictions = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(_model_predict)(
                     models[identifier], X, batch_size, self._logger, self._task,
-                    self.get_base_model_predictions(models[identifier], base_model_predictions),
+                    self.get_base_model_predictions(models[identifier], base_model_predictions, identifier),
+                    identifier,
                 ) for identifier in identifiers)
             for indentifier, prediction in zip(identifiers, predictions):
                 base_model_predictions[indentifier] = prediction
@@ -1251,7 +1263,8 @@ class AutoML(BaseEstimator):
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(_model_predict)(
                 models[identifier], X, batch_size, self._logger, self._task,
-                self.get_base_model_predictions(models[identifier], base_model_predictions),
+                self.get_base_model_predictions(models[identifier], base_model_predictions, identifier),
+                identifier,
             ) if identifier not in base_model_predictions else joblib.delayed(identity)(base_model_predictions[identifier])
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )
