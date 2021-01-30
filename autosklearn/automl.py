@@ -106,7 +106,7 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, 
                 )
         except Exception as e:
             print(f"Failure on {identifier}")
-            print(f"model={model} X={np.shape(X)} lower_level_predictions={lower_level_predictions}")
+            print(f"model={model} X={np.shape(X)} lower_level_predictions={[np.shape(a) for a in lower_level_predictions]}({len(lower_level_predictions)})")
             raise e
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
@@ -1181,7 +1181,7 @@ class AutoML(BaseEstimator):
             self._logger.critical(f"For model {identifier} no base prediction is needed")
             return []
         base =  [base_model_predictions[idx] for idx in estimator.base_models_]
-        print(f"For model {identifier} {[np.shape(s) for s in base]} prediction is needed")
+        print(f"For model {identifier} {[idx for idx in estimator.base_models_]} ({len(base)}) {[np.shape(s) for s in base]} prediction is needed")
         self._logger.critical(f"For model {identifier} {[np.shape(s) for s in base]} prediction is needed")
         return base
 
@@ -1257,6 +1257,7 @@ class AutoML(BaseEstimator):
                     identifier,
                 ) for identifier in identifiers)
             for indentifier, prediction in zip(identifiers, predictions):
+                print(f"{indentifier}->{np.shape(prediction)}")
                 base_model_predictions[indentifier] = prediction
 
         identity = lambda x: x
