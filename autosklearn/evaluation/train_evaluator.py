@@ -203,13 +203,23 @@ class TrainEvaluator(AbstractEvaluator):
                 # Do not yet use the current level!
                 levels=list(range(1, level))
             )
+
+            # We intensify across repetitions. That is level=2 numrun=2 isntance=0
+            # might have seen models A, B, C. By the time level=2 numrun=2 instance=1
+            # starts, there might be A, B, C, D. We cannot use D.
             identifiers = [k for k in idx2predict.keys()]
+            if self.instance > 0:
+                reference_model = self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                    level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=0,
+                )
+                identifiers = reference_model.base_models_
+
             self.base_models_ = identifiers
             self.X_train = np.concatenate(
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
-            self.logger.debug(f"For num_run={self.num_run} instance={self.instance} level={self.level} base_models->{self.base_models_}({len(self.base_models_)} self.X_train->{self.X_train.shape}")
+            #self.logger.debug(f"For num_run={self.num_run} instance={self.instance} level={self.level} base_models->{self.base_models_}({len(self.base_models_)} self.X_train->{self.X_train.shape} where    {[(k, v.shape) for k,v in idx2predict.items()]}")
             # Notice how I use the same identifiers, in case a new config is there
             idx2predict = self.backend.load_model_predictions(
                 # Ensemble correspond to the OOF prediction that have previously
