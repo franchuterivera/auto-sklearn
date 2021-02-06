@@ -237,7 +237,9 @@ class TrainEvaluator(AbstractEvaluator):
                 # been pre-sorted to match X_train indices
                 subset='ensemble',
                 # Do not yet use the current level!
-                levels=list(range(1, level))
+                levels=list(range(1, level)),
+                # When doing instances_selfasbase strategy, we do towers
+                idxs=None if self.resampling_strategy_args['stacking_strategy'] == 'instances_anyasbase' else [self.num_run],
             )
 
             # We intensify across repetitions. That is level=2 numrun=2 isntance=0
@@ -715,7 +717,6 @@ class TrainEvaluator(AbstractEvaluator):
                     past_opt_losses = self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                         level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
                     )['loss']
-                    self.logger.debug(f"For instance {self.instance} loss is {opt_loss} and past loss are={past_opt_losses}")
                     # Because all repetitions have same number of folds, we can do average of average
                     opt_loss = (past_opt_losses * self.instance + opt_loss) / (self.instance + 1)
 
