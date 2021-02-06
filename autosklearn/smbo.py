@@ -415,10 +415,22 @@ class AutoMLSMBO(object):
                          for fold_number in range(num_folds)]
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
-            instances = [[json.dumps({'task_id': self.dataset_name,
-                                      'level': level,
-                                      'repeats': repeat})]
-                         for repeat in range(num_repeats) for level in self.stacking_levels]
+
+            instances = []
+            for level in self.stacking_levels:
+                for repeat in range(num_repeats):
+                    instances.append([
+                        json.dumps({'task_id': self.dataset_name,
+                                    'repeats': repeat,
+                                    'level': level,
+                                    })
+                    ])
+
+            #instances = [[json.dumps({'task_id': self.dataset_name,
+            #                          'repeats': repeat,
+            #                          'level': level,
+            #                          })]
+            #             for repeat in range(num_repeats) for level in self.stacking_levels]
         else:
             instances = [[json.dumps({'task_id': self.dataset_name, 'level': self.stacking_levels[-1]})]]
 

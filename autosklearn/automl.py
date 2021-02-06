@@ -159,7 +159,8 @@ class AutoML(BaseEstimator):
         self._stacking_strategy = stacking_strategy
         if self._max_stacking_level > 1 and self._stacking_strategy not in [
             'time_split',
-            'instances',
+            'instances_anyasbase',
+            'instances_selfasbase',
         ]:
             raise ValueError(f"Unsupported stacking strategy {self._max_stacking_level}")
         self._memory_limit = memory_limit
@@ -205,6 +206,8 @@ class AutoML(BaseEstimator):
                 self._resampling_strategy_arguments['repeats'] = 5
             if 'repetition_as_individual_models' not in self._resampling_strategy_arguments:
                 self._resampling_strategy_arguments['repetition_as_individual_models'] = False
+            if self._max_stacking_level > 1:
+                self._resampling_strategy_arguments['stacking_strategy'] = self._stacking_strategy
         self._n_jobs = n_jobs
         self._dask_client = dask_client
 

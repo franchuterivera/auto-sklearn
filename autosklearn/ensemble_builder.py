@@ -864,14 +864,22 @@ class EnsembleBuilder(object):
         runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
 
         highest_instance = {}
+        max_instance = 0
         for level_, seed_, num_run_, budget_, instance_ in runs:
-            if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
-                highest_instance[num_run_] = instance_
+            if level_ not in highest_instance:
+                highest_instance[level_] = {}
+            if num_run_ not in highest_instance[level_] or instance_ > highest_instance[level_][num_run_]:
+                highest_instance[level_][num_run_] = instance_
+            # k > 1 means that ignore dummy prediction for higest instance
+            if instance_ > max_instance and num_run_ > 1:
+                max_instance = instance_
 
-        if len([v for k, v in highest_instance.items() if k > 1]) == 0:
-            raise ValueError(f"Failed to find data on {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
-        # k > 1 means that ignore dummy prediction for higest instance
-        max_instance = max([v for k, v in highest_instance.items() if k > 1])
+        for level in highest_instance.keys():
+            if len([v for k, v in highest_instance[level].items() if k > 1]) == 0:
+                if level == 1:
+                    raise ValueError(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
+                else:
+                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
 
         # First sort files chronologically
         to_read = []
@@ -886,7 +894,8 @@ class EnsembleBuilder(object):
 
             # For dummy prediction we only use the highes budget always
             if _num_run == 1:
-                if _instance == highest_instance[_num_run]:
+                # There should not be dummy predict for every level, just level 1
+                if _instance == highest_instance[1][_num_run]:
                     to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
                 else:
                     continue
@@ -895,8 +904,8 @@ class EnsembleBuilder(object):
                 if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
                     #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
                     continue
-                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_num_run]:
-                    #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_num_run]}")
+                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_level][_num_run]:
+                    #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_level][_num_run]}")
                     continue
 
             to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
@@ -909,8 +918,8 @@ class EnsembleBuilder(object):
                 if self.ensemble_folds == 'highest_repeat' and value['instance'] != max_instance and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
                     self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
                     self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
-                elif self.ensemble_folds == 'highest_repeat_per_run' and value['instance'] != highest_instance[self.read_scores[y_ens_fn]["num_run"]] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
-                    self.logger.debug(f"Invalidate old result for {y_ens_fn}({self.read_scores[y_ens_fn]['ens_score']}->{self.metric._worst_possible_result}) as {self.ensemble_folds}->{highest_instance[self.read_scores[y_ens_fn]['num_run']]}")
+                elif self.ensemble_folds == 'highest_repeat_per_run' and value['instance'] != highest_instance[self.read_scores[y_ens_fn]["level"]][self.read_scores[y_ens_fn]["num_run"]] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
+                    self.logger.debug(f"Invalidate old result for {y_ens_fn}({self.read_scores[y_ens_fn]['ens_score']}->{self.metric._worst_possible_result}) as {self.ensemble_folds}->{highest_instance[self.read_scores[y_ens_fn]['level']][self.read_scores[y_ens_fn]['num_run']]}")
                     self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
 
         n_read_files = 0
