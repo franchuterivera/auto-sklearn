@@ -877,9 +877,9 @@ class EnsembleBuilder(object):
         for level in highest_instance.keys():
             if len([v for k, v in highest_instance[level].items() if k > 1]) == 0:
                 if level == 1:
-                    raise ValueError(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
+                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))} {highest_instance}")
                 else:
-                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))}")
+                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))} {highest_instance}")
 
         # First sort files chronologically
         to_read = []
