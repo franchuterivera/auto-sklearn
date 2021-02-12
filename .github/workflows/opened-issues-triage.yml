@@ -1,0 +1,33 @@
+name: Move new issues into Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+
+  # Automatically label the issue
+  #https://github.com/scikit-learn/scikit-learn/blob/main/.github/workflows/labeler-title-regex.yml
+  labeler:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install ghapi
+        run: pip install -Uq ghapi
+      - name: Label issues
+        run: python .github/scripts/label_title_regex.py
+        env:
+          CONTEXT_GITHUB: ${{ toJson(github) }}
+
+  automate-project-columns:
+    if: github.event.label.name == 'Bug'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alex-page/github-project-automation-plus@v0.3.0
+        with:
+          project: BugFixes
+          column: NeedsTriage
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
