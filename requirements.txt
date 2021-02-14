@@ -1,6 +1,6 @@
 setuptools
 
-numpy>=1.9.0
+numpy==1.19.2
 scipy>=0.14.1
 
 joblib
