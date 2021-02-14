@@ -739,11 +739,23 @@ class AutoML(BaseEstimator):
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
 
+        self.started_registered_time = time.time()
+        print(f"TIMEDEBUG-AUTOML: started registering time at {time.ctime()} ({time.time() - self.started_registered_time})")
         if 'time_split' in self._stacking_strategy:
+            # Calculate the time each smac should last. This elapsed time here
+            # makes the overhead up to this point which is usually less than 0.5 seconds
+            # and is substracted from all smac runs to be safe
+            elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
+            time_left_for_smac = max(0, self._time_for_task - elapsed_time) / self._max_stacking_level
+            extra_overhead = 0
             for level in range(1, self._max_stacking_level + 1):
-                elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
-                time_left_for_smac = max(0, self._time_for_task - elapsed_time) / self._max_stacking_level
-                num_run = self.run_smac(level, time_left_for_smac, num_run, proc_ensemble)
+                start_time = self._stopwatch.wall_elapsed(self._dataset_name)
+                num_run = self.run_smac(level,
+                                        time_left_for_smac - extra_overhead,
+                                        num_run, proc_ensemble)
+                end_time = self._stopwatch.wall_elapsed(self._dataset_name)
+                extra_overhead = end_time - (start_time + time_left_for_smac)
+                print(f"Started smac iteration at {start_time} which lasted {end_time - start_time} giving an overhead of {extra_overhead}")
         else:
             elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
             time_left_for_smac = max(0, self._time_for_task - elapsed_time)
@@ -786,6 +798,7 @@ class AutoML(BaseEstimator):
         return self
 
     def run_smac(self, level, time_left_for_smac, num_run, proc_ensemble) -> int:
+        print(f"TIMEDEBUG-AUTOML: STARTED run_smac at {time.ctime()} ({time.time() - self.started_registered_time})")
         run_id = level + self._seed
 
         if self._logger:
@@ -819,6 +832,7 @@ class AutoML(BaseEstimator):
                     )
                 )
 
+            print(f"TIMEDEBUG-AUTOML: Started running at SMBO at {time.ctime()} ({time.time() - self.started_registered_time})")
             _proc_smac = AutoMLSMBO(
                 config_space=self.configuration_space,
                 dataset_name=self._dataset_name,
@@ -831,7 +845,8 @@ class AutoML(BaseEstimator):
                 n_jobs=self._n_jobs,
                 dask_client=self._dask_client,
                 start_num_run=num_run,
-                num_metalearning_cfgs=self._initial_configurations_via_metalearning,
+                # In case of a second level call, wich can only happend
+                num_metalearning_cfgs=0 if ('time_split' in self._stacking_strategy and level > 1) else self._initial_configurations_via_metalearning,
                 seed=self._seed,
                 # levels will also be part of the seed/instance/budget paradigm
                 # here the stacking levels will be converted as part of the instances,
@@ -874,6 +889,7 @@ class AutoML(BaseEstimator):
         if len(self.runhistory_.data) > 0:
             num_run = max([key.config_id for key in self.runhistory_.data.keys()])
 
+        print(f"TIMEDEBUG-AUTOML: Finished run_smac at {time.ctime()} ({time.time() - self.started_registered_time})")
         return num_run
 
     @staticmethod
