@@ -1,6 +1,7 @@
 import copy
 import json
 import typing
+import random
 
 import numpy as np
 from smac.tae import TAEAbortException, StatusType
@@ -215,6 +216,19 @@ class TrainEvaluator(AbstractEvaluator):
                     level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=0,
                 )
                 identifiers = reference_model.base_models_
+            else:
+                # This is the first time we decide the models to stack
+                # we might want to limit the amount of models we read
+                if 'stack_at_most' in self.resampling_strategy_args and len(identifiers) > self.resampling_strategy_args['stack_at_most']:
+                    losses = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                        level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
+                    )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
+                    identifiers = [idx_ for _, idx_ in sorted(zip(losses, identifiers))]
+                    # The ideas is to have 75% coming from best performance and other 25% comming from random for diversity
+                    total_best_performance = int(0.75 * self.resampling_strategy_args['stack_at_most'])
+                    best_performance = identifiers[:total_best_performance]
+                    diversity = random.sample(identifiers[total_best_performance:], k=self.resampling_strategy_args['stack_at_most']-total_best_performance)
+                    identifiers = best_performance + diversity
 
             self.base_models_ = identifiers
             self.X_train = np.concatenate(
@@ -233,6 +247,7 @@ class TrainEvaluator(AbstractEvaluator):
                 [self.X_test] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
+        self.logger.debug(f"training num_run={self.num_run} at level={self.level} with {self.X_train.shape} due to base={self.base_models_}")
 
         self.Y_optimization = None
         self.Y_targets = [None] * self.num_cv_folds
@@ -671,11 +686,11 @@ class TrainEvaluator(AbstractEvaluator):
                 # Update the loss to reflect and average. Because we always have the same
                 # number of folds, we can do an average of average
                 try:
-                    past_opt_losses = self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
-                        level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
-                    )['loss']
-                    # Because all repetitions have same number of folds, we can do average of average
-                    opt_loss = (past_opt_losses * self.instance + opt_loss) / (self.instance + 1)
+                    #past_opt_losses = self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                    #    level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
+                    #)['loss']
+                    ## Because all repetitions have same number of folds, we can do average of average
+                    #opt_loss = (past_opt_losses * self.instance + opt_loss) / (self.instance + 1)
 
                     # Average predictions -- Ensemble
                     # preditions are sorted to make things easy -- But what price are we paying
@@ -707,6 +722,12 @@ class TrainEvaluator(AbstractEvaluator):
                         1/(self.instance + 1),
                         out=Y_optimization_pred,
                     )
+                    opt_loss = self._loss(
+                        self.Y_optimization,
+                        Y_optimization_pred,
+                    )
+
+                    # Then TEST
                     lower_prediction = self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
                         subset='test', level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
                         instance=self.instance - 1,
