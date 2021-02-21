@@ -136,6 +136,8 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.random_state = random_state
         self.logger_port = logger_port
         self.ensemble_folds = ensemble_folds
+        if self.ensemble_folds not in [None, 'highest_repeat_trusted', 'highest_repeat', 'highest_repeat_per_run']:
+            raise NotImplementedError(self.ensemble_folds)
         self.pynisher_context = pynisher_context
 
         # Store something similar to SMAC's runhistory
@@ -904,8 +906,9 @@ class EnsembleBuilder(object):
                 if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
                     #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
                     continue
-                if self.ensemble_folds == 'highest_repeat_trusted' and _instance not in [max_instance, max_instance-1]:
-                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
+                elif self.ensemble_folds == 'highest_repeat_trusted' and (_instance != highest_instance[_level][_num_run] or _instance not in [max_instance, max_instance-1]):
+                    # BUGFIX: Notice that trusted means that we need the instance to be in highest, or highest-1 BUT ALSO that is the biggest repeat per config
+                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance} _level={_level} _num_run={_num_run} highest_instance={highest_instance[_level][_num_run]}")
                     continue
                 elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_level][_num_run]:
                     #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_level][_num_run]}")
@@ -921,7 +924,7 @@ class EnsembleBuilder(object):
                 if self.ensemble_folds == 'highest_repeat' and value['instance'] != max_instance and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
                     self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
                     self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
-                elif self.ensemble_folds == 'highest_repeat_trusted' and value['instance'] not in [max_instance, max_instance-1] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
+                elif self.ensemble_folds == 'highest_repeat_trusted' and (value['instance'] not in [max_instance, max_instance-1] or value['instance'] != highest_instance[self.read_scores[y_ens_fn]["level"]][self.read_scores[y_ens_fn]["num_run"]]) and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
                     self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
                     self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
                 elif self.ensemble_folds == 'highest_repeat_per_run' and value['instance'] != highest_instance[self.read_scores[y_ens_fn]["level"]][self.read_scores[y_ens_fn]["num_run"]] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
