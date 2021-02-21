@@ -436,11 +436,21 @@ class Backend(object):
         runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*'))]
         runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
 
+        #highest_instance = {}
+        #for level_, seed_, num_run_, budget_, instance_ in runs:
+        #    if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
+        #        highest_instance[num_run_] = instance_
 
         highest_instance = {}
+        max_instance = 0
         for level_, seed_, num_run_, budget_, instance_ in runs:
-            if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
-                highest_instance[num_run_] = instance_
+            if level_ not in highest_instance:
+                highest_instance[level_] = {}
+            if num_run_ not in highest_instance[level_] or instance_ > highest_instance[level_][num_run_]:
+                highest_instance[level_][num_run_] = instance_
+            # k > 1 means that ignore dummy prediction for higest instance
+            if instance_ > max_instance and num_run_ > 1:
+                max_instance = instance_
 
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if levels is not None and level_ not in levels:
@@ -455,7 +465,8 @@ class Backend(object):
                 continue
             elif instances is None:
                 # Only allow highest instance available
-                if num_run_ in highest_instance and instance_ != highest_instance[num_run_]:
+                # Treat each level like a different config basically
+                if num_run_ in highest_instance[level_] and (instance_ not in [max_instance, max_instance - 1] or instance_ != highest_instance[level_][num_run_]):
                     continue
             try:
                 prediction = self.load_prediction_by_level_seed_and_id_and_budget_and_instance(
