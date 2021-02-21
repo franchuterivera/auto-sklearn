@@ -255,7 +255,7 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 # This is the first time we decide the models to stack
                 # we might want to limit the amount of models we read
-                if 'stack_at_most' in self.resampling_strategy_args and len(identifiers) > self.resampling_strategy_args['stack_at_most']:
+                if 'stack_at_most' in self.resampling_strategy_args and self.resampling_strategy_args['stack_at_most'] is not None and len(identifiers) > self.resampling_strategy_args['stack_at_most']:
                     losses = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                         level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
                     )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
