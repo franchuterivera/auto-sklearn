@@ -182,6 +182,7 @@ def get_smac_object(
     ta,
     ta_kwargs,
     metalearning_configurations,
+    initial_configurations,
     n_jobs,
     dask_client,
 ):
@@ -190,13 +191,20 @@ def get_smac_object(
     else:
         intensifier = SimpleIntensifier
 
+    if len(initial_configurations) > 0 and len(metalearning_configurations) > 0:
+        raise ValueError(f"Can only have initial configurations from initial_configurations or from metalearning, not both")
+
     scenario = Scenario(scenario_dict)
-    if len(metalearning_configurations) > 0:
+    if initial_configurations is not None and len(initial_configurations) > 0:
+        # Using the user provided initial configurations
+        pass
+    elif len(metalearning_configurations) > 0:
         default_config = scenario.cs.get_default_configuration()
         initial_configurations = [default_config] + metalearning_configurations
     else:
         initial_configurations = None
     rh2EPM = RunHistory2EPM4LogCost
+
     return SMAC4AC(
         scenario=scenario,
         rng=seed,
@@ -225,6 +233,7 @@ class AutoMLSMBO(object):
                  port: int,
                  run_id: int,
                  start_num_run=1,
+                 initial_configurations=[],
                  data_memory_limit=None,
                  num_metalearning_cfgs=25,
                  seed=1,
@@ -254,6 +263,7 @@ class AutoMLSMBO(object):
         self.backend = backend
         self.port = port
         self.run_id = run_id
+        self.initial_configurations = initial_configurations
 
         # the configuration space
         self.config_space = config_space
@@ -518,6 +528,7 @@ class AutoMLSMBO(object):
             'metalearning_configurations': metalearning_configurations,
             'n_jobs': self.n_jobs,
             'dask_client': self.dask_client,
+            'initial_configurations': self.initial_configurations,
         }
         if self.get_smac_object_callback is not None:
             smac = self.get_smac_object_callback(**smac_args)

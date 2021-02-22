@@ -10,7 +10,7 @@ class LGBMClassifier(AutoSklearnClassificationAlgorithm):
     def __init__(self,
                  learning_rate=0.05,
                  num_leaves=31,
-                 min_data_in_leaf=20,
+                 min_data_in_leaf=5,
                  feature_fraction=1.0,
                  n_estimators=100,
                  random_state=None):
@@ -66,11 +66,11 @@ class LGBMClassifier(AutoSklearnClassificationAlgorithm):
         learning_rate = UniformFloatHyperparameter(
             "learning_rate", lower=5e-3, upper=0.2, default_value=0.05, log=True)
         num_leaves = UniformIntegerHyperparameter(
-            "num_leaves", lower=16, upper=96, default_value=31)
+            "num_leaves", lower=16, upper=128, default_value=31)
         feature_fraction = UniformFloatHyperparameter(
-            "feature_fraction", lower=0.75, upper=1.0, default_value=1.0)
+            "feature_fraction", lower=0.75, upper=1.0, default_value=0.9)
         min_data_in_leaf = UniformIntegerHyperparameter(
-            "min_data_in_leaf", lower=2, upper=30, default_value=20)
+            "min_data_in_leaf", lower=2, upper=30, default_value=5)
         n_estimators = UniformIntegerHyperparameter(
             "n_estimators", lower=50, upper=150, default_value=100)
 
