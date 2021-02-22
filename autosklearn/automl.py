@@ -14,6 +14,7 @@ import unittest.mock
 import warnings
 import tempfile
 
+from ConfigSpace import Configuration
 from ConfigSpace.read_and_write import json as cs_json
 import dask
 import dask.distributed
@@ -142,6 +143,7 @@ class AutoML(BaseEstimator):
                  metric=None,
                  scoring_functions=None,
                  ensemble_folds=None,
+                 warmstart_with_initial_configurations=False,
                  ):
         super(AutoML, self).__init__()
         self._backend = backend
@@ -270,6 +272,7 @@ class AutoML(BaseEstimator):
         # By default try to use the TCP logging port or get a new port
         self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
         self._ensemble_folds = ensemble_folds
+        self._warmstart_with_initial_configurations = warmstart_with_initial_configurations
 
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
@@ -466,6 +469,35 @@ class AutoML(BaseEstimator):
                     % (str(status), str(additional_info))
                 )
 
+    def get_initial_configurations(
+        self,
+        configuration_space,
+        datamanager,
+    ):
+        """
+        Creates a set of robust configurations to warm start smac and create diverse model not
+        only for ensemble selection, which need a good diversity of robust models,
+        but also take into account that we need good models like autogluon's one that consistently
+        give a decent performance and improve with repetitions
+        """
+        initial_configurations = []
+        for include_estimator in ['lgbm', 'xgboost', 'random_forest', 'extra_trees', 'mlp',
+                                  'k_nearest_neighbors', 'passive_aggressive', 'liblinear_svc', 'sgd']:
+            cs, cp = self._create_search_space(
+                None,
+                self._backend,
+                datamanager,
+                include_estimators=[include_estimator],
+                exclude_estimators=self._exclude_estimators,
+                include_preprocessors=self._include_preprocessors,
+                exclude_preprocessors=self._exclude_preprocessors,
+            )
+            initial_configurations.append(
+                Configuration(configuration_space, values=cs.get_default_configuration())
+            )
+        self._logger.critical("Warmstarting smac with {}".format("\n".join([str(i) for i in initial_configurations])))
+        return initial_configurations
+
     def fit(
         self,
         X: np.ndarray,
@@ -589,6 +621,7 @@ class AutoML(BaseEstimator):
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
+        self._logger.debug("  warmstart_with_initial_configurations: {}".format(self._warmstart_with_initial_configurations))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
         self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
@@ -739,6 +772,13 @@ class AutoML(BaseEstimator):
         smac_task_name = 'runSMAC'
         self._stopwatch.start_task(smac_task_name)
 
+        initial_configurations = []
+        if self._warmstart_with_initial_configurations:
+            initial_configurations = self.get_initial_configurations(
+                self.configuration_space,
+                datamanager,
+            )
+
         self.started_registered_time = time.time()
         print(f"TIMEDEBUG-AUTOML: started registering time at {time.ctime()} ({time.time() - self.started_registered_time})")
         if 'time_split' in self._stacking_strategy:
@@ -752,14 +792,14 @@ class AutoML(BaseEstimator):
                 start_time = self._stopwatch.wall_elapsed(self._dataset_name)
                 num_run = self.run_smac(level,
                                         time_left_for_smac - extra_overhead,
-                                        num_run, proc_ensemble)
+                                        num_run, proc_ensemble, initial_configurations)
                 end_time = self._stopwatch.wall_elapsed(self._dataset_name)
                 extra_overhead = end_time - (start_time + time_left_for_smac)
                 print(f"Started smac iteration at {start_time} which lasted {end_time - start_time} giving an overhead of {extra_overhead}")
         else:
             elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
             time_left_for_smac = max(0, self._time_for_task - elapsed_time)
-            num_run = self.run_smac(self._max_stacking_level, time_left_for_smac, num_run, proc_ensemble)
+            num_run = self.run_smac(self._max_stacking_level, time_left_for_smac, num_run, proc_ensemble, initial_configurations)
 
         self._logger.info("Starting shutdown...")
         # Wait until the ensemble process is finished to avoid shutting down
@@ -797,7 +837,7 @@ class AutoML(BaseEstimator):
 
         return self
 
-    def run_smac(self, level, time_left_for_smac, num_run, proc_ensemble) -> int:
+    def run_smac(self, level, time_left_for_smac, num_run, proc_ensemble, initial_configurations) -> int:
         print(f"TIMEDEBUG-AUTOML: STARTED run_smac at {time.ctime()} ({time.time() - self.started_registered_time})")
         run_id = level + self._seed
 
@@ -847,6 +887,7 @@ class AutoML(BaseEstimator):
                 start_num_run=num_run,
                 # In case of a second level call, wich can only happend
                 num_metalearning_cfgs=0 if ('time_split' in self._stacking_strategy and level > 1) else self._initial_configurations_via_metalearning,
+                initial_configurations=initial_configurations,
                 seed=self._seed,
                 # levels will also be part of the seed/instance/budget paradigm
                 # here the stacking levels will be converted as part of the instances,
@@ -1453,7 +1494,6 @@ class AutoML(BaseEstimator):
         task_name = 'CreateConfigSpace'
 
         self._stopwatch.start_task(task_name)
-        configspace_path = os.path.join(tmp_dir, 'space.json')
         configuration_space = pipeline.get_configuration_space(
             datamanager.info,
             include_estimators=include_estimators,
@@ -1462,12 +1502,16 @@ class AutoML(BaseEstimator):
             exclude_preprocessors=exclude_preprocessors)
         configuration_space = self.configuration_space_created_hook(
             datamanager, configuration_space)
-        backend.write_txt_file(
-            configspace_path,
-            cs_json.write(configuration_space),
-            'Configuration space'
-        )
-        self._stopwatch.stop_task(task_name)
+
+        configspace_path = None
+        if tmp_dir is not None:
+            configspace_path = os.path.join(tmp_dir, 'space.json')
+            backend.write_txt_file(
+                configspace_path,
+                cs_json.write(configuration_space),
+                'Configuration space'
+            )
+            self._stopwatch.stop_task(task_name)
 
         return configuration_space, configspace_path
 
