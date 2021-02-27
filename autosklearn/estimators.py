@@ -232,7 +232,7 @@ class AutoSklearnEstimator(BaseEstimator):
             :meth:`autosklearn.metrics.make_scorer`. These are the `Built-in
             Metrics`_.
             If None is provided, a default metric is selected depending on the task.
-            
+
         load_models : bool, optional (True)
             Whether to load the models after fitting Auto-sklearn.
 
@@ -372,7 +372,7 @@ class AutoSklearnEstimator(BaseEstimator):
 
     def fit_ensemble(self, y, task=None, precision=32,
                      dataset_name=None, ensemble_nbest=None,
-                     ensemble_size=None):
+                     ensemble_size=None, early_stop_oob=False):
         """Fit an ensemble to models trained during an optimization process.
 
         All parameters are ``None`` by default. If no other value is given,
@@ -431,6 +431,7 @@ class AutoSklearnEstimator(BaseEstimator):
             dataset_name=dataset_name,
             ensemble_nbest=ensemble_nbest,
             ensemble_size=ensemble_size,
+            early_stop_oob=early_stop_oob,
         )
         return self
 

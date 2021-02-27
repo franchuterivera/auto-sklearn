@@ -188,9 +188,12 @@ class AutoML(BaseEstimator):
         if self.bbc_cv_strategy not in [
                 None,
                 'autosklearnBBCScoreEnsemble',
+                'autosklearnBBCScoreEnsembleALLIB',
+                'autosklearnBBCScoreEnsembleNOPREFILTER',
                 'autosklearnBBCScoreEnsembleMAX',
                 'autosklearnBBCScoreEnsembleMAXWinner',
                 'autosklearnBBCScoreEnsembleAVGMDEV',
+                'autosklearnBBCScoreEnsemblePercentile',
                 'autosklearnBBCEnsembleSelection',
                 'autosklearnBBCEnsembleSelectionFULL',
                 'autosklearnBBCEnsembleSelectionNoPreSelect',
@@ -935,7 +938,7 @@ class AutoML(BaseEstimator):
 
     def fit_ensemble(self, y, task=None, precision=32,
                      dataset_name=None, ensemble_nbest=None,
-                     ensemble_size=None):
+                     ensemble_size=None, early_stop_oob=False):
         if self._resampling_strategy in ['partial-cv', 'partial-cv-iterative-fit']:
             raise ValueError('Cannot call fit_ensemble with resampling '
                              'strategy %s.' % self._resampling_strategy)
@@ -975,6 +978,7 @@ class AutoML(BaseEstimator):
             bbc_cv_strategy=self.bbc_cv_strategy,
             bbc_cv_sample_size=self.bbc_cv_sample_size,
             bbc_cv_n_bootstrap=self.bbc_cv_n_bootstrap,
+            early_stop_oob=early_stop_oob,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()

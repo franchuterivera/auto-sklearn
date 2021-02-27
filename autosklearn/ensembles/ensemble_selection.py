@@ -21,6 +21,8 @@ class EnsembleSelection(AbstractEnsemble):
         mode: str = 'fast',
         bootstrap_indices: Optional[List[List[int]]] = None,
         bbc_cv_strategy=None,
+        # Enables early stopping using the oob predicitons. This required bootstrap indices
+        early_stop_oob=False,
     ) -> None:
         self.ensemble_size = ensemble_size
         self.task_type = task_type
@@ -30,7 +32,8 @@ class EnsembleSelection(AbstractEnsemble):
         self.random_state = random_state
         self.bootstrap_indices = bootstrap_indices
         self.bbc_cv_strategy = bbc_cv_strategy
-        print(f"bootstrap_indices = {bootstrap_indices}")
+        self.early_stop_oob = early_stop_oob
+        print(f"bootstrap_indices = {bootstrap_indices} {early_stop_oob}")
 
     def __getstate__(self) -> Dict[str, Any]:
         # Cannot serialize a metric if
@@ -48,6 +51,9 @@ class EnsembleSelection(AbstractEnsemble):
         predictions: List[np.ndarray],
         labels: np.ndarray,
         identifiers: List[Tuple[int, int, float]],
+        # bootstrap indices are not available when doing B ensemble selection
+        # but rather we do early stopping at the bag level
+        early_stop_oob_bag=None,
     ) -> AbstractEnsemble:
         self.ensemble_size = int(self.ensemble_size)
         if self.ensemble_size < 1:
@@ -67,7 +73,7 @@ class EnsembleSelection(AbstractEnsemble):
         if self.bagging:
             self._bagging(predictions, labels)
         else:
-            self._fit(predictions, labels)
+            self._fit(predictions, labels, early_stop_oob_bag=early_stop_oob_bag)
             # Weight calculation has to be done in bagging differently
             # as the average of averages. The problem is that different models
             # get selected a different number of times, so it is better if we build
@@ -82,6 +88,7 @@ class EnsembleSelection(AbstractEnsemble):
         predictions: List[np.ndarray],
         labels: np.ndarray,
         indices = None,
+        early_stop_oob_bag=None,
     ) -> AbstractEnsemble:
         if self.mode == 'fast':
             if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleMAX':
@@ -93,10 +100,11 @@ class EnsembleSelection(AbstractEnsemble):
                         self._fast(predictions, labels, indices, bootstrap_indices=[boot_indices])
                     )
                 self.indices_ = order
+                print(f"found indices are = {self.indices_}")
             elif self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleMAXWinner':
                 self._fast_winner(predictions, labels, indices, bootstrap_indices=None)
             else:
-                self._fast(predictions, labels, indices, bootstrap_indices=None)
+                self._fast(predictions, labels, indices, bootstrap_indices=None, early_stop_oob_bag=early_stop_oob_bag)
         else:
             self._slow(predictions, labels)
         return self
@@ -113,6 +121,7 @@ class EnsembleSelection(AbstractEnsemble):
 
         ensemble = []  # type: List[np.ndarray]
         trajectory = []
+        trajectory_OOB = []
         order = []
 
         ensemble_size = self.ensemble_size
@@ -133,6 +142,11 @@ class EnsembleSelection(AbstractEnsemble):
             # We fill a wins matrix with a score per bootstrap, so we have a
             # #predictions times number of bags array. This wins matrix will allow us
             # to get the most frequent winner which we will add to bootstrap
+            if self.early_stop_oob:
+                scores_oob = np.ones(
+                    (len(predictions)),
+                    dtype=np.float64,
+                ) * (self.metric._optimum-self.metric._worst_possible_result)
             wins = np.zeros(
                 (len(predictions), len(self.bootstrap_indices)),
                 dtype=np.float64,
@@ -197,6 +211,27 @@ class EnsembleSelection(AbstractEnsemble):
                         return_all_boot_scores=True,
                     )
                 )
+                if self.bootstrap_indices is not None and self.early_stop_oob:
+                    oob_score = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=True,
+                            return_all_boot_scores=False,
+                        )
+                    )
+                    scores_oob[j] = self.metric._optimum - oob_score
                 #scores[j] = self.metric._optimum - calculated_score
                 # Convert each calculated score to a minimum to be consistent
                 scores = [(self.metric._optimum - score) for score in calculated_scores]
@@ -208,6 +243,8 @@ class EnsembleSelection(AbstractEnsemble):
             # Then here we get the most frequent winner and that's who we add
             winner_per_boot = np.bincount(np.argmin(wins, axis=0))
             best = self.random_state.choice(np.argwhere(winner_per_boot == np.amax(winner_per_boot)).flatten().tolist())
+            if self.bootstrap_indices is not None and self.early_stop_oob:
+                trajectory_OOB.append(scores_oob[best])
             print(f"{i} bincount={winner_per_boot} with best={best}")
             # --> do not select always the firs tone best = np.argmax(winner_per_boot)
             ensemble.append(predictions[best])
@@ -217,6 +254,12 @@ class EnsembleSelection(AbstractEnsemble):
             # Handle special case
             if len(predictions) == 1:
                 break
+
+        if self.bootstrap_indices is not None and self.early_stop_oob:
+            index = np.argmin(trajectory_OOB) + 1
+            print(f"Early stooped at {index}/{len(trajectory_OOB)} for {trajectory_OOB}")
+            order = order[:index]
+            trajectory = trajectory[:index]
 
         self.indices_ = order
         self.trajectory_ = trajectory
@@ -229,12 +272,14 @@ class EnsembleSelection(AbstractEnsemble):
         labels: np.ndarray,
         indices=None,
         bootstrap_indices=None,
+        early_stop_oob_bag=None,
     ) -> None:
         """Fast version of Rich Caruana's ensemble selection method."""
         self.num_input_models_ = len(predictions)
 
         ensemble = []  # type: List[np.ndarray]
         trajectory = []
+        trajectory_OOB = []
         order = []
 
         ensemble_size = self.ensemble_size
@@ -262,6 +307,11 @@ class EnsembleSelection(AbstractEnsemble):
                 (len(predictions)),
                 dtype=np.float64,
             ) * (self.metric._optimum-self.metric._worst_possible_result)
+            if self.early_stop_oob or early_stop_oob_bag is not None:
+                scores_oob = np.ones(
+                    (len(predictions)),
+                    dtype=np.float64,
+                ) * (self.metric._optimum-self.metric._worst_possible_result)
             s = len(ensemble)
             if s == 0:
                 weighted_ensemble_prediction.fill(0.0)
@@ -303,7 +353,106 @@ class EnsembleSelection(AbstractEnsemble):
 
                 # Calculate score is versatile and can return a dict of score
                 # when all_scoring_functions=False, we know it will be a float
-                if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleAVGMDEV':
+                if self.bbc_cv_strategy == 'autosklearnBBCScoreEnsemblePercentile':
+                    # We substract the std deviation as a mechanism to make sure that
+                    # the certainty per bootstrap is guaranteed. That is, if we are pesimistic
+                    # and only add a model if the worst case scenario of adding such model
+                    # improves over the worst case scenario of others
+                    calculated_scores = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=False,
+                            return_all_boot_scores=True,
+                        )
+                    )
+                    robust_score = np.percentile(calculated_scores, 2.5)
+                    print(f"[{j}] corrected score from {np.mean(calculated_scores)} to {robust_score}")
+                    if self.bootstrap_indices is not None and self.early_stop_oob:
+                        oob_score = cast(
+                            float,
+                            calculate_score(
+                                solution=labels,
+                                prediction=fant_ensemble_prediction,
+                                task_type=self.task_type,
+                                metric=self.metric,
+                                all_scoring_functions=False,
+                                # bootstrap_indices is a way to provide which indices we want to use directly
+                                # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                                bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                                # The construction of the ensemble should use the bootstrap prediction
+                                # That is because there is noise there which act as a regularization,
+                                # Noise coming from repetition in the indices, which is not there in the
+                                # OOB
+                                oob=True,
+                                return_all_boot_scores=False,
+                            )
+                        )
+                        scores_oob[j] = self.metric._optimum - oob_score
+
+                    # Notice the + because we are minimizing, the worst case scenario is a +
+                    scores[j] = self.metric._optimum - robust_score
+                elif self.bbc_cv_strategy == 'autosklearnBBCScoreEnsemblePERT':
+                    # This does not make sense, because we do not train on this train data to do
+                    # model selection, we fit the final model with this
+                    calculated_scores_IB = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=False,
+                            return_all_boot_scores=True,
+                        )
+                    )
+                    calculated_scores_OOB = cast(
+                        float,
+                        calculate_score(
+                            solution=labels,
+                            prediction=fant_ensemble_prediction,
+                            task_type=self.task_type,
+                            metric=self.metric,
+                            all_scoring_functions=False,
+                            # bootstrap_indices is a way to provide which indices we want to use directly
+                            # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                            bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                            # The construction of the ensemble should use the bootstrap prediction
+                            # That is because there is noise there which act as a regularization,
+                            # Noise coming from repetition in the indices, which is not there in the
+                            # OOB
+                            oob=True,
+                            return_all_boot_scores=True,
+                        )
+                    )
+                    test_err = [1 - test_acc for test_acc in calculated_scores_OOB]
+                    train_err = [1 - train_acc for train_acc in calculated_scores_IB]
+                    weight = 0.632
+                    acc = [1 - (weight*te + (1. - weight)*tr) for te, tr in zip(test_err, train_err)]
+                    scores[j] = self.metric._optimum - np.mean(acc)
+
+                    # Notice the + because we are minimizing, the worst case scenario is a +
+                    print(f"[{j}] corrected score from {np.mean(min_scores)} to {np.mean(min_scores) + np.std(min_scores)}")
+                elif self.bbc_cv_strategy == 'autosklearnBBCScoreEnsembleAVGMDEV':
                     # We substract the std deviation as a mechanism to make sure that
                     # the certainty per bootstrap is guaranteed. That is, if we are pesimistic
                     # and only add a model if the worst case scenario of adding such model
@@ -332,6 +481,27 @@ class EnsembleSelection(AbstractEnsemble):
                     # Notice the + because we are minimizing, the worst case scenario is a +
                     print(f"[{j}] corrected score from {np.mean(min_scores)} to {np.mean(min_scores) + np.std(min_scores)}")
                     scores[j] = np.mean(min_scores) + np.std(min_scores)
+                    if self.bootstrap_indices is not None and self.early_stop_oob:
+                        oob_score = cast(
+                            float,
+                            calculate_score(
+                                solution=labels,
+                                prediction=fant_ensemble_prediction,
+                                task_type=self.task_type,
+                                metric=self.metric,
+                                all_scoring_functions=False,
+                                # bootstrap_indices is a way to provide which indices we want to use directly
+                                # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                                bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                                # The construction of the ensemble should use the bootstrap prediction
+                                # That is because there is noise there which act as a regularization,
+                                # Noise coming from repetition in the indices, which is not there in the
+                                # OOB
+                                oob=True,
+                                return_all_boot_scores=False,
+                            )
+                        )
+                        scores_oob[j] = self.metric._optimum - oob_score
                 else:
                     calculated_score = cast(
                         float,
@@ -352,16 +522,67 @@ class EnsembleSelection(AbstractEnsemble):
                         )
                     )
                     scores[j] = self.metric._optimum - calculated_score
+                    if self.bootstrap_indices is not None and self.early_stop_oob:
+                        oob_score = cast(
+                            float,
+                            calculate_score(
+                                solution=labels,
+                                prediction=fant_ensemble_prediction,
+                                task_type=self.task_type,
+                                metric=self.metric,
+                                all_scoring_functions=False,
+                                # bootstrap_indices is a way to provide which indices we want to use directly
+                                # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                                bootstrap_indices=bootstrap_indices if bootstrap_indices is not None else self.bootstrap_indices,
+                                # The construction of the ensemble should use the bootstrap prediction
+                                # That is because there is noise there which act as a regularization,
+                                # Noise coming from repetition in the indices, which is not there in the
+                                # OOB
+                                oob=True,
+                                return_all_boot_scores=False,
+                            )
+                        )
+                        scores_oob[j] = self.metric._optimum - oob_score
+                    elif early_stop_oob_bag is not None:
+                        # This case means that we do early stopping at the bag level, not across all bags
+                        oob_score = cast(
+                            float,
+                            calculate_score(
+                                solution=labels,
+                                prediction=fant_ensemble_prediction,
+                                task_type=self.task_type,
+                                metric=self.metric,
+                                all_scoring_functions=False,
+                                # bootstrap_indices is a way to provide which indices we want to use directly
+                                # The idea is that self.bootstrap_indices =[ B1, B2, B3] which are the sampled indices
+                                bootstrap_indices=[early_stop_oob_bag],
+                                # The construction of the ensemble should use the bootstrap prediction
+                                # That is because there is noise there which act as a regularization,
+                                # Noise coming from repetition in the indices, which is not there in the
+                                # OOB
+                                oob=True,
+                                return_all_boot_scores=False,
+                            )
+                        )
+                        scores_oob[j] = self.metric._optimum - oob_score
 
             all_best = np.argwhere(scores == np.nanmin(scores)).flatten()
             best = self.random_state.choice(all_best)
             ensemble.append(predictions[best])
             trajectory.append(scores[best])
+            if (self.bootstrap_indices is not None and self.early_stop_oob) or early_stop_oob_bag is not None:
+                trajectory_OOB.append(scores_oob[best])
             order.append(best)
 
             # Handle special case
             if len(predictions) == 1:
                 break
+
+        if (self.bootstrap_indices is not None and self.early_stop_oob) or early_stop_oob_bag is not None:
+            index = np.argmin(trajectory_OOB) + 1
+            print(f"Early stooped at {index}/{len(trajectory_OOB)} for {trajectory_OOB}")
+            order = order[:index]
+            trajectory = trajectory[:index]
 
         self.indices_ = order
         self.trajectory_ = trajectory
@@ -448,6 +669,9 @@ class EnsembleSelection(AbstractEnsemble):
                 weights[ensemble_member[0]] = weight
 
         if np.sum(weights) < 1:
+            weights = weights / np.sum(weights)
+
+        if np.sum(weights) > 1:
             weights = weights / np.sum(weights)
 
         self.weights_ = weights

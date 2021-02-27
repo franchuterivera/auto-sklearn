@@ -11,15 +11,25 @@ import os
 import time
 from shutil import copyfile
 
+import sklearn.metrics
+from sklearn.utils.multiclass import type_of_target
+
+
 import numpy as np
 import pandas as pd
 
 from sklearn.metrics import balanced_accuracy_score
+import autosklearn.metrics as metrics
 
 import autosklearn.classification
 import autosklearn.metrics as metrics
-
-
+from autosklearn.constants import (
+    BINARY_CLASSIFICATION,
+    MULTICLASS_CLASSIFICATION,
+    MULTILABEL_CLASSIFICATION,
+    MULTIOUTPUT_REGRESSION,
+    REGRESSION,
+)
 
 
 def generate_overfit_artifacts(estimator, X_train, y_train, X_test, y_test):
@@ -39,6 +49,7 @@ def generate_overfit_artifacts(estimator, X_train, y_train, X_test, y_test):
     })
 
     best_ensemble_index = np.argmax([v['ensemble_optimization_score'] for v in estimator.automl_.ensemble_performance_history])
+    best_ensemble_index = -1  # Take the last ensemble built
     dataframe.append({
         'model': 'best_ensemble_model',
         'test': estimator.automl_.ensemble_performance_history[best_ensemble_index]['ensemble_test_score'],
@@ -55,11 +66,21 @@ def generate_overfit_artifacts(estimator, X_train, y_train, X_test, y_test):
     })
 
     try:
+        if estimator._metric._score_func is sklearn.metrics.log_loss:
+            #metric_._kwargs['labels'] = np.unique(Y_test)
+            estimator.target_type = type_of_target(Y_test)
+            predictions_test = estimator.predict_proba(X_test)
+            predictions_train = estimator.predict_proba(X_train)
+            test_score = estimator._metric._score_func(y_test, predictions_test, labels=np.unique(Y_test))
+            train_score = estimator._metric._score_func(y_train, predictions_train, labels=np.unique(Y_test))
+        else:
+            test_score = estimator.score(X_test, y_test)
+            train_score = estimator.score(X_train, y_train)
         dataframe.append({
             'model': 'rescore_final',
-            'test': estimator.score(X_test, y_test),
+            'test': test_score,
             'val': np.inf,
-            'train': estimator.score(X_train, y_train),
+            'train': train_score,
         })
     except Exception as e:
         print(e)
@@ -131,7 +152,16 @@ if __name__ == '__main__':
         type=int,
         default=392,
     )
+    parser.add_argument(
+        '--early_stop_oob',
+        help='patter of wher the debug file originally is',
+        required=False,
+        type=str,
+        choices=['True', 'False'],
+        default='False',
+    )
     args = parser.parse_args()
+    print(f"\n\nargs={args}\n\n")
 
     starttime = time.time()
 
@@ -146,6 +176,29 @@ if __name__ == '__main__':
 
     copy_seed = int(os.path.basename(glob.glob(os.path.join(input_dir, 'smac3-output', 'run_*'))[0]).split('_')[1])
 
+    if args.task in [
+        'adult',
+        'Albert',
+        'Australian',
+        'higgs',
+        'kr-vs-kp',
+        'MiniBooNE',
+        'kc2',
+    ]:
+        metric_ = metrics.roc_auc
+        task_type = BINARY_CLASSIFICATION
+    elif args.task in [
+        'cnae-9',
+        'connect-4',
+        'segment',
+        'vehicle',
+        'iris',
+    ]:
+        metric_ = metrics.log_loss
+        task_type = MULTICLASS_CLASSIFICATION
+    else:
+        raise NotImplementedError(args.task)
+
     # Prepare the automl object
     cls = autosklearn.classification.AutoSklearnClassifier(
         time_left_for_this_task=3600,
@@ -154,7 +207,7 @@ if __name__ == '__main__':
         delete_tmp_folder_after_terminate=False,
         delete_output_folder_after_terminate=False,
         seed=args.seed,
-        metric=metrics.balanced_accuracy,
+        metric=metric_,
         per_run_time_limit=30,
         bbc_cv_strategy=args.strategy if 'None' not in args.strategy else None,
         bbc_cv_sample_size=args.bbc_cv_sample_size,
@@ -219,13 +272,26 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"No ensemble yet {e}")
         print(f"Starting to fit the ensemble args.ensemble_size={args.ensemble_size}")
-        cls.fit_ensemble(y_train, ensemble_size=args.ensemble_size, dataset_name=dataset_name)
+        cls.fit_ensemble(y_train, ensemble_size=args.ensemble_size, dataset_name=dataset_name, early_stop_oob=True if 'True' in args.early_stop_oob else False)
         # Reduce the ensemble size for next time if needed
         args.ensemble_size = args.ensemble_size // 2
 
     # Score
     predictions = cls.predict(X_test)
-    score = balanced_accuracy_score(Y_test, predictions)
+    #score = metrics.calculate_score(
+    #    solution=Y_test,
+    #    prediction=predictions,
+    #    task_type=task_type,
+    #    metric=metric_,
+    #)
+    if metric_._score_func is sklearn.metrics.log_loss:
+        #metric_._kwargs['labels'] = np.unique(Y_test)
+        cls.target_type = type_of_target(Y_test)
+        predictions = cls.predict_proba(X_test)
+        score = metric_._score_func(Y_test, predictions, labels=np.unique(Y_test))
+    else:
+        score = metric_._score_func(Y_test, predictions)
+    print(f"expected={Y_test} predicted={predictions}")
     print(f"{args.strategy} Score={score}")
     frame = generate_overfit_artifacts(cls, datamanager.data['X_train'], datamanager.data['Y_train'], X_test, Y_test)
     os.makedirs(os.path.join(args.output),  exist_ok=True)
@@ -240,7 +306,7 @@ if __name__ == '__main__':
         'constraint': '1h1c',
         'fold': args.fold,
         'result': score,
-        'metric': 'balacc',
+        'metric': metric_.name,
         'mode': 'cluster',
         'version': 'latest',
         'params': 'None',
