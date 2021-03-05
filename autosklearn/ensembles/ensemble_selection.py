@@ -152,6 +152,10 @@ class EnsembleSelection(AbstractEnsemble):
             if len(predictions) == 1:
                 break
 
+        # Prune to best
+        order = order[:np.argmin(trajectory)+1]
+        trajectory = trajectory[:np.argmin(trajectory)+1]
+
         self.indices_ = order
         self.trajectory_ = trajectory
         self.train_loss_ = trajectory[-1]
