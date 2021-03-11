@@ -5,7 +5,7 @@ on:
   pull_request:
   schedule:
     # Every Monday at 7AM UTC
-    - cron: '0 07 * * 1'
+    - cron: '0 07 * * 5'
 
 jobs:
   ubuntu:
