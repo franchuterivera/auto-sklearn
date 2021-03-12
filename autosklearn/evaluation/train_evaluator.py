@@ -432,6 +432,7 @@ class TrainEvaluator(AbstractEvaluator):
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
             Y_test_pred = [None] * self.num_cv_folds
+            indices = [None] * self.num_cv_folds
             additional_run_info = None
             train_splits = [None] * self.num_cv_folds
 
@@ -497,6 +498,7 @@ class TrainEvaluator(AbstractEvaluator):
                 Y_valid_pred[i] = valid_pred
                 Y_test_pred[i] = test_pred
                 train_splits[i] = train_split
+                indices[i] = test_split
 
                 # Compute train loss of this fold and store it. train_loss could
                 # either be a scalar or a dict of scalars with metrics as keys.
@@ -618,6 +620,7 @@ class TrainEvaluator(AbstractEvaluator):
                 file_output=True,
                 final_call=True,
                 status=status,
+                indices=indices,
             )
 
     def partial_fit_predict_and_loss(self, fold, iterative=False):

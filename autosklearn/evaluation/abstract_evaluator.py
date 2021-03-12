@@ -273,7 +273,7 @@ class AbstractEvaluator(object):
         return err
 
     def finish_up(self, loss, train_loss,  opt_pred, valid_pred, test_pred,
-                  additional_run_info, file_output, final_call, status):
+                  additional_run_info, file_output, final_call, status, indices):
         """This function does everything necessary after the fitting is done:
 
         * predicting
@@ -286,7 +286,7 @@ class AbstractEvaluator(object):
 
         if file_output:
             loss_, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                opt_pred, valid_pred, test_pred, indices,
             )
         else:
             loss_ = None
@@ -358,7 +358,8 @@ class AbstractEvaluator(object):
             self,
             Y_optimization_pred,
             Y_valid_pred,
-            Y_test_pred
+            Y_test_pred,
+            indices,
     ):
         # Abort if self.Y_optimization is None
         # self.Y_optimization can be None if we use partial-cv, then,
@@ -424,6 +425,7 @@ class AbstractEvaluator(object):
             models = None
 
         self.backend.save_numrun_to_dir(
+            indices=indices,
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,

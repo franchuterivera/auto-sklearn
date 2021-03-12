@@ -381,6 +381,7 @@ class Backend(object):
         self, seed: int, idx: int, budget: float, model: Optional[Pipeline],
         cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
+        indices: Optional[np.ndarray]
     ) -> None:
         runs_directory = self.get_runs_directory()
         tmpdir = tempfile.mkdtemp(dir=runs_directory)
@@ -393,6 +394,11 @@ class Backend(object):
             file_path = os.path.join(tmpdir, self.get_cv_model_filename(seed, idx, budget))
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
+
+        if indices is not None:
+            file_path = os.path.join(tmpdir, '%s.%s.%s.indices.pkl' % (seed, idx, budget))
+            with open(file_path, 'wb') as fh:
+                pickle.dump(indices, fh, -1)
 
         for preds, subset in (
             (ensemble_predictions, 'ensemble'),
