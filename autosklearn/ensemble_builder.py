@@ -908,7 +908,7 @@ class EnsembleBuilder(object):
                     continue
                 elif self.ensemble_folds == 'highest_repeat_trusted' and (_instance != highest_instance[_level][_num_run] or _instance not in [max_instance, max_instance-1]):
                     # BUGFIX: Notice that trusted means that we need the instance to be in highest, or highest-1 BUT ALSO that is the biggest repeat per config
-                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance} _level={_level} _num_run={_num_run} highest_instance={highest_instance[_level][_num_run]}")
+                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat trusted max_instance={max_instance}/{max_instance-1} _level={_level} _num_run={_num_run} _instance={_instance} highest_instance={highest_instance[_level][_num_run]}")
                     continue
                 elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_level][_num_run]:
                     #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_level][_num_run]}")
@@ -1020,6 +1020,8 @@ class EnsembleBuilder(object):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_losses.values()])
         )
+        # for k, v in self.read_scores.items():
+        #    self.logger.critical(f"{k}->\t{v}")
         return True
 
     def get_n_best_preds(self):
@@ -1352,8 +1354,7 @@ class EnsembleBuilder(object):
 
         try:
             self.logger.debug(
-                "Fitting the ensemble on %d models.",
-                len(predictions_train),
+                f"Fitting the ensemble on {len(predictions_train)} models: {include_num_runs}"
             )
             start_time = time.time()
             ensemble.fit(predictions_train, self.y_true_ensemble,
