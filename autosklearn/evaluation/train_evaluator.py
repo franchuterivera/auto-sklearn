@@ -34,6 +34,8 @@ from autosklearn.metrics import Scorer
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
 
+from autosklearn.util.repeated_kfold import RepeatedStratifiedMultiKFold
+
 
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
            'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative', 'eval_intensifier_cv']
@@ -811,6 +813,7 @@ class TrainEvaluator(AbstractEvaluator):
             # We do not train all folds :) -- because instances indicate what
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
+            #self.logger.debug(f"Using training_folds={training_folds} for instance={self.instance} trained aber {len(self.models)} models")
 
             self.finish_up(
                 loss=opt_loss,
@@ -1224,6 +1227,14 @@ class TrainEvaluator(AbstractEvaluator):
                     cv.n_splits = 1  # As sklearn is inconsistent here
             elif self.resampling_strategy in ['cv', 'cv-iterative-fit', 'partial-cv',
                                               'partial-cv-iterative-fit', 'intensifier-cv']:
+
+                # WorkAround -- set here for the time being
+                if isinstance(self.resampling_strategy_args['folds'], list):
+                    return RepeatedStratifiedMultiKFold(
+                        n_splits=self.resampling_strategy_args['folds'],
+                        n_repeats=repeats,
+                    )
+
                 if shuffle:
                     if repeats is not None:
                         # Notice, no shuffle here because obviously for repeat that happens
@@ -1610,6 +1621,10 @@ def eval_intensifier_cv(
     # data for EnsembleBuilder
     # repeats = resampling_strategy_args.get('repeats')
     folds = resampling_strategy_args.get('folds')
-    training_folds = list(range(folds * instance, folds * (instance + 1)))
+    if isinstance(folds, list):
+        start = sum([folds[i-1] for i in range(1, instance + 1)])
+        training_folds = list(range(start, folds[instance] + start  ))
+    else:
+        training_folds = list(range(folds * instance, folds * (instance + 1)))
 
     evaluator.fit_predict_and_loss(iterative=iterative, training_folds=training_folds)
