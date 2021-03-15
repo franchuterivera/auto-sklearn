@@ -356,10 +356,14 @@ class AbstractEvaluator(object):
 
         self.duration = time.time() - self.starttime
 
+        modeltype = 'N/A'
+        if hasattr(self.model, 'steps'):
+            modeltype = self.model.steps[-1][-1].choice.__class__.__name__
         run_metadata = {
             'loss': loss,
             'duration': self.duration,
             'status': status,
+            'modeltype': modeltype,
         }
 
         if file_output:
