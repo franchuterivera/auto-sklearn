@@ -261,12 +261,24 @@ class TrainEvaluator(AbstractEvaluator):
                     losses = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                         level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
                     )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
+                    modeltypes = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                        level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
+                    )['modeltype'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
                     identifiers = [idx_ for _, idx_ in sorted(zip(losses, identifiers))]
+                    modeltypes = [idx_ for _, idx_ in sorted(zip(losses, modeltypes))]
+                    index_first_ocurrence = [modeltypes.index(x) for x in set(modeltypes)]
+
+                    # We want to have the best performer per model, then fill the rest with top performers
+                    # Get the first occurrence in sorted list, that is the best performer
+                    diversity = [identifiers[i_] for i_ in index_first_ocurrence]
+                    total_remaining = self.resampling_strategy_args['stack_at_most'] - len(diversity)
+                    identifiers = [idx_ for idx_ in identifiers if idx_ not in diversity][:total_remaining+1] + diversity
+
                     # The ideas is to have 75% coming from best performance and other 25% comming from random for diversity
-                    total_best_performance = int(0.75 * self.resampling_strategy_args['stack_at_most'])
-                    best_performance = identifiers[:total_best_performance]
-                    diversity = random.sample(identifiers[total_best_performance:], k=self.resampling_strategy_args['stack_at_most']-total_best_performance)
-                    identifiers = best_performance + diversity
+                    #total_best_performance = int(0.75 * self.resampling_strategy_args['stack_at_most'])
+                    #best_performance = identifiers[:total_best_performance]
+                    #diversity = random.sample(identifiers[total_best_performance:], k=self.resampling_strategy_args['stack_at_most']-total_best_performance)
+                    #identifiers = best_performance + diversity
 
             self.base_models_ = identifiers
             self.X_train = np.concatenate(

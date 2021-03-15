@@ -453,6 +453,9 @@ class Backend(object):
                 max_instance = instance_
 
         for level_, seed_, num_run_, budget_, instance_ in runs:
+            if num_run_ <= 1:
+                # No dummy predictions
+                continue
             if levels is not None and level_ not in levels:
                 continue
             if seeds is not None and seed_ not in seeds:
