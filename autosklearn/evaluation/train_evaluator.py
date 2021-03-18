@@ -472,6 +472,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.partial = False
 
+            opt_indices: List[int] = []
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
@@ -493,6 +494,7 @@ class TrainEvaluator(AbstractEvaluator):
                     groups=self.resampling_strategy_args.get('groups')
             )):
 
+                opt_indices.extend(test_split)
                 # TODO add check that split is actually an integer array,
                 # not a boolean array (to allow indexed assignement of
                 # training data later).
@@ -562,6 +564,10 @@ class TrainEvaluator(AbstractEvaluator):
                 # the average.
                 opt_fold_weights.append(len(test_split))
 
+            # Any prediction/GT saved to disk most be sorted to be able to compare predictions
+            # in ensemble selection
+            sort_indices = np.argsort(opt_indices)
+
             # Compute weights of each fold based on the number of samples in each
             # fold.
             train_fold_weights = [w / sum(train_fold_weights) for w in train_fold_weights]
@@ -595,6 +601,7 @@ class TrainEvaluator(AbstractEvaluator):
             Y_optimization_pred = np.concatenate(
                 [Y_optimization_pred[i] for i in range(self.num_cv_folds)
                  if Y_optimization_pred[i] is not None])
+            Y_optimization_pred = Y_optimization_pred[sort_indices]
             Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
                                         if Y_targets[i] is not None])
 
@@ -614,8 +621,8 @@ class TrainEvaluator(AbstractEvaluator):
                 if len(np.shape(Y_test_pred)) == 3:
                     Y_test_pred = np.nanmean(Y_test_pred, axis=0)
 
-            self.Y_optimization = Y_targets
-            self.Y_actual_train = Y_train_targets
+            self.Y_optimization = Y_targets[sort_indices]
+            self.Y_actual_train = Y_train_targets[sort_indices]
 
             if self.num_cv_folds > 1:
                 self.model = self._get_model()
@@ -1042,13 +1049,13 @@ class TrainEvaluator(AbstractEvaluator):
                     try:
                         cv = StratifiedShuffleSplit(n_splits=1,
                                                     test_size=test_size,
-                                                    random_state=1)
+                                                    random_state=self.num_run)
                         test_cv = copy.deepcopy(cv)
                         next(test_cv.split(y, y))
                     except ValueError as e:
                         if 'The least populated class in y has only' in e.args[0]:
                             cv = ShuffleSplit(n_splits=1, test_size=test_size,
-                                              random_state=1)
+                                              random_state=self.num_run)
                         else:
                             raise e
                 else:
@@ -1062,7 +1069,7 @@ class TrainEvaluator(AbstractEvaluator):
                 if shuffle:
                     cv = StratifiedKFold(
                         n_splits=self.resampling_strategy_args['folds'],
-                        shuffle=shuffle, random_state=1)
+                        shuffle=shuffle, random_state=self.num_run)
                 else:
                     cv = KFold(n_splits=self.resampling_strategy_args['folds'],
                                shuffle=shuffle)
@@ -1074,7 +1081,7 @@ class TrainEvaluator(AbstractEvaluator):
                 # TODO shuffle not taken into account for this
                 if shuffle:
                     cv = ShuffleSplit(n_splits=1, test_size=test_size,
-                                      random_state=1)
+                                      random_state=self.num_run)
                 else:
                     tmp_train_size = int(np.floor(train_size * y.shape[0]))
                     test_fold = np.zeros(y.shape[0])
@@ -1083,7 +1090,7 @@ class TrainEvaluator(AbstractEvaluator):
                     cv.n_splits = 1  # As sklearn is inconsistent here
             elif self.resampling_strategy in ['cv', 'partial-cv',
                                               'partial-cv-iterative-fit']:
-                random_state = 1 if shuffle else None
+                random_state = self.num_run if shuffle else None
                 cv = KFold(
                     n_splits=self.resampling_strategy_args['folds'],
                     shuffle=shuffle,
