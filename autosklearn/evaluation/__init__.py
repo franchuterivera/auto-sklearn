@@ -135,6 +135,8 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
 
         if resampling_strategy == 'holdout':
             eval_function = autosklearn.evaluation.train_evaluator.eval_holdout
+        elif resampling_strategy == 'thresholdout':
+            eval_function = autosklearn.evaluation.train_evaluator.eval_thresholdout
         elif resampling_strategy == 'holdout-iterative-fit':
             eval_function = autosklearn.evaluation.train_evaluator.eval_iterative_holdout
         elif resampling_strategy == 'cv-iterative-fit':

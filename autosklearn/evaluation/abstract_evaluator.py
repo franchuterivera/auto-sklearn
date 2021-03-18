@@ -330,6 +330,7 @@ class AbstractEvaluator(object):
         self,
         loss: Union[Dict[str, float], float],
         train_loss: Optional[Union[float, Dict[str, float]]],
+        train_pred: np.ndarray,
         opt_pred: np.ndarray,
         valid_pred: np.ndarray,
         test_pred: np.ndarray,
@@ -351,7 +352,7 @@ class AbstractEvaluator(object):
 
         if file_output:
             file_out_loss, additional_run_info_ = self.file_output(
-                opt_pred, valid_pred, test_pred,
+                train_pred, opt_pred, valid_pred, test_pred,
             )
         else:
             file_out_loss = None
@@ -424,6 +425,7 @@ class AbstractEvaluator(object):
 
     def file_output(
         self,
+        Y_train_pred: np.ndarray,
         Y_optimization_pred: np.ndarray,
         Y_valid_pred: np.ndarray,
         Y_test_pred: np.ndarray,
@@ -493,12 +495,20 @@ class AbstractEvaluator(object):
                     # Mypy cannot understand hasattr yet
                     models.estimators_ = self.models  # type: ignore[attr-defined]
 
+        # This file can be written independently of the others down bellow
+        if ('y_train' not in self.disable_file_output):
+            if self.output_y_hat_optimization:
+                self.backend.save_train_targets_ensemble(self.Y_actual_train)
+
         self.backend.save_numrun_to_dir(
             seed=self.seed,
             idx=self.num_run,
             budget=self.budget,
             model=self.model if 'model' not in self.disable_file_output else None,
             cv_model=models if 'cv_model' not in self.disable_file_output else None,
+            train_predictions=(
+                Y_train_pred if 'y_train' not in self.disable_file_output else None
+            ),
             ensemble_predictions=(
                 Y_optimization_pred if 'y_optimization' not in self.disable_file_output else None
             ),

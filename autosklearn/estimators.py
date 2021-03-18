@@ -116,6 +116,7 @@ class AutoSklearnEstimator(BaseEstimator):
             how to to handle overfitting, might need 'resampling_strategy_arguments'
 
             * 'holdout': 67:33 (train:test) split
+            * 'thresholdout': 67:33 (train:test) split
             * 'holdout-iterative-fit':  67:33 (train:test) split, calls iterative
               fit where possible
             * 'cv': crossvalidation, requires 'folds'

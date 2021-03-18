@@ -157,6 +157,7 @@ class AutoML(BaseEstimator):
         self._resampling_strategy_arguments = resampling_strategy_arguments \
             if resampling_strategy_arguments is not None else {}
         if self._resampling_strategy not in ['holdout',
+                                             'thresholdout',
                                              'holdout-iterative-fit',
                                              'cv',
                                              'cv-iterative-fit',
@@ -935,7 +936,7 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit')
+                'holdout', 'thresholdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit',)
             and not self._can_predict
         ):
             raise NotImplementedError(

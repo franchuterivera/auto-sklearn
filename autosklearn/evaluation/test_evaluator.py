@@ -67,6 +67,7 @@ class TestEvaluator(AbstractEvaluator):
         _fit_and_suppress_warnings(self.logger, self.model, self.X_train, self.Y_train)
         loss, Y_pred, _, _ = self.predict_and_loss()
         self.finish_up(
+            train_pred=None,
             loss=loss,
             train_loss=None,
             opt_pred=Y_pred,
