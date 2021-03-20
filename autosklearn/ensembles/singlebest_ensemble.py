@@ -37,7 +37,7 @@ class SingleBest(AbstractEnsemble):
         self.run_history = run_history
         self.identifiers_ = self.get_identifiers_from_run_history()
 
-    def get_identifiers_from_run_history(self) -> List[Tuple[int, int, float]]:
+    def get_identifiers_from_run_history(self) -> List[Tuple[int, int, int, float, int]]:
         """
         This method parses the run history, to identify
         the best performing model
@@ -61,12 +61,14 @@ class SingleBest(AbstractEnsemble):
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
+                    run_key.instance,
                 )
                 model_file_name = self.backend.get_model_filename(
                     run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
+                    run_key.instance,
                 )
                 file_path = os.path.join(model_dir, model_file_name)
                 if not os.path.exists(file_path):
@@ -77,6 +79,7 @@ class SingleBest(AbstractEnsemble):
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
+                    run_key.instance,
                 )]
                 best_model_score = score
 
@@ -112,7 +115,7 @@ class SingleBest(AbstractEnsemble):
 
         return output
 
-    def get_selected_model_identifiers(self) -> List[Tuple[int, int, float]]:
+    def get_selected_model_identifiers(self) -> List[Tuple[int, int, int, float, int]]:
         output = []
 
         for i, weight in enumerate(self.weights_):

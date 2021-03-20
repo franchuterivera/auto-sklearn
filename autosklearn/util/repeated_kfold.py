@@ -1,6 +1,11 @@
+#  type: ignore
+#  Mypy Bug: error: Cannot determine type of 'n_repeats'  [has-type]
 import copy
 import numbers
 from abc import ABCMeta
+from typing import Any, Generator, List, Optional
+
+import numpy as np
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.utils import check_random_state
@@ -24,7 +29,9 @@ class _RepeatedMultiSplits(metaclass=ABCMeta):
         Constructor parameters for cv. Must not contain random_state
         and shuffle.
     """
-    def __init__(self, cv, *, n_repeats=10, n_splits=[3, 5, 10], random_state=None, **cvargs):
+    def __init__(self, cv: StratifiedKFold, *,
+                 n_repeats: int = 10, n_splits: List[int] = [3, 5, 10],
+                 random_state: Optional[np.random.RandomState] = None, **cvargs: Any) -> None:
         if not isinstance(n_repeats, numbers.Integral):
             raise ValueError("Number of repetitions must be of Integral type.")
 
@@ -41,7 +48,8 @@ class _RepeatedMultiSplits(metaclass=ABCMeta):
         self.random_state = random_state
         self.cvargs = cvargs
 
-    def split(self, X, y=None, groups=None):
+    def split(self, X: np.ndarray, y: Optional[np.ndarray] = None,
+              groups: Optional[np.ndarray] = None) -> Generator:
         """Generates indices to split data into training and test set.
         Parameters
         ----------
@@ -72,7 +80,9 @@ class _RepeatedMultiSplits(metaclass=ABCMeta):
                 for train_index, test_index in cv.split(X, y, groups):
                     yield train_index, test_index
 
-    def get_n_splits(self, X=None, y=None, groups=None):
+    def get_n_splits(self, X: Optional[np.ndarray] = None,
+                     y: Optional[np.ndarray] = None,
+                     groups: List[np.ndarray] = None) -> int:
         """Returns the number of splitting iterations in the cross-validator
         Parameters
         ----------
@@ -143,7 +153,8 @@ class RepeatedStratifiedMultiKFold(_RepeatedMultiSplits):
     --------
     RepeatedKFold : Repeats K-Fold n times.
     """
-    def __init__(self, *, n_splits=[3, 5, 10, 5, 3], n_repeats=1, random_state=None):
+    def __init__(self, *, n_splits: List[int] = [3, 5, 10, 5, 3], n_repeats: int = 1,
+                 random_state: Optional[np.random.RandomState] = None):
         assert len(n_splits) == n_repeats, "Repetitions come through n_splits schedule"
         super().__init__(
             StratifiedKFold, n_repeats=n_repeats, random_state=random_state,

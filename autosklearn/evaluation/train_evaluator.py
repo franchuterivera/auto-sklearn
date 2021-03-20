@@ -4,8 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import copy
 import json
-import typing
-import random
 
 from ConfigSpace import Configuration
 
@@ -13,8 +11,17 @@ import numpy as np
 from smac.tae import TAEAbortException, StatusType
 
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit, KFold, \
-    StratifiedKFold, train_test_split, BaseCrossValidator, PredefinedSplit, RepeatedStratifiedKFold, RepeatedKFold
+from sklearn.model_selection import (
+    ShuffleSplit,
+    StratifiedShuffleSplit,
+    KFold,
+    StratifiedKFold,
+    train_test_split,
+    BaseCrossValidator,
+    PredefinedSplit,
+    RepeatedStratifiedKFold,
+    RepeatedKFold,
+)
 from sklearn.model_selection._split import _RepeatedSplits, BaseShuffleSplit
 
 from autosklearn.evaluation.abstract_evaluator import (
@@ -231,10 +238,14 @@ class TrainEvaluator(AbstractEvaluator):
         self.Y_train = self.datamanager.data['Y_train']
         self.Y_optimization: Optional[Union[List, np.ndarray]] = None
 
-        self.base_models_ = []
+        self.base_models_: List = []
         if self.level > 1:
             # For now I only want to use the higesht budget available
             assert resampling_strategy == 'intensifier-cv'
+            if self.resampling_strategy_args['stacking_strategy'] == 'instances_anyasbase':
+                idxs = None
+            else:
+                idxs = [self.num_run]
             idx2predict = self.backend.load_model_predictions(
                 # Ensemble correspond to the OOF prediction that have previously
                 # been pre-sorted to match X_train indices
@@ -242,7 +253,7 @@ class TrainEvaluator(AbstractEvaluator):
                 # Do not yet use the current level!
                 levels=list(range(1, level)),
                 # When doing instances_selfasbase strategy, we do towers
-                idxs=None if self.resampling_strategy_args['stacking_strategy'] == 'instances_anyasbase' else [self.num_run],
+                idxs=idxs,
             )
 
             # We intensify across repetitions. That is level=2 numrun=2 isntance=0
@@ -250,42 +261,43 @@ class TrainEvaluator(AbstractEvaluator):
             # starts, there might be A, B, C, D. We cannot use D.
             identifiers = [k for k in idx2predict.keys()]
             if self.instance > 0:
-                reference_model = self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                    level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=0,
-                )
+                reference_model = \
+                    self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                        level=self.level, seed=self.seed, idx=self.num_run,
+                        budget=self.budget, instance=0,)
                 identifiers = reference_model.base_models_
             else:
                 # This is the first time we decide the models to stack
                 # we might want to limit the amount of models we read
-                if 'stack_at_most' in self.resampling_strategy_args and self.resampling_strategy_args['stack_at_most'] is not None and len(identifiers) > self.resampling_strategy_args['stack_at_most']:
-                    losses = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
-                        level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
-                    )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
-                    modeltypes = [self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
-                        level=level_, seed=seed_, idx=num_run_, budget=budget_, instance=instance_,
-                    )['modeltype'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
+                stack_at_most = self.resampling_strategy_args.get('stack_at_most')
+                if stack_at_most is not None and len(identifiers) > int(stack_at_most):
+                    losses = [
+                        self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                            level=level_, seed=seed_, idx=num_run_,
+                            budget=budget_, instance=instance_,
+                        )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
+                    modeltypes = [
+                        self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                            level=level_, seed=seed_, idx=num_run_, budget=budget_,
+                            instance=instance_,)['modeltype']
+                        for level_, seed_, num_run_, budget_, instance_ in identifiers]
                     identifiers = [idx_ for _, idx_ in sorted(zip(losses, identifiers))]
                     modeltypes = [idx_ for _, idx_ in sorted(zip(losses, modeltypes))]
                     index_first_ocurrence = [modeltypes.index(x) for x in set(modeltypes)]
 
-                    # We want to have the best performer per model, then fill the rest with top performers
+                    # We want to have the best performer per model,
+                    # then fill the rest with top performers
                     # Get the first occurrence in sorted list, that is the best performer
                     diversity = [identifiers[i_] for i_ in index_first_ocurrence]
-                    total_remaining = self.resampling_strategy_args['stack_at_most'] - len(diversity)
-                    identifiers = [idx_ for idx_ in identifiers if idx_ not in diversity][:total_remaining+1] + diversity
-
-                    # The ideas is to have 75% coming from best performance and other 25% comming from random for diversity
-                    #total_best_performance = int(0.75 * self.resampling_strategy_args['stack_at_most'])
-                    #best_performance = identifiers[:total_best_performance]
-                    #diversity = random.sample(identifiers[total_best_performance:], k=self.resampling_strategy_args['stack_at_most']-total_best_performance)
-                    #identifiers = best_performance + diversity
+                    total_remaining = int(stack_at_most) - len(diversity)
+                    identifiers = [idx_ for idx_ in identifiers
+                                   if idx_ not in diversity][:total_remaining+1] + diversity
 
             self.base_models_ = identifiers
             self.X_train = np.concatenate(
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
-            #self.logger.debug(f"For num_run={self.num_run} instance={self.instance} level={self.level} base_models->{self.base_models_}({len(self.base_models_)} self.X_train->{self.X_train.shape} where    {[(k, v.shape) for k,v in idx2predict.items()]}")
             # Notice how I use the same identifiers, in case a new config is there
             idx2predict = self.backend.load_model_predictions(
                 # Ensemble correspond to the OOF prediction that have previously
@@ -297,7 +309,6 @@ class TrainEvaluator(AbstractEvaluator):
                 [self.X_test] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
-        self.logger.debug(f"training num_run={self.num_run} at level={self.level} with {self.X_train.shape} due to base={self.base_models_}")
 
         self.Y_targets = [None] * self.num_cv_folds
         self.Y_train_targets = np.ones(self.Y_train.shape) * np.NaN
@@ -312,7 +323,7 @@ class TrainEvaluator(AbstractEvaluator):
         self.keep_models = keep_models
 
     def fit_predict_and_loss(self, iterative: bool = False,
-                             training_folds: typing.List[int] = None) -> None:
+                             training_folds: List[int] = None) -> None:
         """Fit, predict and compute the loss for cross-validation and
         holdout (both iterative and non-iterative)"""
 
@@ -552,7 +563,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.partial = False
 
-            opt_indices = []
+            opt_indices: List[int] = []
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
@@ -737,30 +748,22 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
-            avg_previous_repeats = self.resampling_strategy_args.get('avg_previous_repeats', False)
             # We do averaging if requested AND if at least 2 repetition have passed
-            if self.resampling_strategy == 'intensifier-cv' and avg_previous_repeats and self.instance > 0:
+            if self.resampling_strategy == 'intensifier-cv' and self.instance > 0:
                 # Update the loss to reflect and average. Because we always have the same
                 # number of folds, we can do an average of average
                 try:
-                    #past_opt_losses = self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
-                    #    level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget, instance=self.instance - 1,
-                    #)['loss']
-                    ## Because all repetitions have same number of folds, we can do average of average
-                    #opt_loss = (past_opt_losses * self.instance + opt_loss) / (self.instance + 1)
-
                     # Average predictions -- Ensemble
-                    # preditions are sorted to make things easy -- But what price are we paying
 
-                    # So that I remember: We want to average the predictions only with the past repetition as follows:
+                    # We want to average the predictions only with the past repetition as follows:
                     # Repeat 0: A/1
                     # Repeat 1: (        1*A     + B  )/2
                     # Repeat 2: (    2*(A + B)/2 + c  )/3
                     # Notice we NEED only repeat N-1 for N averaging
-                    lower_prediction = self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                        subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
-                        instance=self.instance - 1,
-                    )
+                    lower_prediction = \
+                        self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                            subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
+                            budget=self.budget, instance=self.instance - 1)
                     # Remove the division from past iteration
                     np.multiply(
                         lower_prediction,
@@ -779,16 +782,16 @@ class TrainEvaluator(AbstractEvaluator):
                         1/(self.instance + 1),
                         out=Y_optimization_pred,
                     )
-                    opt_loss = self._loss(
+                    opt_loss = cast(Dict, self._loss(
                         self.Y_optimization,
                         Y_optimization_pred,
-                    )
+                    ))
 
                     # Then TEST
-                    lower_prediction = self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                        subset='test', level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
-                        instance=self.instance - 1,
-                    )
+                    lower_prediction = \
+                        self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                            subset='test', level=self.level, seed=self.seed, idx=self.num_run,
+                            budget=self.budget, instance=self.instance - 1)
                     # Remove the division from past iteration
                     np.multiply(
                         lower_prediction,
@@ -809,23 +812,22 @@ class TrainEvaluator(AbstractEvaluator):
                     )
 
                     # And then finally the model needs to be average
-                    old_voting_model = self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                        level=self.level, seed=self.seed, idx=self.num_run, budget=self.budget,
-                        instance=self.instance - 1,
-                    )
+                    old_voting_model = \
+                        self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                            level=self.level, seed=self.seed, idx=self.num_run,
+                            budget=self.budget, instance=self.instance - 1,)
                     # voting estimator has fitted estimators in a list
                     # We expect from 0 to training_folds-1 to be taken from old models
-                    # then training_folds folds would be trained properly, and the rest of repetition should be none
+                    # then training_folds folds would be trained properly,
+                    # and the rest of repetition should be none
                     for i in range(len(old_voting_model.estimators_)):
                         self.models[i] = old_voting_model.estimators_[i]
-                    assert i + 1 == training_folds[0], f"training_folds={training_folds} old_voting_model.estimators_={len(old_voting_model.estimators_)} instance={self.instance} i={i}"
                 except Exception as e:
-                    self.logger.error(f"Run into {e} while averaging instance={self.instance} for num_run={self.num_run} budget={self.budget}")
+                    self.logger.error(f"Run into {e} while averaging for num_run={self.num_run}")
 
             # We do not train all folds :) -- because instances indicate what
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
-            #self.logger.debug(f"Using training_folds={training_folds} for instance={self.instance} trained aber {len(self.models)} models")
 
             self.finish_up(
                 loss=opt_loss,
@@ -1461,10 +1463,6 @@ def eval_partial_cv_iterative(
     if budget_type is not None:
         raise NotImplementedError()
 
-    if instance is not None:
-        instance_dict = json.loads(instance) if instance is not None else {}
-        level = instance_dict.get('level', 1)
-
     return eval_partial_cv(
         queue=queue,
         config=config,
@@ -1472,7 +1470,6 @@ def eval_partial_cv_iterative(
         metric=metric,
         resampling_strategy=resampling_strategy,
         resampling_strategy_args=resampling_strategy_args,
-        level=level,
         seed=seed,
         port=port,
         num_run=num_run,
@@ -1599,11 +1596,11 @@ def eval_intensifier_cv(
     init_params: Optional[Dict[str, Any]] = None,
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
-    iterative: bool = True,
+    iterative: bool = False,
 ) -> None:
     # Instances in this context are repetitions to be selected from the evaluator
     instance_dict = json.loads(instance) if instance is not None else {}
-    instance = instance_dict.get('repeats', 0)
+    repeat = instance_dict.get('repeats', 0)
     level = instance_dict.get('level', 1)
 
     evaluator = TrainEvaluator(
@@ -1625,18 +1622,22 @@ def eval_intensifier_cv(
         init_params=init_params,
         budget=budget,
         budget_type=budget_type,
-        instance=instance,
+        instance=repeat,
     )
-    # Bellow says what folds the current instance has access two.
+    # Bellow says what folds the current repeat has access two.
     # By default we have repeats * folds splits to train. Splits not in training_folds
     # will be None and ignored by the code. All data written to disk is sorted as the training
     # data for EnsembleBuilder
     # repeats = resampling_strategy_args.get('repeats')
-    folds = resampling_strategy_args.get('folds')
+    folds = resampling_strategy_args.get('folds', 5)
+    assert folds is not None
     if isinstance(folds, list):
-        start = sum([folds[i-1] for i in range(1, instance + 1)])
-        training_folds = list(range(start, folds[instance] + start  ))
+        start = sum([folds[i-1] for i in range(1, repeat + 1)])
+        training_folds = list(range(start, folds[repeat] + start))
     else:
-        training_folds = list(range(folds * instance, folds * (instance + 1)))
+        training_folds = list(range(
+            int(folds * int(repeat)),
+            int(folds * (int(repeat) + 1)),
+        ))
 
     evaluator.fit_predict_and_loss(iterative=iterative, training_folds=training_folds)

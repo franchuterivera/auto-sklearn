@@ -344,7 +344,7 @@ class AutoSklearnEstimator(BaseEstimator):
             logging_config=self.logging_config,
             metadata_directory=self.metadata_directory,
             metric=self.metric,
-            scoring_functions=self.scoring_functions
+            scoring_functions=self.scoring_functions,
             ensemble_folds=self.ensemble_folds,
             warmstart_with_initial_configurations=self.warmstart_with_initial_configurations,
         )
