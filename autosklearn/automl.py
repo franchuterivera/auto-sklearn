@@ -98,8 +98,7 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, 
                     model
                 )
         except Exception as e:
-            print(f"Failure on {identifier}")
-            print(f"model={model} X={np.shape(X)} lower_level_predictions={[np.shape(a) for a in lower_level_predictions]}({len(lower_level_predictions)})")
+            logger.error(f"Failure on {identifier}")
             raise e
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
@@ -482,7 +481,8 @@ class AutoML(BaseEstimator):
         """
         initial_configurations = []
         for include_estimator in ['lgbm', 'xgboost', 'random_forest', 'extra_trees', 'mlp',
-                                  'k_nearest_neighbors', 'passive_aggressive', 'liblinear_svc', 'sgd']:
+                                  'k_nearest_neighbors', 'passive_aggressive',
+                                  'liblinear_svc', 'sgd']:
             cs, cp = self._create_search_space(
                 None,
                 self._backend,
@@ -495,7 +495,8 @@ class AutoML(BaseEstimator):
             initial_configurations.append(
                 Configuration(configuration_space, values=cs.get_default_configuration())
             )
-        self._logger.critical("Warmstarting smac with {}".format("\n".join([str(i) for i in initial_configurations])))
+        self._logger.critical("Warmstarting smac with {}".format(
+            "\n".join([str(i) for i in initial_configurations])))
         return initial_configurations
 
     def fit(
@@ -621,7 +622,8 @@ class AutoML(BaseEstimator):
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
-        self._logger.debug("  warmstart_with_initial_configurations: {}".format(self._warmstart_with_initial_configurations))
+        self._logger.debug("  warmstart_with_initial_configurations: {}".format(
+            self._warmstart_with_initial_configurations))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
         self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
@@ -780,13 +782,14 @@ class AutoML(BaseEstimator):
             )
 
         self.started_registered_time = time.time()
-        print(f"TIMEDEBUG-AUTOML: started registering time at {time.ctime()} ({time.time() - self.started_registered_time})")
         if 'time_split' in self._stacking_strategy:
             # Calculate the time each smac should last. This elapsed time here
             # makes the overhead up to this point which is usually less than 0.5 seconds
             # and is substracted from all smac runs to be safe
             elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
-            time_left_for_smac = max(0, self._time_for_task - elapsed_time) / self._max_stacking_level
+            time_left_for_smac = max(
+                0,
+                self._time_for_task - elapsed_time) / self._max_stacking_level
             extra_overhead = 0
             for level in range(1, self._max_stacking_level + 1):
                 start_time = self._stopwatch.wall_elapsed(self._dataset_name)
@@ -795,11 +798,12 @@ class AutoML(BaseEstimator):
                                         num_run, proc_ensemble, initial_configurations)
                 end_time = self._stopwatch.wall_elapsed(self._dataset_name)
                 extra_overhead = end_time - (start_time + time_left_for_smac)
-                print(f"Started smac iteration at {start_time} which lasted {end_time - start_time} giving an overhead of {extra_overhead}")
         else:
             elapsed_time = self._stopwatch.wall_elapsed(self._dataset_name)
             time_left_for_smac = max(0, self._time_for_task - elapsed_time)
-            num_run = self.run_smac(self._max_stacking_level, time_left_for_smac, num_run, proc_ensemble, initial_configurations)
+            num_run = self.run_smac(
+                self._max_stacking_level,
+                time_left_for_smac, num_run, proc_ensemble, initial_configurations)
 
         self._logger.info("Starting shutdown...")
         # Wait until the ensemble process is finished to avoid shutting down
@@ -837,8 +841,8 @@ class AutoML(BaseEstimator):
 
         return self
 
-    def run_smac(self, level, time_left_for_smac, num_run, proc_ensemble, initial_configurations) -> int:
-        print(f"TIMEDEBUG-AUTOML: STARTED run_smac at {time.ctime()} ({time.time() - self.started_registered_time})")
+    def run_smac(self, level, time_left_for_smac, num_run,
+                 proc_ensemble, initial_configurations) -> int:
         run_id = level + self._seed
 
         if self._logger:
@@ -872,7 +876,6 @@ class AutoML(BaseEstimator):
                     )
                 )
 
-            print(f"TIMEDEBUG-AUTOML: Started running at SMBO at {time.ctime()} ({time.time() - self.started_registered_time})")
             _proc_smac = AutoMLSMBO(
                 config_space=self.configuration_space,
                 dataset_name=self._dataset_name,
@@ -886,13 +889,16 @@ class AutoML(BaseEstimator):
                 dask_client=self._dask_client,
                 start_num_run=num_run,
                 # In case of a second level call, wich can only happend
-                num_metalearning_cfgs=0 if ('time_split' in self._stacking_strategy and level > 1) else self._initial_configurations_via_metalearning,
+                num_metalearning_cfgs=0 if (
+                    'time_split' in self._stacking_strategy and level > 1
+                ) else self._initial_configurations_via_metalearning,
                 initial_configurations=initial_configurations,
                 seed=self._seed,
                 # levels will also be part of the seed/instance/budget paradigm
                 # here the stacking levels will be converted as part of the instances,
                 # so that evaluator closures can decide what to do with this
-                stacking_levels=list(range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
+                stacking_levels=list(
+                    range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
                 run_id=run_id,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,
@@ -930,7 +936,6 @@ class AutoML(BaseEstimator):
         if len(self.runhistory_.data) > 0:
             num_run = max([key.config_id for key in self.runhistory_.data.keys()])
 
-        print(f"TIMEDEBUG-AUTOML: Finished run_smac at {time.ctime()} ({time.time() - self.started_registered_time})")
         return num_run
 
     @staticmethod
@@ -1045,9 +1050,7 @@ class AutoML(BaseEstimator):
             print(f"For model {identifier} no base prediction is needed")
             self._logger.critical(f"For model {identifier} no base prediction is needed")
             return []
-        base =  [base_model_predictions[idx] for idx in estimator.base_models_]
-        #print(f"For model {identifier} {[idx for idx in estimator.base_models_]} ({len(base)}) {[np.shape(s) for s in base]} prediction is needed")
-        #self._logger.critical(f"For model {identifier} {[np.shape(s) for s in base]} prediction is needed")
+        base = [base_model_predictions[idx] for idx in estimator.base_models_]
         return base
 
     def predict(self, X, batch_size=None, n_jobs=1):
@@ -1114,24 +1117,28 @@ class AutoML(BaseEstimator):
 
         base_model_predictions = {}
         for level_ in range(1, self._max_stacking_level + 1):
-            identifiers = [(level, seed, num_run, budget, instance) for level, seed, num_run, budget, instance in models.keys() if level == level_]
+            identifiers = [(level, seed, num_run, budget, instance)
+                           for level, seed, num_run, budget, instance in models.keys()
+                           if level == level_]
             predictions = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(_model_predict)(
                     models[identifier], X, batch_size, self._logger, self._task,
-                    self.get_base_model_predictions(models[identifier], base_model_predictions, identifier),
+                    self.get_base_model_predictions(models[identifier],
+                                                    base_model_predictions, identifier),
                     identifier,
                 ) for identifier in identifiers)
             for indentifier, prediction in zip(identifiers, predictions):
-                #print(f"{indentifier}->{np.shape(prediction)}")
                 base_model_predictions[indentifier] = prediction
 
-        identity = lambda x: x
+        identity = lambda x: x  # noqa
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(_model_predict)(
                 models[identifier], X, batch_size, self._logger, self._task,
-                self.get_base_model_predictions(models[identifier], base_model_predictions, identifier),
+                self.get_base_model_predictions(
+                    models[identifier], base_model_predictions, identifier),
                 identifier,
-            ) if identifier not in base_model_predictions else joblib.delayed(identity)(base_model_predictions[identifier])
+            ) if identifier not in base_model_predictions else joblib.delayed(identity)(
+                base_model_predictions[identifier])
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )
 
@@ -1221,9 +1228,12 @@ class AutoML(BaseEstimator):
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
             if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv'):
+                include_base_models = False
+                if self._resampling_strategy == 'intensifier-cv' and self._max_stacking_level > 1:
+                    include_base_models = True
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(
                     identifiers,
-                    include_base_models=self._resampling_strategy == 'intensifier-cv' and self._max_stacking_level > 1,
+                    include_base_models=include_base_models,
                 )
             else:
                 self.cv_models_ = None

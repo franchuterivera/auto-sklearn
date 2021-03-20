@@ -180,7 +180,7 @@ def get_smac_object(
         intensifier = SimpleIntensifier
 
     if len(initial_configurations) > 0 and len(metalearning_configurations) > 0:
-        raise ValueError(f"Can only have initial configurations from initial_configurations or from metalearning, not both")
+        raise ValueError("Can only have initial configurations or from metalearning, not both")
 
     scenario = Scenario(scenario_dict)
     if initial_configurations is not None and len(initial_configurations) > 0:
@@ -241,7 +241,6 @@ class AutoMLSMBO(object):
                  ensemble_callback: typing.Optional[EnsembleBuilderManager] = None,
                  ):
         self.started_registered_time = time.time()
-        print(f"SMBO: CREATED SMBO CLASS at {time.ctime()} ({time.time() - self.started_registered_time})")
         super(AutoMLSMBO, self).__init__()
         # data related
         self.dataset_name = dataset_name
@@ -403,7 +402,6 @@ class AutoMLSMBO(object):
 
     def run_smbo(self):
 
-        print(f"SMBO: STARTED SMBO at {time.ctime()} ({time.time() - self.started_registered_time})")
         self.watcher.start_task('SMBO')
 
         # == first things first: load the datamanager
@@ -419,7 +417,6 @@ class AutoMLSMBO(object):
         # Initialize some SMAC dependencies
 
         metalearning_configurations = self.get_metalearning_suggestions()
-        print(f"SMBO: finished metalearning configs at {time.ctime()} ({time.time() - self.started_registered_time})")
 
         if self.resampling_strategy in ['partial-cv',
                                         'partial-cv-iterative-fit']:
@@ -440,13 +437,9 @@ class AutoMLSMBO(object):
                                     })
                     ])
 
-            #instances = [[json.dumps({'task_id': self.dataset_name,
-            #                          'repeats': repeat,
-            #                          'level': level,
-            #                          })]
-            #             for repeat in range(num_repeats) for level in self.stacking_levels]
         else:
-            instances = [[json.dumps({'task_id': self.dataset_name, 'level': self.stacking_levels[-1]})]]
+            instances = [[json.dumps(
+                {'task_id': self.dataset_name, 'level': self.stacking_levels[-1]})]]
 
         # TODO rebuild target algorithm to be it's own target algorithm
         # evaluator, which takes into account that a run can be killed prior
@@ -497,7 +490,6 @@ class AutoMLSMBO(object):
         )
         ta = ExecuteTaFuncWithQueue
 
-        #startup_time = self.watcher.wall_elapsed(self.dataset_name)
         startup_time = time.time() - self.start_time
         total_walltime_limit = self.total_walltime_limit - startup_time - 5
         scenario_dict = {
@@ -560,9 +552,7 @@ class AutoMLSMBO(object):
         if self.ensemble_callback is not None:
             smac.register_callback(self.ensemble_callback)
 
-        print(f"SMBO: Started running at SMBO OPTIMIZE at {time.ctime()} ({time.time() - self.started_registered_time})")
         smac.optimize()
-        print(f"SMBO: Finished running at SMBO OPTIMIZE at {time.ctime()} ({time.time() - self.started_registered_time})")
 
         self.runhistory = smac.solver.runhistory
         self.trajectory = smac.solver.intensifier.traj_logger.trajectory

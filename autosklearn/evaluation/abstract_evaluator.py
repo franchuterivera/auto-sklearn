@@ -277,6 +277,7 @@ class AbstractEvaluator(object):
 
         # Please mypy to prevent not defined attr
         self.model = self._get_model()
+        self.base_models_: List = []
 
     def _get_model(self) -> BaseEstimator:
         if not isinstance(self.configuration, Configuration):
