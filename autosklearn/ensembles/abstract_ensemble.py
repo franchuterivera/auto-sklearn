@@ -14,7 +14,7 @@ class AbstractEnsemble(object):
         self,
         base_models_predictions: np.ndarray,
         true_targets: np.ndarray,
-        model_identifiers: List[Tuple[int, int, float]],
+        model_identifiers: List[Tuple[int, int, int, float, int]],
     ) -> 'AbstractEnsemble':
         """Fit an ensemble given predictions of base models and targets.
 
@@ -70,7 +70,7 @@ class AbstractEnsemble(object):
         """
 
     @abstractmethod
-    def get_selected_model_identifiers(self) -> List[Tuple[int, int, float]]:
+    def get_selected_model_identifiers(self) -> List[Tuple[int, int, int, float, int]]:
         """Return identifiers of models in the ensemble.
 
         This includes models which have a weight of zero!

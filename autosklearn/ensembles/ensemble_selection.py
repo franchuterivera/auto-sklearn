@@ -42,7 +42,7 @@ class EnsembleSelection(AbstractEnsemble):
         self,
         predictions: List[np.ndarray],
         labels: np.ndarray,
-        identifiers: List[Tuple[int, int, float]],
+        identifiers: List[Tuple[int, int, int, float, int]],
     ) -> AbstractEnsemble:
         self.ensemble_size = int(self.ensemble_size)
         if self.ensemble_size < 1:
@@ -306,7 +306,7 @@ class EnsembleSelection(AbstractEnsemble):
 
         return output
 
-    def get_selected_model_identifiers(self) -> List[Tuple[int, int, float]]:
+    def get_selected_model_identifiers(self) -> List[Tuple[int, int, int, float, int]]:
         output = []
 
         for i, weight in enumerate(self.weights_):

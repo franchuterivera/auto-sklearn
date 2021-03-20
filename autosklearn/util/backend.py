@@ -316,26 +316,32 @@ class Backend(object):
     def get_runs_directory(self) -> str:
         return os.path.join(self.internals_directory, 'runs')
 
-    def get_numrun_directory(self, level: int, seed: int, num_run: int, budget: float, instance: int) -> str:
-        return os.path.join(self.internals_directory, 'runs', '%d_%d_%d_%s_%s' % (level, seed, num_run, budget, instance))
+    def get_numrun_directory(self, level: int, seed: int, num_run: int, budget: float,
+                             instance: int) -> str:
+        return os.path.join(self.internals_directory, 'runs', '%d_%d_%d_%s_%s' % (
+            level, seed, num_run, budget, instance))
 
-    def get_model_filename(self, level: int, seed: int, idx: int, budget: float, instance: int) -> str:
+    def get_model_filename(self, level: int, seed: int, idx: int, budget: float,
+                           instance: int) -> str:
         return '%s.%s.%s.%s.%s.model' % (level, seed, idx, budget, instance)
 
-    def get_cv_model_filename(self, level: int, seed: int, idx: int, budget: float, instance: int) -> str:
+    def get_cv_model_filename(self, level: int, seed: int, idx: int, budget: float,
+                              instance: int) -> str:
         return '%s.%s.%s.%s.%s.cv_model' % (level, seed, idx, budget, instance)
 
-    def get_metadata_filename(self, level: int, seed: int, idx: int, budget: float, instance: int) -> str:
+    def get_metadata_filename(self, level: int, seed: int, idx: int, budget: float,
+                              instance: int) -> str:
         return '%s.%s.%s.%s.%s.metadata' % (level, seed, idx, budget, instance)
 
     def list_all_models(self, level: int, seed: int) -> List[str]:
         runs_directory = self.get_runs_directory()
         model_files = glob.glob(
-            os.path.join(glob.escape(runs_directory), '%d_%d_*' % (level, seed), '%s.%s.*.*.model' % (level, seed))
+            os.path.join(glob.escape(runs_directory), '%d_%d_*' % (level, seed),
+                         '%s.%s.*.*.model' % (level, seed))
         )
         return model_files
 
-    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, float]]
+    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float, int]]
                                    ) -> Dict:
         models = dict()
 
@@ -360,7 +366,7 @@ class Backend(object):
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
 
-    def load_cv_models_by_identifiers(self, identifiers: List[Tuple[int, int, float]],
+    def load_cv_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float, int]],
                                       include_base_models: bool = False,
                                       ) -> Dict:
         models = dict()
@@ -373,7 +379,9 @@ class Backend(object):
                 for base_identifier in models[identifier].base_models_:
                     if base_identifier not in models and base_identifier not in identifiers:
                         level_, seed_, idx_, budget_, instance_ = base_identifier
-                        models[base_identifier] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                        models[
+                            base_identifier
+                        ] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
                             level_, seed_, idx_, budget_, instance_,
                         )
 
@@ -433,20 +441,18 @@ class Backend(object):
         runs_directory = self.get_runs_directory()
         identifier_to_prediction = {}
 
-        runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*'))]
-        runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
+        paths = [os.path.basename(path).split('_')
+                 for path in glob.glob(os.path.join(runs_directory, '*'))]
+        runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
+                for level, seed, num_run, budget, instance in paths]
 
-        #highest_instance = {}
-        #for level_, seed_, num_run_, budget_, instance_ in runs:
-        #    if num_run_ not in highest_instance or instance_ > highest_instance[num_run_]:
-        #        highest_instance[num_run_] = instance_
-
-        highest_instance = {}
+        highest_instance: Dict = {}
         max_instance = 0
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if level_ not in highest_instance:
                 highest_instance[level_] = {}
-            if num_run_ not in highest_instance[level_] or instance_ > highest_instance[level_][num_run_]:
+            if num_run_ not in highest_instance[level_] or (
+                    instance_ > highest_instance[level_][num_run_]):
                 highest_instance[level_][num_run_] = instance_
             # k > 1 means that ignore dummy prediction for higest instance
             if instance_ > max_instance and num_run_ > 1:
@@ -469,7 +475,11 @@ class Backend(object):
             elif instances is None:
                 # Only allow highest instance available
                 # Treat each level like a different config basically
-                if num_run_ in highest_instance[level_] and (instance_ not in [max_instance, max_instance - 1] or instance_ != highest_instance[level_][num_run_]):
+                if num_run_ in highest_instance[level_] and (
+                        instance_ not in [
+                            max_instance,
+                            max_instance - 1
+                        ] or instance_ != highest_instance[level_][num_run_]):
                     continue
             try:
                 prediction = self.load_prediction_by_level_seed_and_id_and_budget_and_instance(
@@ -477,12 +487,15 @@ class Backend(object):
                 )
                 identifier_to_prediction[(level_, seed_, num_run_, budget_, instance_)] = prediction
             except Exception as e:
-                self.logger.error(f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                if self.logger is not None:
+                    self.logger.error(
+                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
                 pass
         return identifier_to_prediction
 
     def save_numrun_to_dir(
-        self, level: int, seed: int, idx: int, budget: float, instance: int, model: Optional[Pipeline],
+        self, level: int, seed: int, idx: int, budget: float, instance: int,
+        model: Optional[Pipeline],
         cv_model: Optional[Pipeline], ensemble_predictions: Optional[np.ndarray],
         valid_predictions: Optional[np.ndarray], test_predictions: Optional[np.ndarray],
         run_metadata: Optional[Dict],
@@ -490,18 +503,21 @@ class Backend(object):
         runs_directory = self.get_runs_directory()
         tmpdir = tempfile.mkdtemp(dir=runs_directory)
         if model is not None:
-            file_path = os.path.join(tmpdir, self.get_model_filename(level, seed, idx, budget, instance))
+            file_path = os.path.join(
+                tmpdir, self.get_model_filename(level, seed, idx, budget, instance))
             with open(file_path, 'wb') as fh:
                 pickle.dump(model, fh, -1)
 
         if cv_model is not None:
-            file_path = os.path.join(tmpdir, self.get_cv_model_filename(level, seed, idx, budget, instance))
+            file_path = os.path.join(
+                tmpdir, self.get_cv_model_filename(level, seed, idx, budget, instance))
             with open(file_path, 'wb') as fh:
                 pickle.dump(cv_model, fh, -1)
 
         # Write run metadata for multiple purposes,
         # as we sadly do not have access YET to runhistory
-        file_path = os.path.join(tmpdir, self.get_metadata_filename(level, seed, idx, budget, instance))
+        file_path = os.path.join(tmpdir,
+                                 self.get_metadata_filename(level, seed, idx, budget, instance))
         with open(file_path, 'wb') as fh:
             pickle.dump(run_metadata, fh, -1)
 
@@ -578,7 +594,8 @@ class Backend(object):
                                 budget: float,
                                 instance: int,
                                 ) -> str:
-        return 'predictions_%s_%s_%s_%s_%s_%s.npy' % (subset, level, automl_seed, idx, budget, instance)
+        return 'predictions_%s_%s_%s_%s_%s_%s.npy' % (
+            subset, level, automl_seed, idx, budget, instance)
 
     def save_predictions_as_txt(self,
                                 predictions: np.ndarray,

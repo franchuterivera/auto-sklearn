@@ -136,7 +136,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.random_state = random_state
         self.logger_port = logger_port
         self.ensemble_folds = ensemble_folds
-        if self.ensemble_folds not in [None, 'highest_repeat_trusted', 'highest_repeat', 'highest_repeat_per_run']:
+        if self.ensemble_folds not in [None, 'highest_repeat_trusted']:
             raise NotImplementedError(self.ensemble_folds)
         self.pynisher_context = pynisher_context
 
@@ -384,7 +384,7 @@ class EnsembleBuilder(object):
     def __init__(
         self,
         backend: Backend,
-        max_stacking_level:int,
+        max_stacking_level: int,
         dataset_name: str,
         task_type: int,
         metric: Scorer,
@@ -819,7 +819,8 @@ class EnsembleBuilder(object):
         stored_files_for_run = os.listdir(
             self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance))
         stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance), file_name)
+            os.path.join(self.backend.get_numrun_directory(
+                _level, _seed, _num_run, _budget, _instance), file_name)
             for file_name in stored_files_for_run]
         this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
@@ -862,26 +863,21 @@ class EnsembleBuilder(object):
         # get the highest fold per num_run
         runs_directory = self.backend.get_runs_directory()
         # Added of if > 5 to ignore tmeporal runs not completely writen to disk
-        runs = [os.path.basename(path).split('_') for path in glob.glob(os.path.join(runs_directory, '*')) if len(os.path.basename(path).split('_')) >=5]
-        runs = [(int(l), int(s), int(n), float(b), int(i)) for l, s, n, b, i in runs]
+        runs = [os.path.basename(path).split('_') for path in glob.glob(
+            os.path.join(runs_directory, '*')) if len(os.path.basename(path).split('_')) >= 5]
+        runs = [(int(le), int(se), int(nu), float(bu), int(ins)) for le, se, nu, bu, ins in runs]
 
         highest_instance = {}
         max_instance = 0
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if level_ not in highest_instance:
                 highest_instance[level_] = {}
-            if num_run_ not in highest_instance[level_] or instance_ > highest_instance[level_][num_run_]:
+            if num_run_ not in highest_instance[level_] or (
+                    instance_ > highest_instance[level_][num_run_]):
                 highest_instance[level_][num_run_] = instance_
             # k > 1 means that ignore dummy prediction for higest instance
             if instance_ > max_instance and num_run_ > 1:
                 max_instance = instance_
-
-        for level in highest_instance.keys():
-            if len([v for k, v in highest_instance[level].items() if k > 1]) == 0:
-                if level == 1:
-                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))} {highest_instance}")
-                else:
-                    self.logger.warning(f"Failed to find data on level={level} {runs_directory} = {glob.glob(os.path.join(runs_directory, '*'))} {highest_instance}")
 
         # First sort files chronologically
         to_read = []
@@ -898,38 +894,41 @@ class EnsembleBuilder(object):
             if _num_run == 1:
                 # There should not be dummy predict for every level, just level 1
                 if _instance == highest_instance[1][_num_run]:
-                    to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
+                    to_read.append(
+                        [y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
                 else:
                     continue
 
-            if self.ensemble_folds is not None:
-                if self.ensemble_folds == 'highest_repeat' and _instance != max_instance:
-                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat {max_instance}")
+            if self.ensemble_folds is not None and self.ensemble_folds == 'highest_repeat_trusted':
+                if _instance != highest_instance[_level][_num_run]:
+                    # Only allow the highest instance seen for this config
                     continue
-                elif self.ensemble_folds == 'highest_repeat_trusted' and (_instance != highest_instance[_level][_num_run] or _instance not in [max_instance, max_instance-1]):
-                    # BUGFIX: Notice that trusted means that we need the instance to be in highest, or highest-1 BUT ALSO that is the biggest repeat per config
-                    #self.logger.debug(f"Skip {y_ens_fn} as only ensembling highest repeat trusted max_instance={max_instance}/{max_instance-1} _level={_level} _num_run={_num_run} _instance={_instance} highest_instance={highest_instance[_level][_num_run]}")
-                    continue
-                elif self.ensemble_folds == 'highest_repeat_per_run' and _instance != highest_instance[_level][_num_run]:
-                    #self.logger.debug(f"Skip {y_ens_fn} with as only ensembling highest repeat per run {highest_instance[_level][_num_run]}")
+
+                if _instance not in [max_instance, max_instance-1]:
+                    # Only the highest repetition should be stacked
                     continue
 
             to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
 
-        # We cannot use old predictions when new ones are available at a higher number of repetitions
-        if self.ensemble_folds is not None:
-            for y_ens_fn, value in self.read_scores.items():
+        # We cannot use old predictions when new ones are available
+        # at a higher number of repetitions
+        if self.ensemble_folds is not None and self.ensemble_folds == 'highest_repeat_trusted':
+            for y_ens_fn, value in self.read_losses.items():
                 if value['num_run'] == 1:
                     continue
-                if self.ensemble_folds == 'highest_repeat' and value['instance'] != max_instance and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
-                    self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
-                    self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
-                elif self.ensemble_folds == 'highest_repeat_trusted' and (value['instance'] not in [max_instance, max_instance-1] or value['instance'] != highest_instance[self.read_scores[y_ens_fn]["level"]][self.read_scores[y_ens_fn]["num_run"]]) and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
-                    self.logger.debug(f"Invalidate old result for {y_ens_fn} as {self.ensemble_folds}->{max_instance}")
-                    self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
-                elif self.ensemble_folds == 'highest_repeat_per_run' and value['instance'] != highest_instance[self.read_scores[y_ens_fn]["level"]][self.read_scores[y_ens_fn]["num_run"]] and self.read_scores[y_ens_fn]["ens_score"] != self.metric._worst_possible_result:
-                    self.logger.debug(f"Invalidate old result for {y_ens_fn}({self.read_scores[y_ens_fn]['ens_score']}->{self.metric._worst_possible_result}) as {self.ensemble_folds}->{highest_instance[self.read_scores[y_ens_fn]['level']][self.read_scores[y_ens_fn]['num_run']]}")
-                    self.read_scores[y_ens_fn]["ens_score"] = self.metric._worst_possible_result
+
+                # If the current instance is a trusted repetitions
+                # We can leave the current score
+                level = self.read_losses[y_ens_fn]["level"]
+                num_run = self.read_losses[y_ens_fn]["num_run"]
+                if value['instance'] in [max_instance, max_instance-1] and value[
+                        'instance'] == highest_instance[level][num_run]:
+                    continue
+
+                loss = self.read_losses[y_ens_fn]["ens_loss"]
+                if loss != np.inf:
+                    self.logger.debug(f"Invalidate old result for {y_ens_fn} as {max_instance}")
+                    self.read_losses[y_ens_fn]["ens_loss"] = np.inf
 
         n_read_files = 0
         # Now read file wrt to num_run
@@ -1020,8 +1019,6 @@ class EnsembleBuilder(object):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_losses.values()])
         )
-        # for k, v in self.read_scores.items():
-        #    self.logger.critical(f"{k}->\t{v}")
         return True
 
     def get_n_best_preds(self):
@@ -1244,8 +1241,9 @@ class EnsembleBuilder(object):
                     ),
                     'predictions_test_%d_%d_%d_%s_%d.npy*' % (
                         self.read_losses[k]["level"],
+                        self.read_losses[k]["seed"],
                         self.read_losses[k]["num_run"],
-                        self.read_losses[k]["budget"]
+                        self.read_losses[k]["budget"],
                         self.read_losses[k]["instance"],
                     )
                 )
@@ -1520,7 +1518,7 @@ class EnsembleBuilder(object):
             [
                 # NOTICE that we add level after numrun because
                 # the code relies on num_run to be in position 2
-                (k, v["ens_score"], v["num_run"], v["instance"], v["level"])
+                (k, v["ens_loss"], v["num_run"], v["instance"], v["level"])
                 for k, v in self.read_losses.items()
             ],
             # Sort by loss as priority 1 and then by num_run on a ascending order
@@ -1586,7 +1584,8 @@ class EnsembleBuilder(object):
             if self.ensemble_folds is not None and _num_run not in selected_num_runs:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance)
+            numrun_dir = self.backend.get_numrun_directory(
+                _level, _seed, _num_run, _budget, _instance)
             try:
                 os.rename(numrun_dir, numrun_dir + '.old')
                 shutil.rmtree(numrun_dir + '.old')
