@@ -442,7 +442,11 @@ class Backend(object):
         identifier_to_prediction = {}
 
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(runs_directory, '*'))]
+                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 # Temporal files might get in the way, we expect
+                 # level, seed, num_run, budget, instance in the name
+                 if len(os.path.basename(path).split('_')) == 5
+                 ]
         runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
                 for level, seed, num_run, budget, instance in paths]
 
