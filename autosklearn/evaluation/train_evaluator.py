@@ -1,3 +1,4 @@
+import traceback
 import logging
 import multiprocessing
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
@@ -246,27 +247,19 @@ class TrainEvaluator(AbstractEvaluator):
                 idxs = None
             else:
                 idxs = [self.num_run]
-            idx2predict = self.backend.load_model_predictions(
-                # Ensemble correspond to the OOF prediction that have previously
-                # been pre-sorted to match X_train indices
-                subset='ensemble',
-                # Do not yet use the current level!
-                levels=list(range(1, level)),
-                # When doing instances_selfasbase strategy, we do towers
-                idxs=idxs,
-            )
 
-            # We intensify across repetitions. That is level=2 numrun=2 isntance=0
-            # might have seen models A, B, C. By the time level=2 numrun=2 instance=1
-            # starts, there might be A, B, C, D. We cannot use D.
-            identifiers = [k for k in idx2predict.keys()]
-            if self.instance > 0:
-                reference_model = \
-                    self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                        level=self.level, seed=self.seed, idx=self.num_run,
-                        budget=self.budget, instance=0,)
-                identifiers = reference_model.base_models_
-            else:
+            if self.instance == 0:
+                idx2predict = self.backend.load_model_predictions(
+                    # Ensemble correspond to the OOF prediction that have previously
+                    # been pre-sorted to match X_train indices
+                    subset='ensemble',
+                    # Do not yet use the current level!
+                    levels=list(range(1, level)),
+                    # When doing instances_selfasbase strategy, we do towers
+                    idxs=idxs,
+                )
+                identifiers = [k for k in idx2predict.keys()]
+
                 # This is the first time we decide the models to stack
                 # we might want to limit the amount of models we read
                 stack_at_most = self.resampling_strategy_args.get('stack_at_most')
@@ -293,18 +286,48 @@ class TrainEvaluator(AbstractEvaluator):
                     identifiers = [idx_ for idx_ in identifiers
                                    if idx_ not in diversity][:total_remaining+1] + diversity
 
+                    # Get the memory back
+                    for to_delete_key in set(list(idx2predict.keys())) - set(identifiers):
+                        del idx2predict[to_delete_key]
+            else:
+                # We intensify across repetitions. That is level=2 numrun=2 isntance=0
+                # might have seen models A, B, C. By the time level=2 numrun=2 instance=1
+                # starts, there might be A, B, C, D. We cannot use D.
+                reference_model = \
+                    self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                        level=self.level, seed=self.seed, idx=self.num_run,
+                        budget=self.budget, instance=0,)
+                identifiers = reference_model.base_models_
+                idx2predict = {
+                    idx: self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='ensemble',
+                        level=idx[0],
+                        seed=idx[1],
+                        idx=idx[2],
+                        budget=idx[3],
+                        instance=idx[4],
+                    )
+                    for idx in identifiers
+                }
+
             self.base_models_ = identifiers
             self.X_train = np.concatenate(
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
-            # Notice how I use the same identifiers, in case a new config is there
-            idx2predict = self.backend.load_model_predictions(
-                # Ensemble correspond to the OOF prediction that have previously
-                # been pre-sorted to match X_train indices
-                subset='test',
-                levels=list(range(1, level + 1))
-            )
+
+            # Then load the test predictions for the given identifiers
+            idx2predict = {
+                idx: self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    subset='test',
+                    level=idx[0],
+                    seed=idx[1],
+                    idx=idx[2],
+                    budget=idx[3],
+                    instance=idx[4],
+                )
+                for idx in identifiers
+            }
             self.X_test = np.concatenate(
                 [self.X_test] + [idx2predict[k] for k in identifiers],
                 axis=1
@@ -823,7 +846,8 @@ class TrainEvaluator(AbstractEvaluator):
                     for i in range(len(old_voting_model.estimators_)):
                         self.models[i] = old_voting_model.estimators_[i]
                 except Exception as e:
-                    self.logger.error(f"Run into {e} while averaging for num_run={self.num_run}")
+                    self.logger.error(traceback.format_exc())
+                    self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
 
             # We do not train all folds :) -- because instances indicate what
             # repetition from the repeats*folds we use
