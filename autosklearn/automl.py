@@ -853,13 +853,7 @@ class AutoML(BaseEstimator):
             self._load_models()
             self._logger.info("Finished loading models...")
 
-        self._logger.info("Closing the dask infrastructure")
-        self._close_dask_client()
-        self._logger.info("Finished closing the dask infrastructure")
-
-        # Clean up the logger
-        self._logger.info("Starting to clean up the logger")
-        self._clean_logger()
+        self._fit_cleanup()
 
         return self
 
@@ -956,8 +950,6 @@ class AutoML(BaseEstimator):
         # Get the new num_run from the history
         if len(self.runhistory_.data) > 0:
             self.num_run = max([key.config_id for key in self.runhistory_.data.keys()])
-
-        self._fit_cleanup()
 
         return self
 

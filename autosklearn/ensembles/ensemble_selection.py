@@ -1,12 +1,12 @@
 import random
 from collections import Counter
-from typing import Any, Dict, List, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 
 from autosklearn.constants import TASK_TYPES
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
-from autosklearn.metrics import Scorer, calculate_loss
+from autosklearn.metrics import Scorer, calculate_loss, log_loss
 from autosklearn.pipeline.base import BasePipeline
 
 
@@ -19,6 +19,7 @@ class EnsembleSelection(AbstractEnsemble):
         random_state: np.random.RandomState,
         bagging: bool = False,
         mode: str = 'fast',
+        tie_breaker_metric: Optional[Scorer] = log_loss,
     ) -> None:
         self.ensemble_size = ensemble_size
         self.task_type = task_type
@@ -26,6 +27,7 @@ class EnsembleSelection(AbstractEnsemble):
         self.bagging = bagging
         self.mode = mode
         self.random_state = random_state
+        self.tie_breaker_metric = tie_breaker_metric
 
     def __getstate__(self) -> Dict[str, Any]:
         # Cannot serialize a metric if
@@ -100,10 +102,6 @@ class EnsembleSelection(AbstractEnsemble):
             dtype=np.float64,
         )
         for i in range(ensemble_size):
-            losses = np.zeros(
-                (len(predictions)),
-                dtype=np.float64,
-            )
             s = len(ensemble)
             if s > 0:
                 np.add(
@@ -111,38 +109,33 @@ class EnsembleSelection(AbstractEnsemble):
                     ensemble[-1],
                     out=weighted_ensemble_prediction,
                 )
-
-            # Memory-efficient averaging!
-            for j, pred in enumerate(predictions):
-                # fant_ensemble_prediction is the prediction of the current ensemble
-                # and should be ([predictions[selected_prev_iterations] + predictions[j])/(s+1)
-                # We overwrite the contents of fant_ensemble_prediction
-                # directly with weighted_ensemble_prediction + new_prediction and then scale for avg
-                np.add(
-                    weighted_ensemble_prediction,
-                    pred,
-                    out=fant_ensemble_prediction
-                )
-                np.multiply(
-                    fant_ensemble_prediction,
-                    (1. / float(s + 1)),
-                    out=fant_ensemble_prediction
-                )
-
-                # calculate_loss is versatile and can return a dict of losses
-                # when scoring_functions=None, we know it will be a float
-                losses[j] = cast(
-                    float,
-                    calculate_loss(
-                        solution=labels,
-                        prediction=fant_ensemble_prediction,
-                        task_type=self.task_type,
-                        metric=self.metric,
-                        scoring_functions=None
-                    )
-                )
+            losses = self.get_losses_per_prediction_candidate(
+                ensemble_length=s,
+                predictions=predictions,
+                labels=labels,
+                weighted_ensemble_prediction=weighted_ensemble_prediction,
+                fant_ensemble_prediction=fant_ensemble_prediction,
+                metric=self.metric,
+            )
 
             all_best = np.argwhere(losses == np.nanmin(losses)).flatten()
+            if (
+                len(all_best) > 1 and
+                self.tie_breaker_metric is not None and
+                self.metric != self.tie_breaker_metric
+            ):
+                losses_tie_break = self.get_losses_per_prediction_candidate(
+                    ensemble_length=s,
+                    predictions=predictions,
+                    labels=labels,
+                    weighted_ensemble_prediction=weighted_ensemble_prediction,
+                    fant_ensemble_prediction=fant_ensemble_prediction,
+                    metric=self.tie_breaker_metric,
+                    only_consider_indices=all_best,
+                )
+                all_best = np.argwhere(
+                    losses_tie_break == np.nanmin(losses_tie_break)
+                ).flatten()
             best = self.random_state.choice(all_best)
             ensemble.append(predictions[best])
             trajectory.append(losses[best])
@@ -159,6 +152,83 @@ class EnsembleSelection(AbstractEnsemble):
         self.indices_ = order
         self.trajectory_ = trajectory
         self.train_loss_ = trajectory[-1]
+
+    def get_losses_per_prediction_candidate(
+        self,
+        ensemble_length: int,
+        predictions: List[np.ndarray],
+        labels: np.ndarray,
+        weighted_ensemble_prediction: np.ndarray,
+        fant_ensemble_prediction: np.ndarray,
+        metric: Scorer,
+        only_consider_indices: Optional[List[int]] = None,
+    ):
+        """
+        Calculates the loss incurred when adding a candidate j to
+        the existing ensemble pool. The ensemble contains s members
+        whose current prediction resides in weighted_ensemble_prediction.
+
+        The next candidate to be added to the ensemble will be decided
+        based on the minimum loss returned by this method.
+
+        Parameters
+        ----------
+        ensemble_length: int,
+        predictions: List[np.ndarray],
+        labels: np.ndarray,
+        weighted_ensemble_prediction: np.ndarray,
+        fant_ensemble_prediction: np.ndarray,
+            We add a pointer to a temporary array to perform average calculation
+            instead of creating it internally, as for big dataset it is expensive
+            to allocate memory on each iteration of the greedy ensemble
+        metric: Scorer,
+        only_consider_indices: Optional[List[int]] = None,
+
+        Returns
+        -------
+        loss: np.ndarray
+            An array with a loss for each of the j predictions. This loss
+            correspond to the new loss of the ensemble if this new prediction
+            was added.
+        """
+        losses = np.ones(
+            (len(predictions)),
+            dtype=np.float64,
+        ) * metric._worst_possible_result
+
+        # Memory-efficient averaging!
+        for j, pred in enumerate(predictions):
+            if only_consider_indices is not None and j not in only_consider_indices:
+                continue
+
+            # fant_ensemble_prediction is the prediction of the current ensemble
+            # and should be ([predictions[selected_prev_iterations] + predictions[j])/(s+1)
+            # We overwrite the contents of fant_ensemble_prediction
+            # directly with weighted_ensemble_prediction + new_prediction and then scale for avg
+            np.add(
+                weighted_ensemble_prediction,
+                pred,
+                out=fant_ensemble_prediction
+            )
+            np.multiply(
+                fant_ensemble_prediction,
+                (1. / float(ensemble_length + 1)),
+                out=fant_ensemble_prediction
+            )
+
+            # calculate_loss is versatile and can return a dict of losses
+            # when scoring_functions=None, we know it will be a float
+            losses[j] = cast(
+                float,
+                calculate_loss(
+                    solution=labels,
+                    prediction=fant_ensemble_prediction,
+                    task_type=self.task_type,
+                    metric=metric,
+                    scoring_functions=None
+                )
+            )
+        return losses
 
     def _slow(
         self,
