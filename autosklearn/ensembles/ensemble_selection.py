@@ -162,7 +162,7 @@ class EnsembleSelection(AbstractEnsemble):
         fant_ensemble_prediction: np.ndarray,
         metric: Scorer,
         only_consider_indices: Optional[List[int]] = None,
-    ):
+    ) -> np.ndarray:
         """
         Calculates the loss incurred when adding a candidate j to
         the existing ensemble pool. The ensemble contains s members

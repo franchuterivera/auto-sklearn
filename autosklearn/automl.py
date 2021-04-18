@@ -732,7 +732,7 @@ class AutoML(BaseEstimator):
             # In the case of intensifier CV, we need a dummy prediction per repetition
             num_repeats = self._resampling_strategy_arguments['repeats']
             instances = [json.dumps({'task_id': self._dataset_name,
-                                      'repeats': repeat})
+                                     'repeats': repeat})
                          for repeat in range(num_repeats)]
             for instance in instances:
                 self._do_dummy_prediction(datamanager, num_run=1, instance=instance)
@@ -816,9 +816,9 @@ class AutoML(BaseEstimator):
             extra_overhead = 0
             for level in range(1, self._max_stacking_level + 1):
                 start_time = self._stopwatch.wall_elapsed(self._dataset_name)
-                num_run = self.run_smac(level,
-                                        time_left_for_smac - extra_overhead,
-                                        num_run, proc_ensemble, initial_configurations)
+                self.run_smac(level,
+                              time_left_for_smac - extra_overhead,
+                              proc_ensemble, initial_configurations)
                 end_time = self._stopwatch.wall_elapsed(self._dataset_name)
                 extra_overhead = end_time - (start_time + time_left_for_smac)
         else:

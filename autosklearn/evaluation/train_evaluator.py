@@ -81,6 +81,12 @@ baseCrossValidator_defaults: Dict[str, Dict[str, Optional[Union[int, float, str]
     }
 
 
+class MedianPruneException(Exception):
+    """Forces stop of a run if the performance of the first
+    fold is worst than the median of the successful runs"""
+    pass
+
+
 def _get_y_array(y: np.ndarray, task_type: int) -> np.ndarray:
     if task_type in CLASSIFICATION_TASKS and task_type != \
             MULTILABEL_CLASSIFICATION:
@@ -680,6 +686,15 @@ class TrainEvaluator(AbstractEvaluator):
                 # the average.
                 opt_fold_weights.append(len(test_split))
 
+                if training_folds is not None and i == 0:
+                    # We are on the first fold, and we want to quickly kill runs
+                    # that are bad, so we do not waste precious training time specially
+                    # on big datasets
+                    self.end_train_if_worst_than_median(
+                        optimization_loss if isinstance(optimization_loss, float)
+                        else optimization_loss[self.metric.name]
+                    )
+
             # Any prediction/GT saved to disk most be sorted to be able to compare predictions
             # in ensemble selection
             sort_indices = np.argsort(opt_indices)
@@ -863,7 +878,27 @@ class TrainEvaluator(AbstractEvaluator):
                 file_output=True,
                 final_call=True,
                 status=status,
+                opt_losses=opt_losses,
             )
+
+    def end_train_if_worst_than_median(self, optimization_loss: float) -> None:
+        # Get all the fold0 repeat0 losses
+        older_runs_opt_losses = [
+            losses[0] for losses in self.backend.load_opt_losses(
+                instances=[0], levels=[1]
+            )
+        ]
+
+        min_prune_members = cast(int, self.resampling_strategy_args.get('min_prune_members', 10))
+        # Need at least min_prune_members to terminate with confidence
+        if len(older_runs_opt_losses) < min_prune_members:
+            return
+
+        # Only take up to 2 * min prune members to calculate the median
+        older_runs_opt_losses = sorted(older_runs_opt_losses)[:min_prune_members * 2]
+
+        if optimization_loss > np.median(older_runs_opt_losses):
+            raise MedianPruneException(f"{optimization_loss} > {np.median(older_runs_opt_losses)}")
 
     def partial_fit_predict_and_loss(self, fold: int, iterative: bool = False) -> None:
         """Fit, predict and compute the loss for eval_partial_cv (both iterative and normal)"""

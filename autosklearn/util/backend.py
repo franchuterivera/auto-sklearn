@@ -430,6 +430,51 @@ class Backend(object):
         with open(file_path, 'rb') as fh:
             return pickle.load(fh)
 
+    def load_opt_losses(self,
+                        levels: Optional[List[int]] = None,
+                        seeds: Optional[List[int]] = None,
+                        idxs: Optional[List[int]] = None,
+                        budgets: Optional[List[float]] = None,
+                        instances: Optional[List[int]] = None,
+                        ) -> List[List[float]]:
+        runs_directory = self.get_runs_directory()
+        paths = [os.path.basename(path).split('_')
+                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 # Temporal files might get in the way, we expect
+                 # level, seed, num_run, budget, instance in the name
+                 if len(os.path.basename(path).split('_')) == 5
+                 ]
+        runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
+                for level, seed, num_run, budget, instance in paths]
+
+        opt_losses = []
+        for level_, seed_, num_run_, budget_, instance_ in runs:
+            if num_run_ <= 1:
+                # No dummy predictions
+                continue
+            if levels is not None and level_ not in levels:
+                continue
+            if seeds is not None and seed_ not in seeds:
+                continue
+            if idxs is not None and num_run_ not in idxs:
+                continue
+            if budgets is not None and budget_ not in budgets:
+                continue
+            if instances is not None and instance_ not in instances:
+                continue
+            try:
+                opt_losses.append(
+                    self.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                        level_, seed_, num_run_, budget_, instance_
+                    )['opt_losses']
+                )
+            except Exception as e:
+                if self.logger is not None:
+                    self.logger.error(
+                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                pass
+        return opt_losses
+
     def load_model_predictions(self,
                                subset: str,
                                levels: Optional[List[int]] = None,
