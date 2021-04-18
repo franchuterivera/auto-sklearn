@@ -691,8 +691,8 @@ class TrainEvaluator(AbstractEvaluator):
                     # that are bad, so we do not waste precious training time specially
                     # on big datasets
                     self.end_train_if_worst_than_median(
-                        optimization_loss if isinstance(optimization_loss, float)
-                        else optimization_loss[self.metric.name]
+                        optimization_loss[self.metric.name]
+                        if isinstance(optimization_loss, dict) else optimization_loss
                     )
 
             # Any prediction/GT saved to disk most be sorted to be able to compare predictions
