@@ -99,11 +99,19 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, 
                     prediction = model.predict_proba(X_)
 
                 # Check that all probability values lie between 0 and 1.
-                assert(
-                    (prediction >= 0).all() and (prediction <= 1).all()
-                ), "For {}, prediction probability not within [0, 1]!".format(
-                    model
-                )
+                if not ((prediction >= 0).all() and (prediction <= 1).all()):
+                    estimators = 'N/A'
+                    if hasattr(model, 'estimators'):
+                        estimators = model.estimators
+                    elif hasattr(model, 'steps'):
+                        estimators = model.steps
+
+                    raise ValueError(
+                        "For {}/{}, prediction probability not within [0, 1]!".format(
+                            model,
+                            estimators
+                        )
+                    )
         except Exception as e:
             logger.error(f"Failure on {identifier}")
             raise e
