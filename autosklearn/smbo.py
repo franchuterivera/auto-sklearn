@@ -434,6 +434,8 @@ class AutoMLSMBO(object):
                                     'level': level,
                                     })
                     ])
+                    if repeat == 0 and level == 1:
+                        break
 
         else:
             instances = [[json.dumps(
