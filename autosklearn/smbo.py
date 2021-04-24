@@ -9,6 +9,7 @@ import typing
 import warnings
 
 import dask.distributed
+import numpy as np
 import pynisher
 
 from smac.facade.smac_ac_facade import SMAC4AC
@@ -424,7 +425,7 @@ class AutoMLSMBO(object):
                          for fold_number in range(num_folds)]
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
-
+            num_points = np.shape(self.datamanager.data['X_train'])[0]
             instances = []
             for level in self.stacking_levels:
                 for repeat in range(num_repeats):
@@ -434,7 +435,10 @@ class AutoMLSMBO(object):
                                     'level': level,
                                     })
                     ])
-                    if repeat == 0 and level == 1:
+                    if level == 1 and not self.enough_time_to_do_repeats(num_points):
+                        # If not enough time to do repetitions at level
+                        # zero, it is more useful to stack models than
+                        # to do a few repetitions
                         break
 
         else:
@@ -677,3 +681,37 @@ class AutoMLSMBO(object):
         if meta_features is None:
             metalearning_configurations = []
         return metalearning_configurations
+
+    def enough_time_to_do_repeats(self, num_points: int):
+        """
+        Implements a heuristic to identify if with the allocated
+        time limit in seconds, we can fit a round of repetitions before
+        moving to the next level.
+
+        It is more promising to to stacking than just a few repetitions.
+        Parameters
+        ----------
+
+        Returns
+        -------
+        (bool):
+            True if there is enough time to do repetitions at a given level
+        """
+        num_repeats = self.resampling_strategy_args['repeats']
+        # Todo: Unhardcode this, and take it from the intensifier arguments
+        max_ensemble_memebers = 10
+        if isinstance(num_repeats, list):
+            required_runs = len(typing.cast(list, num_repeats)
+                                ) * max_ensemble_memebers * len(self.stacking_levels)
+        else:
+            required_runs = typing.cast(int, num_repeats
+                                        ) * max_ensemble_memebers * len(self.stacking_levels)
+        self.logger.critical(
+            "{} ({} / (0.01 * {})) > {}".format(
+                (self.total_walltime_limit * self.n_jobs / (0.01 * num_points)) > required_runs,
+                self.total_walltime_limit * self.n_jobs,
+                num_points,
+                required_runs,
+            )
+        )
+        return (self.total_walltime_limit * self.n_jobs / (0.01 * num_points)) > required_runs
