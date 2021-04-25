@@ -9,7 +9,6 @@ import typing
 import warnings
 
 import dask.distributed
-import numpy as np
 import pynisher
 
 from smac.facade.smac_ac_facade import SMAC4AC
@@ -425,22 +424,26 @@ class AutoMLSMBO(object):
                          for fold_number in range(num_folds)]
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
-            num_points = np.shape(self.datamanager.data['X_train'])[0]
             instances = []
-            for level in self.stacking_levels:
-                for repeat in range(num_repeats):
+
+            # For interleaved we change the order so that we have
+            # repeat1 level1, repeat1 level2, and so on...
+            # Reminder: For the ensemble intensification, the instances
+            # will see an heterogeneous non-progressive schedule so that
+            # before they say level1, repeat1, level1, repeat2..
+            # You would expect the higher the instance the better the level
+            # this is no longer the case, yet all configurations see this
+            # and you could argue that you get an early performance indicator
+            # of how good a higher level will be. You also waste resources
+            # as higher repeats won't be available when you stack.
+            for repeat in range(num_repeats):
+                for level in self.stacking_levels:
                     instances.append([
                         json.dumps({'task_id': self.dataset_name,
                                     'repeats': repeat,
                                     'level': level,
                                     })
                     ])
-                    if level == 1 and not self.enough_time_to_do_repeats(num_points):
-                        # If not enough time to do repetitions at level
-                        # zero, it is more useful to stack models than
-                        # to do a few repetitions
-                        break
-
         else:
             instances = [[json.dumps(
                 {'task_id': self.dataset_name, 'level': self.stacking_levels[-1]})]]

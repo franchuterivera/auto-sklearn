@@ -254,7 +254,8 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 idxs = [self.num_run]
 
-            if self.instance == 0:
+            if self.instance == 0 or self.resampling_strategy_args.get('restart_interleaved',
+                                                                       False):
                 idx2predict = self.backend.load_model_predictions(
                     # Ensemble correspond to the OOF prediction that have previously
                     # been pre-sorted to match X_train indices
@@ -787,7 +788,16 @@ class TrainEvaluator(AbstractEvaluator):
                     status = StatusType.SUCCESS
 
             # We do averaging if requested AND if at least 2 repetition have passed
-            if self.resampling_strategy == 'intensifier-cv' and self.instance > 0:
+            if (
+                self.resampling_strategy == 'intensifier-cv' and
+                self.instance > 0 and
+
+                # When doing restarted interleaved, we must train from scratch
+                # So when doing interleaved instances, we can stick to the repeats we saw on
+                # repeat 0 and prevent wasting configurations. When doing restart
+                # true we train from stach, from repeat 0 to repeat N, so no need for below
+                (not self.resampling_strategy_args.get('restart_interleaved', False))
+            ):
                 # Update the loss to reflect and average. Because we always have the same
                 # number of folds, we can do an average of average
                 try:
@@ -868,6 +878,16 @@ class TrainEvaluator(AbstractEvaluator):
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
 
+            self.logger.debug(
+                "For num_run={} level={} instance={} used folds={} had loss={} base={}".format(
+                    self.num_run,
+                    self.level,
+                    self.instance,
+                    training_folds,
+                    opt_loss,
+                    self.base_models_
+                )
+            )
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -1691,7 +1711,13 @@ def eval_intensifier_cv(
     folds = resampling_strategy_args.get('folds', 5)
     assert folds is not None
     if isinstance(folds, list):
-        start = sum([folds[i-1] for i in range(1, repeat + 1)])
+        if level > 1 and resampling_strategy_args.get('restart_interleaved',
+                                                      False):
+            # If interleaved restart, every repetition starts from
+            # scratch
+            start = 0
+        else:
+            start = sum([folds[i-1] for i in range(1, repeat + 1)])
         training_folds = list(range(start, folds[repeat] + start))
     else:
         training_folds = list(range(
