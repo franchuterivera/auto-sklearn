@@ -321,6 +321,11 @@ class TrainEvaluator(AbstractEvaluator):
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
+            if 'data_preprocessing:categorical_features' in self._init_params:
+                dimensionality = np.shape(idx2predict[self.base_models_[0]])[1]
+                for identifier in self.base_models_:
+                    for i in range(dimensionality):
+                        self._init_params['data_preprocessing:categorical_features'].append(False)
 
             # Then load the test predictions for the given identifiers
             idx2predict = {
@@ -686,7 +691,7 @@ class TrainEvaluator(AbstractEvaluator):
                 # the average.
                 opt_fold_weights.append(len(test_split))
 
-                if training_folds is not None and i == 0:
+                if training_folds is not None and i == 0 and self.instance == 0:
                     # We are on the first fold, and we want to quickly kill runs
                     # that are bad, so we do not waste precious training time specially
                     # on big datasets
