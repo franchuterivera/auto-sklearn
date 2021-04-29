@@ -679,4 +679,3 @@ class AutoMLSMBO(object):
         if meta_features is None:
             metalearning_configurations = []
         return metalearning_configurations
-

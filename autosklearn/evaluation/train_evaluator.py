@@ -316,6 +316,11 @@ class TrainEvaluator(AbstractEvaluator):
                 [self.X_train] + [idx2predict[k] for k in identifiers],
                 axis=1
             )
+            if 'data_preprocessing:categorical_features' in self._init_params:
+                dimensionality = np.shape(idx2predict[self.base_models_[0]])[1]
+                for identifier in self.base_models_:
+                    for i in range(dimensionality):
+                        self._init_params['data_preprocessing:categorical_features'].append(False)
 
             # Then load the test predictions for the given identifiers
             idx2predict = {
@@ -769,10 +774,18 @@ class TrainEvaluator(AbstractEvaluator):
                 indices = [np.concatenate(
                     [np.argsort(split) + i * split.shape[0] for i, split in enumerate(
                         np.split(Y_optimization_indices, repeats))])]
-                self.Y_optimization = np.mean(np.split(self.Y_optimization[indices],
-                                                       repeats), axis=0)
-                Y_optimization_pred = np.mean(np.split(Y_optimization_pred[indices],
-                                                       repeats), axis=0)
+                self.Y_optimization = np.mean(
+                    np.split(
+                        self.Y_optimization[indices],  # type: ignore[call-overload]
+                        repeats
+                    ), axis=0
+                )
+                Y_optimization_pred = np.mean(
+                    np.split(
+                        Y_optimization_pred[indices],  # type: ignore[call-overload]
+                        repeats
+                    ), axis=0
+                )
                 if self.X_test is not None:
                     # Nothing to do for the test prediction. What is being done
                     # here is an average of all
@@ -1278,7 +1291,6 @@ class TrainEvaluator(AbstractEvaluator):
         y = D.data['Y_train']
         shuffle = self.resampling_strategy_args.get('shuffle', True)
         repeats = self.resampling_strategy_args.get('repeats', None)
-        fix_repetitions = self.resampling_strategy_args.get('fix_repetitions', False)
         train_size = 0.67
         if self.resampling_strategy_args:
             train_size_from_user = self.resampling_strategy_args.get('train_size')
