@@ -501,8 +501,9 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
 
         autosklearn.evaluation.util.empty_queue(queue)
         self.logger.info(
-            "Finished evaluating configuration {} with status {}".format(
+            "Finished evaluating configuration c:{}/i:{} with status {}".format(
                 config_id,
+                instance,
                 status
             )
         )

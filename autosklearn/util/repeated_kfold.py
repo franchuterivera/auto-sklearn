@@ -68,17 +68,15 @@ class _RepeatedMultiSplits(metaclass=ABCMeta):
         test : ndarray
             The testing set indices for that split.
         """
-        n_repeats = self.n_repeats
         rng = check_random_state(self.random_state)
 
-        for idx in range(n_repeats):
-            for this_split in self.n_splits:
-                this_cvargs = copy.deepcopy(self.cvargs)
-                this_cvargs['n_splits'] = this_split
-                cv = self.cv(random_state=rng, shuffle=True,
-                             **this_cvargs)
-                for train_index, test_index in cv.split(X, y, groups):
-                    yield train_index, test_index
+        for this_split in self.n_splits:
+            this_cvargs = copy.deepcopy(self.cvargs)
+            this_cvargs['n_splits'] = this_split
+            cv = self.cv(random_state=rng, shuffle=True,
+                         **this_cvargs)
+            for train_index, test_index in cv.split(X, y, groups):
+                yield train_index, test_index
 
     def get_n_splits(self, X: Optional[np.ndarray] = None,
                      y: Optional[np.ndarray] = None,
@@ -102,13 +100,12 @@ class _RepeatedMultiSplits(metaclass=ABCMeta):
         """
         cv_n_splits = []
         rng = check_random_state(self.random_state)
-        for idx in range(self.n_repeats):
-            for this_split in self.n_splits:
-                this_cvargs = copy.deepcopy(self.cvargs)
-                this_cvargs['n_splits'] = this_split
-                cv = self.cv(random_state=rng, shuffle=True,
-                             **this_cvargs)
-                cv_n_splits.append(cv.get_n_splits(X, y, groups))
+        for this_split in self.n_splits:
+            this_cvargs = copy.deepcopy(self.cvargs)
+            this_cvargs['n_splits'] = this_split
+            cv = self.cv(random_state=rng, shuffle=True,
+                         **this_cvargs)
+            cv_n_splits.append(cv.get_n_splits(X, y, groups))
         return sum(cv_n_splits)
 
 

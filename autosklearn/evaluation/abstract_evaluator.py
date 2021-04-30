@@ -283,7 +283,7 @@ class AbstractEvaluator(object):
 
         # Please mypy to prevent not defined attr
         self.model = self._get_model()
-        self.base_models_: List = []
+        self.base_models_: List[Tuple[int, int, int, float, Tuple]] = []
 
     def _get_model(self) -> BaseEstimator:
         if not isinstance(self.configuration, Configuration):
@@ -351,6 +351,7 @@ class AbstractEvaluator(object):
         file_output: bool,
         final_call: bool,
         status: StatusType,
+        opt_losses: Optional[List[float]] = None,
     ) -> Tuple[float, Union[float, Dict[str, float]], int,
                Dict[str, Union[str, int, float, Dict, List, Tuple]]]:
         """This function does everything necessary after the fitting is done:
@@ -371,6 +372,7 @@ class AbstractEvaluator(object):
             'duration': self.duration,
             'status': status,
             'modeltype': modeltype,
+            'opt_losses': opt_losses,
         }
 
         if file_output:

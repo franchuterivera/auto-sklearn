@@ -81,6 +81,12 @@ baseCrossValidator_defaults: Dict[str, Dict[str, Optional[Union[int, float, str]
     }
 
 
+class MedianPruneException(Exception):
+    """Forces stop of a run if the performance of the first
+    fold is worst than the median of the successful runs"""
+    pass
+
+
 def _get_y_array(y: np.ndarray, task_type: int) -> np.ndarray:
     if task_type in CLASSIFICATION_TASKS and task_type != \
             MULTILABEL_CLASSIFICATION:
@@ -225,7 +231,6 @@ class TrainEvaluator(AbstractEvaluator):
             budget_type=budget_type,
             instance=instance,
         )
-
         self.resampling_strategy = resampling_strategy
         if resampling_strategy_args is None:
             self.resampling_strategy_args = {}
@@ -239,7 +244,6 @@ class TrainEvaluator(AbstractEvaluator):
         self.Y_train = self.datamanager.data['Y_train']
         self.Y_optimization: Optional[Union[List, np.ndarray]] = None
 
-        self.base_models_: List = []
         if self.level > 1:
             # For now I only want to use the higesht budget available
             assert resampling_strategy == 'intensifier-cv'
@@ -248,8 +252,11 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 idxs = [self.num_run]
 
-            fix_repetitions = self.resampling_strategy_args.get('fix_repetitions', False)
-            if self.instance == 0 or fix_repetitions:
+            train_all_repeat_together = self.resampling_strategy_args.get(
+                'train_all_repeat_together', False)
+            repeats_as_individual_models = self.resampling_strategy_args.get(
+                'repeats_as_individual_models', True)
+            if self.instance == 0 or train_all_repeat_together:
                 idx2predict = self.backend.load_model_predictions(
                     # Ensemble correspond to the OOF prediction that have previously
                     # been pre-sorted to match X_train indices
@@ -258,6 +265,13 @@ class TrainEvaluator(AbstractEvaluator):
                     levels=list(range(1, level)),
                     # When doing instances_selfasbase strategy, we do towers
                     idxs=idxs,
+                    # This means whether we only load the last repetition available
+                    # or if we should load all repetitions available and just average
+                    # if repeats_as_individual_models==True backend will do the average
+                    # for us, repeats_as_individual_models==False means that during
+                    # train evaluator, the predictions are progressively averaged
+                    repeats_as_individual_models=repeats_as_individual_models,
+                    train_all_repeat_together=train_all_repeat_together,
                 )
                 identifiers = [k for k in idx2predict.keys()]
 
@@ -265,16 +279,32 @@ class TrainEvaluator(AbstractEvaluator):
                 # we might want to limit the amount of models we read
                 stack_at_most = self.resampling_strategy_args.get('stack_at_most')
                 if stack_at_most is not None and len(identifiers) > int(stack_at_most):
-                    losses = [
-                        self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
-                            level=level_, seed=seed_, idx=num_run_,
-                            budget=budget_, instance=instance_,
-                        )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers]
                     modeltypes = [
                         self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                             level=level_, seed=seed_, idx=num_run_, budget=budget_,
-                            instance=instance_,)['modeltype']
-                        for level_, seed_, num_run_, budget_, instance_ in identifiers]
+                            # We can just read instance=0 even on a multiple instance
+                            # identifier as the model type is going to be the same
+                            instance=instances_[0])['modeltype']
+                        for level_, seed_, num_run_, budget_, instances_ in identifiers]
+
+                    # Here is one of the justifiers for repeats_as_individual_models==False
+                    # If all repetitions are treated as individual models, then the only
+                    # way to know the real performance estimate is to recompute the predictions
+                    # of all available repetitions. We do so here, because it is imperative to
+                    # stack the best performing models!
+                    if not repeats_as_individual_models:
+                        losses = [
+                            self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                                level=level_, seed=seed_, idx=num_run_,
+                                budget=budget_, instance=instance_[0],
+                            )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers
+                        ]
+                    else:
+                        y_true_ensemble = self.backend.load_targets_ensemble()
+                        losses = [self._loss(y_true_ensemble, idx2predict[identifier])
+                                  for identifier in identifiers]
+                        del y_true_ensemble
+
                     identifiers = [idx_ for _, idx_ in sorted(zip(losses, identifiers))]
                     modeltypes = [idx_ for _, idx_ in sorted(zip(losses, modeltypes))]
                     index_first_ocurrence = [modeltypes.index(x) for x in set(modeltypes)]
@@ -297,16 +327,16 @@ class TrainEvaluator(AbstractEvaluator):
                 reference_model = \
                     self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
                         level=self.level, seed=self.seed, idx=self.num_run,
+                        # Notice the hardcoded instance 0. We need to wait for
+                        # level=2 instance=0 to be complete before going to instance=1
+                        # This is a design requirement because all level2 repetitions have
+                        # to see the same base models
                         budget=self.budget, instance=0,)
                 identifiers = reference_model.base_models_
                 idx2predict = {
-                    idx: self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    idx: self.backend.get_averaged_instance_predictions(
+                        identifier=idx,
                         subset='ensemble',
-                        level=idx[0],
-                        seed=idx[1],
-                        idx=idx[2],
-                        budget=idx[3],
-                        instance=idx[4],
                     )
                     for idx in identifiers
                 }
@@ -324,13 +354,9 @@ class TrainEvaluator(AbstractEvaluator):
 
             # Then load the test predictions for the given identifiers
             idx2predict = {
-                idx: self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                idx: self.backend.get_averaged_instance_predictions(
+                    identifier=idx,
                     subset='test',
-                    level=idx[0],
-                    seed=idx[1],
-                    idx=idx[2],
-                    budget=idx[3],
-                    instance=idx[4],
                 )
                 for idx in identifiers
             }
@@ -610,6 +636,8 @@ class TrainEvaluator(AbstractEvaluator):
             # TODO: mention that no additional run info is possible in this
             # case! -> maybe remove full CV from the train evaluator anyway and
             # make the user implement this!
+            enable_median_rule_prunning = self.resampling_strategy_args.get(
+                'enable_median_rule_prunning', True)
             for i, (train_split, test_split) in enumerate(self.splitter.split(
                     self.X_train, y,
                     groups=self.resampling_strategy_args.get('groups')
@@ -688,9 +716,19 @@ class TrainEvaluator(AbstractEvaluator):
                 # the average.
                 opt_fold_weights.append(len(test_split))
 
-            # Any prediction/GT saved to disk most be sorted to be able to compare predictions
-            # in ensemble selection
-            sort_indices = np.argsort(opt_indices)
+                if (
+                    training_folds is not None and
+                    i == 0 and
+                    self.instance == 0 and
+                    enable_median_rule_prunning
+                ):
+                    # We are on the first fold, and we want to quickly kill runs
+                    # that are bad, so we do not waste precious training time specially
+                    # on big datasets
+                    self.end_train_if_worst_than_median(
+                        optimization_loss[self.metric.name]
+                        if isinstance(optimization_loss, dict) else optimization_loss
+                    )
 
             # Compute weights of each fold based on the number of samples in each
             # fold.
@@ -744,8 +782,11 @@ class TrainEvaluator(AbstractEvaluator):
                 if len(np.shape(Y_test_pred)) == 3:
                     Y_test_pred = np.nanmean(Y_test_pred, axis=0)
 
-            fix_repetitions = self.resampling_strategy_args.get('fix_repetitions', False)
-            if fix_repetitions:
+            train_all_repeat_together = self.resampling_strategy_args.get(
+                'train_all_repeat_together', False)
+            repeats_as_individual_models = self.resampling_strategy_args.get(
+                'repeats_as_individual_models', True)
+            if train_all_repeat_together:
                 Y_optimization_indices = np.concatenate(
                     [Y_optimization_indices[i] for i in range(self.num_cv_folds)
                      if Y_optimization_indices[i] is not None])
@@ -792,6 +833,10 @@ class TrainEvaluator(AbstractEvaluator):
                     # the k folds of all repetitions
                     pass
             else:
+                # Any prediction/GT saved to disk most be sorted to be able to compare predictions
+                # in ensemble selection
+                sort_indices = np.argsort(opt_indices)
+
                 # we do not have a fixed repetition number, but repetitions
                 # are split among different instances
                 self.Y_optimization = Y_targets[sort_indices]
@@ -830,8 +875,21 @@ class TrainEvaluator(AbstractEvaluator):
                     status = StatusType.SUCCESS
 
             # We do averaging if requested AND if at least 2 repetition have passed
-            if self.resampling_strategy == 'intensifier-cv' and self.instance > 0 and (
-                not fix_repetitions
+            if (
+                # This is only required on intensifier-cv
+                self.resampling_strategy == 'intensifier-cv' and
+
+                # We need to do average of the previous repetitions only if there
+                # are previous repetitions
+                self.instance > 0 and
+
+                # train_all_repeat_together means that all repetitions happen
+                # in a single fit() call, so no need to average previous repetitions
+                not train_all_repeat_together and
+
+                # And if we treat models as individual models, then we just output
+                # the fitter cv-split as it is. No need to average
+                not repeats_as_individual_models
             ):
                 # Update the loss to reflect and average. Because we always have the same
                 # number of folds, we can do an average of average
@@ -913,6 +971,7 @@ class TrainEvaluator(AbstractEvaluator):
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
 
+            self.logger.critical(f"FINISHED num_run={self.num_run} instance={self.instance} level={self.level} training_folds={training_folds} with loss={opt_loss} train={np.shape(self.X_train)} and base_models={self.base_models_}")
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -923,7 +982,27 @@ class TrainEvaluator(AbstractEvaluator):
                 file_output=True,
                 final_call=True,
                 status=status,
+                opt_losses=opt_losses,
             )
+
+    def end_train_if_worst_than_median(self, optimization_loss: float) -> None:
+        # Get all the fold0 repeat0 losses
+        older_runs_opt_losses = [
+            losses[0] for losses in self.backend.load_opt_losses(
+                instances=[0], levels=[1]
+            )
+        ]
+
+        min_prune_members = cast(int, self.resampling_strategy_args.get('min_prune_members', 10))
+        # Need at least min_prune_members to terminate with confidence
+        if len(older_runs_opt_losses) < min_prune_members:
+            return
+
+        # Only take up to 2 * min prune members to calculate the median
+        older_runs_opt_losses = sorted(older_runs_opt_losses)[:min_prune_members * 2]
+
+        if optimization_loss > np.median(older_runs_opt_losses):
+            raise MedianPruneException(f"{optimization_loss} > {np.median(older_runs_opt_losses)}")
 
     def partial_fit_predict_and_loss(self, fold: int, iterative: bool = False) -> None:
         """Fit, predict and compute the loss for eval_partial_cv (both iterative and normal)"""
@@ -1714,9 +1793,9 @@ def eval_intensifier_cv(
     # data for EnsembleBuilder
     # repeats = resampling_strategy_args.get('repeats')
     folds = resampling_strategy_args.get('folds', 5)
-    fix_repetitions = resampling_strategy_args.get('fix_repetitions', False)
+    train_all_repeat_together = resampling_strategy_args.get('train_all_repeat_together', False)
     assert folds is not None
-    if fix_repetitions:
+    if train_all_repeat_together:
         training_folds = None
     elif isinstance(folds, list):
         start = sum([folds[i-1] for i in range(1, repeat + 1)])

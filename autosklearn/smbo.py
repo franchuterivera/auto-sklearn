@@ -425,8 +425,8 @@ class AutoMLSMBO(object):
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
             repeats = range(num_repeats)
-            if 'fix_repetitions' in self.resampling_strategy_args:
-                if self.resampling_strategy_args['fix_repetitions']:
+            if 'train_all_repeat_together' in self.resampling_strategy_args:
+                if self.resampling_strategy_args['train_all_repeat_together']:
                     repeats = [num_repeats]
 
             instances = []

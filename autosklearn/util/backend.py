@@ -341,14 +341,19 @@ class Backend(object):
         )
         return model_files
 
-    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float, int]]
+    def load_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float, List[int]]]
                                    ) -> Dict:
         models = dict()
 
         for identifier in identifiers:
-            level, seed, idx, budget, instance = identifier
-            models[identifier] = self.load_model_by_level_seed_and_id_and_budget_and_instance(
-                level, seed, idx, budget, instance)
+            # Notice that instances is a list, as we support
+            # independent repetitions
+            level, seed, idx, budget, instances = identifier
+            for instance in instances:
+                models[
+                    (level, seed, idx, budget, instance)
+                ] = self.load_model_by_level_seed_and_id_and_budget_and_instance(
+                    level, seed, idx, budget, instance)
 
         return models
 
@@ -366,24 +371,33 @@ class Backend(object):
         with open(model_file_path, 'rb') as fh:
             return pickle.load(fh)
 
-    def load_cv_models_by_identifiers(self, identifiers: List[Tuple[int, int, int, float, int]],
+    def load_cv_models_by_identifiers(self,
+                                      identifiers: List[Tuple[int, int, int, float, List[int]]],
                                       include_base_models: bool = False,
                                       ) -> Dict:
         models = dict()
 
         for identifier in identifiers:
-            level, seed, idx, budget, instance = identifier
-            models[identifier] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                level, seed, idx, budget, instance)
-            if include_base_models and hasattr(models[identifier], 'base_models_'):
-                for base_identifier in models[identifier].base_models_:
-                    if base_identifier not in models and base_identifier not in identifiers:
-                        level_, seed_, idx_, budget_, instance_ = base_identifier
-                        models[
-                            base_identifier
-                        ] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                            level_, seed_, idx_, budget_, instance_,
-                        )
+            # Notice that instances is a list, as we support
+            # independent repetitions
+            level, seed, idx, budget, instances = identifier
+            for instance in instances:
+                identifier_ = (level, seed, idx, budget, instance)
+                models[
+                    identifier_
+                ] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                    level, seed, idx, budget, instance)
+                if include_base_models and hasattr(models[identifier_], 'base_models_'):
+                    for base_identifier in models[identifier_].base_models_:
+                        level_, seed_, idx_, budget_, instances_ = base_identifier
+                        for instance__ in instances_:
+                            identifier__ = (level_, seed_, idx_, budget_, instance__)
+                            if identifier__ not in models and identifier__ not in identifiers:
+                                models[
+                                    identifier__
+                                ] = self.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                                    level_, seed_, idx_, budget_, instance__,
+                                )
 
         return models
 
@@ -415,6 +429,19 @@ class Backend(object):
         with open(file_path, 'rb') as fh:
             return pickle.load(fh)
 
+    def get_prediction_mtime_by_level_seed_and_id_and_budget_and_instance(self,
+                                                                          subset: str,
+                                                                          level: int,
+                                                                          seed: int,
+                                                                          idx: int,
+                                                                          budget: float,
+                                                                          instance: int,
+                                                                          ) -> float:
+        model_directory = self.get_numrun_directory(level, seed, idx, budget, instance)
+        filename = self.get_prediction_filename(subset, level, seed, idx, budget, instance)
+        file_path = os.path.join(model_directory, filename)
+        return os.path.getmtime(file_path)
+
     def load_prediction_by_level_seed_and_id_and_budget_and_instance(self,
                                                                      subset: str,
                                                                      level: int,
@@ -430,6 +457,51 @@ class Backend(object):
         with open(file_path, 'rb') as fh:
             return pickle.load(fh)
 
+    def load_opt_losses(self,
+                        levels: Optional[List[int]] = None,
+                        seeds: Optional[List[int]] = None,
+                        idxs: Optional[List[int]] = None,
+                        budgets: Optional[List[float]] = None,
+                        instances: Optional[List[int]] = None,
+                        ) -> List[List[float]]:
+        runs_directory = self.get_runs_directory()
+        paths = [os.path.basename(path).split('_')
+                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 # Temporal files might get in the way, we expect
+                 # level, seed, num_run, budget, instance in the name
+                 if len(os.path.basename(path).split('_')) == 5
+                 ]
+        runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
+                for level, seed, num_run, budget, instance in paths]
+
+        opt_losses = []
+        for level_, seed_, num_run_, budget_, instance_ in runs:
+            if num_run_ <= 1:
+                # No dummy predictions
+                continue
+            if levels is not None and level_ not in levels:
+                continue
+            if seeds is not None and seed_ not in seeds:
+                continue
+            if idxs is not None and num_run_ not in idxs:
+                continue
+            if budgets is not None and budget_ not in budgets:
+                continue
+            if instances is not None and instance_ not in instances:
+                continue
+            try:
+                opt_losses.append(
+                    self.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                        level_, seed_, num_run_, budget_, instance_
+                    )['opt_losses']
+                )
+            except Exception as e:
+                if self.logger is not None:
+                    self.logger.error(
+                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                pass
+        return opt_losses
+
     def load_model_predictions(self,
                                subset: str,
                                levels: Optional[List[int]] = None,
@@ -437,7 +509,12 @@ class Backend(object):
                                idxs: Optional[List[int]] = None,
                                budgets: Optional[List[float]] = None,
                                instances: Optional[List[int]] = None,
-                               ) -> Dict:
+                               repeats_as_individual_models: bool = True,
+                               train_all_repeat_together: bool = True,
+                               ) -> Dict[
+                                   Tuple[int, int, int, float, Tuple],
+                                   np.ndarray
+                               ]:
         runs_directory = self.get_runs_directory()
         identifier_to_prediction = {}
 
@@ -462,6 +539,8 @@ class Backend(object):
             if instance_ > max_instance and num_run_ > 1:
                 max_instance = instance_
 
+        # Filter the valid runs according to repeats_as_individual_models
+        to_read: Dict[Tuple[int, int, int, float], List[int]] = {}
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if num_run_ <= 1:
                 # No dummy predictions
@@ -477,25 +556,78 @@ class Backend(object):
             if instances is not None and instance_ not in instances:
                 continue
             elif instances is None:
-                # Only allow highest instance available
-                # Treat each level like a different config basically
-                if num_run_ in highest_instance[level_] and (
-                        instance_ not in [
-                            max_instance,
-                            max_instance - 1
-                        ] or instance_ != highest_instance[level_][num_run_]):
-                    continue
+                identifier = (level_, seed_, num_run_, budget_)
+                if not repeats_as_individual_models:
+                    # We have to search for the highest instance and only
+                    # this one
+
+                    # Only allow highest instance available
+                    # Treat each level like a different config basically
+                    if num_run_ in highest_instance[level_] and (
+                            instance_ not in [
+                                max_instance,
+                                max_instance - 1
+                            ] or instance_ != highest_instance[level_][num_run_]):
+                        continue
+                    to_read[identifier] = [instance_]
+                else:
+                    if identifier not in to_read:
+                        to_read[identifier] = [instance_]
+                    else:
+                        to_read[identifier].append(instance_)
+
+        # in the case we have repeats_as_individual_models==True
+        # we only accept models with all desired instances available
+        # so we have to post process
+        if repeats_as_individual_models and not train_all_repeat_together:
+            to_delete = [identifier for identifier in to_read.keys()
+                         if len(to_read[identifier]) < max_instance]
+            for identifier in to_delete:
+                del to_read[identifier]
+
+        # The read the predictions and average if needed
+        for identifier, instances_ in to_read.items():
             try:
-                prediction = self.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                    subset, level_, seed_, num_run_, budget_, instance_
+                _level, _seed, _num_run, _budget = identifier
+                idx = (_level, _seed, _num_run, _budget, tuple(sorted(instances_)))
+                identifier_to_prediction[
+                    idx
+                ] = self.get_averaged_instance_predictions(
+                    identifier=idx,
+                    subset=subset
                 )
-                identifier_to_prediction[(level_, seed_, num_run_, budget_, instance_)] = prediction
             except Exception as e:
                 if self.logger is not None:
                     self.logger.error(
-                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                        f"Skipping {e}->{(identifier, instances_)}")
                 pass
         return identifier_to_prediction
+
+    def get_averaged_instance_predictions(
+        self, identifier: Tuple[int, int, int, float, Tuple],
+        subset: str,
+    ) -> np.ndarray:
+        level_, seed_, num_run_, budget_, instances_ = identifier
+        avg_prediction = None
+        for instance_ in instances_:
+            if avg_prediction is None:
+                avg_prediction = self.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    subset, level_, seed_, num_run_, budget_, instance_
+                )
+            else:
+                np.add(
+                    self.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset, level_, seed_, num_run_, budget_, instance_
+                    ),
+                    avg_prediction,
+                    out=avg_prediction
+                )
+        np.multiply(
+            avg_prediction,
+            1/len(instances_),
+            out=avg_prediction,
+        )
+        return avg_prediction
 
     def save_numrun_to_dir(
         self, level: int, seed: int, idx: int, budget: float, instance: int,

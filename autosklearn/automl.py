@@ -221,8 +221,10 @@ class AutoML(BaseEstimator):
         if self._resampling_strategy in ['intensifier-cv']:
             if 'repeats' not in self._resampling_strategy_arguments:
                 self._resampling_strategy_arguments['repeats'] = 5
-            if 'repetition_as_individual_models' not in self._resampling_strategy_arguments:
-                self._resampling_strategy_arguments['repetition_as_individual_models'] = False
+            # We are passing everything through the resampling strategy!
+            # Think if there is a better way to do this
+            if 'repeats_as_individual_models' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['repeats_as_individual_models'] = True
             if self._max_stacking_level > 1:
                 self._resampling_strategy_arguments['stacking_strategy'] = self._stacking_strategy
         self._n_jobs = n_jobs
@@ -791,6 +793,7 @@ class AutoML(BaseEstimator):
                 logger_port=self._logger_port,
                 pynisher_context=self._multiprocessing_context,
                 ensemble_folds=self._ensemble_folds,
+                resampling_strategy_arguments=self._resampling_strategy_arguments,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -1221,13 +1224,17 @@ class AutoML(BaseEstimator):
             self._logger.warning("File output is disabled. No pipeline can returned")
         elif run_value.status == StatusType.SUCCESS:
             if kwargs['resampling_strategy'] in ('cv', 'cv-iterative-fit'):
-                load_function = self._backend.load_cv_model_by_seed_and_id_and_budget
+                load_function = \
+                    self._backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance
             else:
-                load_function = self._backend.load_model_by_seed_and_id_and_budget
+                load_function = \
+                    self._backend.load_model_by_level_seed_and_id_and_budget_and_instance
             pipeline = load_function(
+                level=0,
                 seed=self._seed,
                 idx=run_info.config.config_id + 1,
                 budget=run_info.budget,
+                instance=0,
             )
 
         self._clean_logger()
@@ -1238,11 +1245,51 @@ class AutoML(BaseEstimator):
                                    base_model_predictions: Dict,
                                    identifier) -> List:
         if not hasattr(estimator, 'base_models_'):
-            print(f"For model {identifier} no base prediction is needed")
-            self._logger.critical(f"For model {identifier} no base prediction is needed")
             return []
-        base = [base_model_predictions[idx] for idx in estimator.base_models_]
-        return base
+        # Normally an identifier looks like (level, seed, numrun, budget, instance)
+        # Base models need and averaged prediction of all the cv repetitions. Of which
+        # repetitions? this is answered by having a tuple as instance, that indicates
+        # which instances where available by the time the higher stacking level was formed:
+        # (level, seed, numrun, budget, Tuple[instance, ...])
+        return [self.get_averaged_instance_predictions(identifier_, base_model_predictions)
+                for identifier_ in estimator.base_models_]
+
+    def get_averaged_instance_predictions(
+        self, identifier_: Tuple[int, int, int, float, Tuple],
+        base_model_predictions: Dict[Tuple[int, int, int, float, int], np.ndarray]
+    ) -> np.ndarray:
+
+        # Notice how this function assumes that all required predictions are
+        # in base_model_predictions.
+        # In other orders, if instances is a list with multiple elements
+        # by construction, all this elements corresponding to individual
+        # repetitions must be already in this dictionary. This is the case
+        # as processing is done in order:
+        # First individual instances (level_, seed_, num_run_, budget_, instance_)
+        # Then (level_, seed_, num_run_, budget_, List[instance_])
+        # Then (level_ + 1, seed_, num_run_, budget_, instance_)
+        # and so on...
+        level_, seed_, num_run_, budget_, instances_ = identifier_
+        avg_prediction = None
+        for instance_ in instances_:
+            if avg_prediction is None:
+                avg_prediction = base_model_predictions[
+                    (level_, seed_, num_run_, budget_, instance_)
+                ]
+            else:
+                np.add(
+                    base_model_predictions[
+                        (level_, seed_, num_run_, budget_, instance_)
+                    ],
+                    avg_prediction,
+                    out=avg_prediction
+                )
+        np.multiply(
+            avg_prediction,
+            1/len(instances_),
+            out=avg_prediction,
+        )
+        return avg_prediction
 
     def predict(self, X, batch_size=None, n_jobs=1):
         """predict.
@@ -1306,6 +1353,16 @@ class AutoML(BaseEstimator):
             except sklearn.exceptions.NotFittedError:
                 raise ValueError('Found no fitted models!')
 
+        # A note on predictions:
+        # models = Dict[tuple[level, seed, numrun, budget, instance]]
+        #
+        # Whereas the estimator has instances that look like:
+        # tuple[level, seed, numrun, budget, List[instances]]
+        # Because if multiple repetitions are available, one has
+        # to average across this cv repetitions
+
+        # First we do the predictions of the lower levels, so that the upper levels
+        # have the information they need
         base_model_predictions = {}
         for level_ in range(1, self._max_stacking_level + 1):
             identifiers = [(level, seed, num_run, budget, instance)
@@ -1321,15 +1378,29 @@ class AutoML(BaseEstimator):
             for indentifier, prediction in zip(identifiers, predictions):
                 base_model_predictions[indentifier] = prediction
 
+        print(f"base_model_predictions->{list(base_model_predictions.keys())}")
+        print(f"models->{list(models.keys())}")
+
         identity = lambda x: x  # noqa
         all_predictions = joblib.Parallel(n_jobs=n_jobs)(
-            joblib.delayed(_model_predict)(
-                models[identifier], X, batch_size, self._logger, self._task,
-                self.get_base_model_predictions(
-                    models[identifier], base_model_predictions, identifier),
-                identifier,
-            ) if identifier not in base_model_predictions else joblib.delayed(identity)(
-                base_model_predictions[identifier])
+            # #####################################################################
+            # # 1-- First check if this if we need to further predict another level
+            # joblib.delayed(_model_predict)(
+            #     models[identifier], X, batch_size, self._logger, self._task,
+            #     self.get_base_model_predictions(
+            #         models[identifier], base_model_predictions, identifier),
+            #     identifier,
+            # ) if identifier not in base_model_predictions else
+            joblib.delayed(identity)(
+                ########################################################################
+                # 2-- If this is a simple, no multi-instance prediction already computed
+                base_model_predictions[identifier] if isinstance(identifier[4], int)
+                #########################################################################
+                # 3-- This is a a multi-instance prediction where only average is needed
+                # This should be the case always, as base_model_predictions always contains
+                # the desired predictions. Consider simplifying this code!
+                else self.get_averaged_instance_predictions(identifier, base_model_predictions)
+            )
             for identifier in self.ensemble_.get_selected_model_identifiers()
         )
 
@@ -1395,6 +1466,7 @@ class AutoML(BaseEstimator):
             logger_port=self._logger_port,
             pynisher_context=self._multiprocessing_context,
             ensemble_folds=self._ensemble_folds,
+            resampling_strategy_arguments=self._resampling_strategy_arguments,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()

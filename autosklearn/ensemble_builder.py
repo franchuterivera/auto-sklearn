@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, cast
 import zlib
 
 import dask.distributed
@@ -39,6 +39,9 @@ Y_TEST = 2
 
 MODEL_FN_RE = r'([0-9]*)_([0-9]*)_([0-9]*)_([0-9]{1,3}\.[0-9]*)_([0-9]*)\.npy'
 
+# Typing definitions
+IDENTIFIER_TYPE = Tuple[int, int, int, float]  # level, seed, num_run, budget
+
 
 class EnsembleBuilderManager(IncorporateRunResultCallback):
     def __init__(
@@ -62,6 +65,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         pynisher_context: str = 'fork',
         ensemble_folds: Optional[str] = None,
+        resampling_strategy_arguments: Dict = {}
     ):
         """ SMAC callback to handle ensemble building
 
@@ -111,6 +115,13 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
             port that receives logging records
         pynisher_context: str
             The multiprocessing context for pynisher. One of spawn/fork/forkserver.
+        ensemble_folds: Optional[str]
+            How to ensemble the repetitions. We can ensemble any repetitions,
+            or only trusted repetitions -- like when we have many repetitions, we
+            only want to use the models at a high repetition
+        resampling_strategy_arguments:
+            Temporary added this here to support multiple experimental settings.
+            TODO: Remove/cleanup for final push
 
     Returns
     -------
@@ -138,6 +149,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_folds = ensemble_folds
         if self.ensemble_folds not in [None, 'highest_repeat_trusted']:
             raise NotImplementedError(self.ensemble_folds)
+        self.resampling_strategy_arguments = resampling_strategy_arguments
         self.pynisher_context = pynisher_context
 
         # Store something similar to SMAC's runhistory
@@ -243,6 +255,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     pynisher_context=self.pynisher_context,
                     logger_port=self.logger_port,
                     ensemble_folds=self.ensemble_folds,
+                    resampling_strategy_arguments=self.resampling_strategy_arguments,
                     unit_test=unit_test,
                 ))
 
@@ -284,6 +297,7 @@ def fit_and_return_ensemble(
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
     ensemble_folds: str = None,
+    resampling_strategy_arguments: Dict = {},
     unit_test: bool = False,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
@@ -370,6 +384,7 @@ def fit_and_return_ensemble(
         random_state=random_state,
         logger_port=logger_port,
         ensemble_folds=ensemble_folds,
+        resampling_strategy_arguments=resampling_strategy_arguments,
         unit_test=unit_test,
     ).run(
         end_at=end_at,
@@ -399,6 +414,7 @@ class EnsembleBuilder(object):
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         ensemble_folds: str = None,
+        resampling_strategy_arguments: Dict = {},
         unit_test: bool = False,
     ):
         """
@@ -500,6 +516,7 @@ class EnsembleBuilder(object):
             port=self.logger_port,
         )
         self.ensemble_folds = ensemble_folds
+        self.resampling_strategy_arguments = resampling_strategy_arguments
 
         if ensemble_nbest == 1:
             self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
@@ -802,30 +819,25 @@ class EnsembleBuilder(object):
         else:
             return self.ensemble_history, self.ensemble_nbest, None, None, None
 
-    def get_disk_consumption(self, pred_path):
+    def get_disk_consumption(self, identifier: IDENTIFIER_TYPE, instances: List[int]):
         """
         gets the cost of a model being on disc
         """
 
-        match = self.model_fn_re.search(pred_path)
-        if not match:
-            raise ValueError("Invalid path format %s" % pred_path)
-        _level = int(match.group(1))
-        _seed = int(match.group(2))
-        _num_run = int(match.group(3))
-        _budget = float(match.group(4))
-        _instance = int(match.group(5))
+        _level, _seed, _num_run, _budget = identifier
+        costs = 0
+        for _instance in instances:
+            stored_files_for_run = os.listdir(
+                self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance))
+            stored_files_for_run = [
+                os.path.join(self.backend.get_numrun_directory(
+                    _level, _seed, _num_run, _budget, _instance), file_name)
+                for file_name in stored_files_for_run]
+            this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
 
-        stored_files_for_run = os.listdir(
-            self.backend.get_numrun_directory(_level, _seed, _num_run, _budget, _instance))
-        stored_files_for_run = [
-            os.path.join(self.backend.get_numrun_directory(
-                _level, _seed, _num_run, _budget, _instance), file_name)
-            for file_name in stored_files_for_run]
-        this_model_cost = sum([os.path.getsize(path) for path in stored_files_for_run])
-
-        # get the megabytes
-        return round(this_model_cost / math.pow(1024, 2), 2)
+            # get the megabytes
+            costs += round(this_model_cost / math.pow(1024, 2), 2)
+        return costs
 
     def compute_loss_per_model(self):
         """
@@ -853,23 +865,32 @@ class EnsembleBuilder(object):
         y_ens_files = glob.glob(pred_path)
         y_ens_files = [y_ens_file for y_ens_file in y_ens_files
                        if y_ens_file.endswith('.npy') or y_ens_file.endswith('.npy.gz')]
-        self.y_ens_files = y_ens_files
+
+        # Translate the y_ens_files to identifiers. This is done because
+        # a configuration can be run on multiple instances, the configuration
+        # is indeed the same
+        # Every model is stored in a directory under the format:
+        # <level>_<seed>_<numrun>_<budget>_<instance>
+        self.y_ens_files = [os.path.basename(os.path.dirname(filename)).split('_')
+                            for filename in y_ens_files
+                            # Below if is to be robust against temporal directories
+                            if len(os.path.basename(os.path.dirname(filename)).split('_')) >= 5]
         # no validation predictions so far -- no files
         if len(self.y_ens_files) == 0:
             self.logger.debug("Found no prediction files on ensemble data set:"
                               " %s" % pred_path)
             return False
 
-        # get the highest fold per num_run
-        runs_directory = self.backend.get_runs_directory()
-        # Added of if > 5 to ignore tmeporal runs not completely writen to disk
-        runs = [os.path.basename(path).split('_') for path in glob.glob(
-            os.path.join(runs_directory, '*')) if len(os.path.basename(path).split('_')) >= 5]
-        runs = [(int(le), int(se), int(nu), float(bu), int(ins)) for le, se, nu, bu, ins in runs]
+        # Convert from string to expected types
+        self.y_ens_files = [(int(level), int(seed), int(numrun), float(budget), int(instance))
+                            for level, seed, numrun, budget, instance in self.y_ens_files]
 
+        self.logger.critical(f"Available self.y_ens_files={self.y_ens_files}")
+
+        # Find the biggest instance per num_run
         highest_instance = {}
         max_instance = 0
-        for level_, seed_, num_run_, budget_, instance_ in runs:
+        for level_, seed_, num_run_, budget_, instance_ in self.y_ens_files:
             if level_ not in highest_instance:
                 highest_instance[level_] = {}
             if num_run_ not in highest_instance[level_] or (
@@ -880,26 +901,37 @@ class EnsembleBuilder(object):
                 max_instance = instance_
 
         # First sort files chronologically
-        to_read = []
-        for y_ens_fn in self.y_ens_files:
-            match = self.model_fn_re.search(y_ens_fn)
-            _level = int(match.group(1))
-            _seed = int(match.group(2))
-            _num_run = int(match.group(3))
-            _budget = float(match.group(4))
-            _instance = int(match.group(5))
-            mtime = os.path.getmtime(y_ens_fn)
+        repeats_as_individual_models = cast(bool, self.resampling_strategy_arguments.get(
+            'repeats_as_individual_models'))
+        train_all_repeat_together = cast(bool, self.resampling_strategy_arguments.get(
+            'train_all_repeat_together'))
+        to_read = {}
+        for _level, _seed, _num_run, _budget, _instance in self.y_ens_files:
+            identifier = (_level, _seed, _num_run, _budget)
+            mtime = self.backend.get_prediction_mtime_by_level_seed_and_id_and_budget_and_instance(
+                subset='ensemble',
+                level=_level,
+                seed=_seed,
+                idx=_num_run,
+                budget=_budget,
+                instance=_instance
+            )
 
             # For dummy prediction we only use the highes budget always
             if _num_run == 1:
                 # There should not be dummy predict for every level, just level 1
                 if _instance == highest_instance[1][_num_run]:
-                    to_read.append(
-                        [y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
+                    to_read[identifier] = {_instance: mtime}
                 else:
                     continue
 
-            if self.ensemble_folds is not None and self.ensemble_folds == 'highest_repeat_trusted':
+            if not repeats_as_individual_models:
+                # If the repetitions are treated independently,
+                # (self.repeats_as_individual_models==True)
+                # we have to average the predictions in the ensemble builder,
+                # and for this reason we add to 'to_read' all instances
+                # In the case that self.repeats_as_individual_models==False
+                # we care only about the last model available
                 if _instance != highest_instance[_level][_num_run]:
                     # Only allow the highest instance seen for this config
                     continue
@@ -908,52 +940,64 @@ class EnsembleBuilder(object):
                     # Only the highest repetition should be stacked
                     continue
 
-            to_read.append([y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime])
+            if identifier not in to_read:
+                to_read[identifier] = {}
+
+            # To read will have 2 modes:
+            # if self.repeats_as_individual_models, it will have N instances
+            # if not self.repeats_as_individual_models: it will have only the highest instance
+            to_read[identifier][_instance] = mtime
+
+        if repeats_as_individual_models and not train_all_repeat_together:
+            # if train_all_repeat_together==True
+            # Means that we can use any model in disc as it will have trained
+            # all repetitions together
+            #
+            # In this case, we only want to deal with predictions that
+            # have max_instance, max_instance-1 repetitions
+            to_delete = [identifier for identifier in to_read.keys()
+                         # Max instance starts at zero, whereas len() returns 1
+                         # so we as for at least max_instance - 1 + 1
+                         if len(to_read[identifier]) < max_instance and identifier[2] > 1]
+            for identifier in to_delete:
+                del to_read[identifier]
 
         # We cannot use old predictions when new ones are available
         # at a higher number of repetitions
-        if self.ensemble_folds is not None and self.ensemble_folds == 'highest_repeat_trusted':
-            for y_ens_fn, value in self.read_losses.items():
-                if value['num_run'] == 1:
-                    continue
+        for y_ens_fn, value in self.read_losses.items():
+            if value['num_run'] == 1:
+                continue
 
-                # If the current instance is a trusted repetitions
-                # We can leave the current score
-                level = self.read_losses[y_ens_fn]["level"]
-                num_run = self.read_losses[y_ens_fn]["num_run"]
-                if value['instance'] in [max_instance, max_instance-1] and value[
-                        'instance'] == highest_instance[level][num_run]:
-                    continue
+            # We assume that to_read has a curated list of valid
+            # identifiers
+            if y_ens_fn in to_read:
+                continue
 
-                loss = self.read_losses[y_ens_fn]["ens_loss"]
-                if loss != np.inf:
-                    self.logger.debug(f"Invalidate old result for {y_ens_fn} as {max_instance}")
-                    self.read_losses[y_ens_fn]["ens_loss"] = np.inf
+            loss = self.read_losses[y_ens_fn]["ens_loss"]
+            if loss != np.inf:
+                self.logger.debug(f"Invalidate old result for {y_ens_fn} as {max_instance}")
+                self.read_losses[y_ens_fn]["ens_loss"] = np.inf
 
         n_read_files = 0
         # Now read file wrt to num_run
-        for y_ens_fn, match, _level, _seed, _num_run, _budget, _instance, mtime in \
-                sorted(to_read, key=lambda x: x[5]):
+        for y_ens_fn in sorted(to_read, key=lambda x: x[3]):
+            _level, _seed, _num_run, _budget = y_ens_fn
+            instances = list(to_read[y_ens_fn].keys())
             if self.read_at_most and n_read_files >= self.read_at_most:
                 # limit the number of files that will be read
                 # to limit memory consumption
                 break
 
-            if not y_ens_fn.endswith(".npy") and not y_ens_fn.endswith(".npy.gz"):
-                self.logger.info('Error loading file (not .npy or .npy.gz): %s', y_ens_fn)
-                continue
-
             if not self.read_losses.get(y_ens_fn):
                 self.read_losses[y_ens_fn] = {
                     "ens_loss": np.inf,
-                    "mtime_ens": 0,
-                    "mtime_valid": 0,
-                    "mtime_test": 0,
+                    "mtime_ens": {},
+                    "mtime_valid": {},
+                    "mtime_test": {},
                     "level": _level,
                     "seed": _seed,
                     "num_run": _num_run,
                     "budget": _budget,
-                    "instance": _instance,
                     "disc_space_cost_mb": None,
                     # Lazy keys so far:
                     # 0 - not loaded
@@ -969,13 +1013,20 @@ class EnsembleBuilder(object):
                     Y_TEST: None,
                 }
 
+            mtime = to_read[y_ens_fn]
             if self.read_losses[y_ens_fn]["mtime_ens"] == mtime:
-                # same time stamp; nothing changed;
+                # same time stamp for every instance; nothing changed;
+                # If there are more instances, the dict compare fails
                 continue
 
             # actually read the predictions and compute their respective loss
             try:
-                y_ensemble = self._read_np_fn(y_ens_fn)
+
+                y_ensemble = self.read_identifier_predictions_for_instances(
+                    identifier=y_ens_fn,
+                    instances=instances,
+                    subset='ensemble',
+                )
                 loss = calculate_loss(solution=self.y_true_ensemble,
                                       prediction=y_ensemble,
                                       task_type=self.task_type,
@@ -985,23 +1036,31 @@ class EnsembleBuilder(object):
                 if np.isfinite(self.read_losses[y_ens_fn]["ens_loss"]):
                     self.logger.debug(
                         'Changing ensemble loss for file %s from %f to %f '
-                        'because file modification time changed? %f - %f',
+                        'because file modification time changed? %s - %s',
                         y_ens_fn,
                         self.read_losses[y_ens_fn]["ens_loss"],
                         loss,
-                        self.read_losses[y_ens_fn]["mtime_ens"],
-                        os.path.getmtime(y_ens_fn),
+                        str(self.read_losses[y_ens_fn]["mtime_ens"]),
+                        str(mtime),
                     )
 
                 self.read_losses[y_ens_fn]["ens_loss"] = loss
 
                 # It is not needed to create the object here
                 # To save memory, we just compute the loss.
-                self.read_losses[y_ens_fn]["mtime_ens"] = os.path.getmtime(y_ens_fn)
+                self.read_losses[y_ens_fn]["mtime_ens"] = mtime
                 self.read_losses[y_ens_fn]["loaded"] = 2
                 self.read_losses[y_ens_fn]["disc_space_cost_mb"] = self.get_disk_consumption(
-                    y_ens_fn
+                    y_ens_fn,
+                    # Calculate for all involved instances
+                    instances,
                 )
+
+                # If mtime_ens changed, the read prediction is no
+                # longer valid
+                self.read_preds[y_ens_fn][Y_ENSEMBLE] = None
+                self.read_preds[y_ens_fn][Y_VALID] = None
+                self.read_preds[y_ens_fn][Y_TEST] = None
 
                 n_read_files += 1
 
@@ -1019,6 +1078,7 @@ class EnsembleBuilder(object):
             n_read_files,
             np.sum([pred["loaded"] > 0 for pred in self.read_losses.values()])
         )
+        self.logger.critical(f"self.read_losses={self.read_losses}")
         return True
 
     def get_n_best_preds(self):
@@ -1063,7 +1123,7 @@ class EnsembleBuilder(object):
                                     "Number of dummy models: %d",
                                     num_keys - 1,
                                     num_dummy)
-            sorted_keys = [(k, v["ens_loss"], v["num_run"], v['instance'], v['level'])
+            sorted_keys = [(k, v["ens_loss"], v["num_run"], v['level'])
                            for k, v in self.read_losses.items()
                            if v["seed"] == self.seed and v["num_run"] == 1]
         # reload predictions if losses changed over time and a model is
@@ -1162,12 +1222,11 @@ class EnsembleBuilder(object):
                 self.read_preds[k][Y_TEST] = None
             if self.read_losses[k]['loaded'] == 1:
                 self.logger.debug(
-                    'Dropping model %s (%d,%d,%d,%d) with loss %f.',
+                    'Dropping model %s (%d,%d,%d) with loss %f.',
                     k,
                     self.read_losses[k]['level'],
                     self.read_losses[k]['seed'],
                     self.read_losses[k]['num_run'],
-                    self.read_losses[k]['instance'],
                     self.read_losses[k]['ens_loss'],
                 )
                 self.read_losses[k]['loaded'] = 2
@@ -1181,7 +1240,13 @@ class EnsembleBuilder(object):
                 )
                 and self.read_losses[k]['loaded'] != 3
             ):
-                self.read_preds[k][Y_ENSEMBLE] = self._read_np_fn(k)
+                instances = list(self.read_losses[k]['mtime_ens'].keys())
+                y_ensemble = self.read_identifier_predictions_for_instances(
+                    identifier=k,
+                    instances=instances,
+                    subset='ensemble',
+                )
+                self.read_preds[k][Y_ENSEMBLE] = y_ensemble
                 # No need to load valid and test here because they are loaded
                 #  only if the model ends up in the ensemble
                 self.read_losses[k]['loaded'] = 1
@@ -1208,95 +1273,74 @@ class EnsembleBuilder(object):
         success_keys_valid = []
         success_keys_test = []
 
+        # Define here as command is to long for flake8
+        mtime_fn = self.backend.get_prediction_mtime_by_level_seed_and_id_and_budget_and_instance
+
         for k in selected_keys:
-            valid_fn = glob.glob(
-                os.path.join(
-                    glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%d_%s_%d' % (
-                        self.read_losses[k]["level"],
-                        self.read_losses[k]["seed"],
-                        self.read_losses[k]["num_run"],
-                        self.read_losses[k]["budget"],
-                        self.read_losses[k]["instance"],
-                    ),
-                    'predictions_valid_%d_%d_%d_%s_%d.npy*' % (
-                        self.read_losses[k]["level"],
-                        self.read_losses[k]["seed"],
-                        self.read_losses[k]["num_run"],
-                        self.read_losses[k]["budget"],
-                        self.read_losses[k]["instance"],
-                    )
-                )
-            )
-            valid_fn = [vfn for vfn in valid_fn if vfn.endswith('.npy') or vfn.endswith('.npy.gz')]
-            test_fn = glob.glob(
-                os.path.join(
-                    glob.escape(self.backend.get_runs_directory()),
-                    '%d_%d_%d_%s_%d' % (
-                        self.read_losses[k]["level"],
-                        self.read_losses[k]["seed"],
-                        self.read_losses[k]["num_run"],
-                        self.read_losses[k]["budget"],
-                        self.read_losses[k]["instance"],
-                    ),
-                    'predictions_test_%d_%d_%d_%s_%d.npy*' % (
-                        self.read_losses[k]["level"],
-                        self.read_losses[k]["seed"],
-                        self.read_losses[k]["num_run"],
-                        self.read_losses[k]["budget"],
-                        self.read_losses[k]["instance"],
-                    )
-                )
-            )
-            test_fn = [tfn for tfn in test_fn if tfn.endswith('.npy') or tfn.endswith('.npy.gz')]
 
-            if len(valid_fn) == 0:
-                # self.logger.debug("Not found validation prediction file "
-                #                   "(although ensemble predictions available): "
-                #                   "%s" % valid_fn)
-                pass
-            else:
-                valid_fn = valid_fn[0]
-                if (
-                    self.read_losses[k]["mtime_valid"] == os.path.getmtime(valid_fn)
-                    and k in self.read_preds
-                    and self.read_preds[k][Y_VALID] is not None
-                ):
-                    success_keys_valid.append(k)
-                    continue
-                try:
-                    y_valid = self._read_np_fn(valid_fn)
-                    self.read_preds[k][Y_VALID] = y_valid
-                    success_keys_valid.append(k)
-                    self.read_losses[k]["mtime_valid"] = os.path.getmtime(valid_fn)
-                except Exception:
-                    self.logger.warning('Error loading %s: %s',
-                                        valid_fn, traceback.format_exc())
+            for subset in ['valid', 'test']:
+                # We have to make sure that predictions exist for all tracked instances
+                instances = list(self.read_losses[k]['mtime_ens'].keys())
 
-            if len(test_fn) == 0:
-                # self.logger.debug("Not found test prediction file (although "
-                #                   "ensemble predictions available):%s" %
-                #                   test_fn)
-                pass
-            else:
-                test_fn = test_fn[0]
-                if (
-                    self.read_losses[k]["mtime_test"] == os.path.getmtime(test_fn)
-                    and k in self.read_preds
-                    and self.read_preds[k][Y_TEST] is not None
-                ):
-                    success_keys_test.append(k)
-                    continue
-                try:
-                    y_test = self._read_np_fn(test_fn)
-                    self.read_preds[k][Y_TEST] = y_test
-                    success_keys_test.append(k)
-                    self.read_losses[k]["mtime_test"] = os.path.getmtime(test_fn)
-                except Exception:
-                    self.logger.warning('Error loading %s: %s',
-                                        test_fn, traceback.format_exc())
+                if self.are_prediction_files_for_identifier(subset, k):
+                    mtime = {instance: mtime_fn(
+                        subset=subset,
+                        level=k[0],
+                        seed=k[1],
+                        idx=k[2],
+                        budget=k[3],
+                        instance=instance
+                        ) for instance in instances
+                    }
+                    if (
+                        self.read_losses[k][
+                            "mtime_valid" if 'valid' in subset else 'mtime_test'
+                        ] == mtime
+                        and k in self.read_preds
+                        and self.read_preds[k][
+                            Y_VALID if 'valid' in subset else Y_TEST
+                        ] is not None
+                    ):
+                        if 'valid' in subset:
+                            success_keys_valid.append(k)
+                        else:
+                            success_keys_test.append(k)
+                        continue
+                    try:
+                        self.read_preds[k][
+                            Y_VALID if 'valid' in subset else Y_TEST
+                        ] = self.read_identifier_predictions_for_instances(
+                            identifier=k,
+                            instances=instances,
+                            subset=subset,
+                        )
+                        if 'valid' in subset:
+                            success_keys_valid.append(k)
+                        else:
+                            success_keys_test.append(k)
+                        self.read_losses[k][
+                            "mtime_valid" if 'valid' in subset else 'mtime_test'
+                        ] = mtime
+                    except Exception:
+                        self.logger.warning('Error loading %s: %s',
+                                            k, traceback.format_exc())
 
         return success_keys_valid, success_keys_test
+
+    def are_prediction_files_for_identifier(self, subset: str,
+                                            identifier: Tuple[int, int, int, float]) -> bool:
+        level, seed, idx, budget = identifier
+        instances = list(self.read_losses[identifier]['mtime_ens'].keys())
+        fn_paths = [os.path.join(
+            self.backend.get_numrun_directory(level, seed, idx, budget, instance),
+            self.backend.get_prediction_filename(subset, level, seed, idx, budget, instance),
+        ) for instance in instances]
+
+        if len([path for path in fn_paths if os.path.exists(path)]) == 0:
+            # try with .gz .
+            # TODO: Ask to Matthias if this is needed
+            fn_paths = [f"{path}.gz" for path in fn_paths if os.path.exists(f"{path}.gz")]
+        return len(fn_paths) > 0
 
     def fit_ensemble(self, selected_keys: list):
         """
@@ -1323,7 +1367,10 @@ class EnsembleBuilder(object):
                 self.read_losses[k]["seed"],
                 self.read_losses[k]["num_run"],
                 self.read_losses[k]["budget"],
-                self.read_losses[k]["instance"],
+                # self.read_losses[k]["instance"],
+                # We need to remember in which instances the ensemble
+                # was fit, to re-built the prediction
+                tuple(list(self.read_losses[k]['mtime_ens'].keys())),
             )
             for k in selected_keys]
 
@@ -1518,7 +1565,7 @@ class EnsembleBuilder(object):
             [
                 # NOTICE that we add level after numrun because
                 # the code relies on num_run to be in position 2
-                (k, v["ens_loss"], v["num_run"], v["instance"], v["level"])
+                (k, v["ens_loss"], v["num_run"], v["level"])
                 for k, v in self.read_losses.items()
             ],
             # Sort by loss as priority 1 and then by num_run on a ascending order
@@ -1538,35 +1585,30 @@ class EnsembleBuilder(object):
 
         # Loop through the files currently in the directory
         selected_num_runs = []
-        for pred_path in self.y_ens_files:
+        for k in self.y_ens_files:
 
             # Do not delete candidates
-            if pred_path not in selected_keys:
+            if k not in selected_keys:
                 continue
 
-            match = self.model_fn_re.search(pred_path)
-            _level = int(match.group(1))
-            _seed = int(match.group(2))
-            _num_run = int(match.group(3))
-            _budget = float(match.group(4))
-            _instance = int(match.group(5))
-            selected_num_runs.append(_num_run)
+            # k -> [level, seed, num_run, budger]
+            selected_num_runs.append(k[2])
 
-        for pred_path in self.y_ens_files:
+        for k in set([(level, seed, num_run, budget)
+                      # Notice how we consider instances as a hole
+                      for level, seed, num_run, budget, instance in self.y_ens_files]):
 
             # Do not delete candidates
-            if pred_path in selected_keys:
+            if k in selected_keys:
                 continue
 
-            if pred_path in self._has_been_candidate:
+            if k in self._has_been_candidate:
                 continue
 
-            match = self.model_fn_re.search(pred_path)
-            _level = int(match.group(1))
-            _seed = int(match.group(2))
-            _num_run = int(match.group(3))
-            _budget = float(match.group(4))
-            _instance = int(match.group(5))
+            _level = int(k[0])
+            _seed = int(k[1])
+            _num_run = int(k[2])
+            _budget = float(k[3])
 
             # Do not delete low level predictions
             if self.max_stacking_level > 1 and _level < self.max_stacking_level:
@@ -1577,6 +1619,13 @@ class EnsembleBuilder(object):
             if _num_run == 1 or _num_run in selected_num_runs:
                 continue
 
+            if k not in self.read_losses:
+                self.logger.error(
+                    f"Could not find {k} in scored predictions {self.read_losses}"
+                )
+                continue
+            instances = list(self.read_losses[k]['mtime_ens'].keys())
+
             # If only using high folds, we can only delete low budget folds for the
             # current selected models. We do NOT know if other configurations are going
             # to used
@@ -1584,20 +1633,53 @@ class EnsembleBuilder(object):
             if self.ensemble_folds is not None and _num_run not in selected_num_runs:
                 continue
 
-            numrun_dir = self.backend.get_numrun_directory(
-                _level, _seed, _num_run, _budget, _instance)
-            try:
-                os.rename(numrun_dir, numrun_dir + '.old')
-                shutil.rmtree(numrun_dir + '.old')
-                self.logger.info("Deleted files of non-candidate model %s", pred_path)
-                self.read_losses[pred_path]["disc_space_cost_mb"] = None
-                self.read_losses[pred_path]["loaded"] = 3
-                self.read_losses[pred_path]["ens_loss"] = np.inf
-            except Exception as e:
-                self.logger.error(
-                    "Failed to delete files of non-candidate model %s due"
-                    " to error %s", pred_path, e
+            for _instance in instances:
+                numrun_dir = self.backend.get_numrun_directory(
+                    _level, _seed, _num_run, _budget, _instance)
+                try:
+                    os.rename(numrun_dir, numrun_dir + '.old')
+                    shutil.rmtree(numrun_dir + '.old')
+                    self.logger.info("Deleted files of non-candidate model %s", numrun_dir)
+                    self.read_losses[k]["disc_space_cost_mb"] = None
+                    self.read_losses[k]["loaded"] = 3
+                    self.read_losses[k]["ens_loss"] = np.inf
+                except Exception as e:
+                    self.logger.error(
+                        "Failed to delete files of non-candidate model %s due"
+                        " to error %s", k, e
+                    )
+
+    def read_identifier_predictions_for_instances(self, identifier: IDENTIFIER_TYPE,
+                                                  instances: List[int], subset: str
+                                                  ) -> np.ndarray:
+        # Read the prediction one at a time due to memory
+        # concern while stile doing the average!
+        y_ensemble = None
+
+        level, seed, idx, budget = identifier
+        for instance in instances:
+            filename = self.backend.get_prediction_filename(
+                subset, level, seed, idx, budget, instance
+            )
+            model_directory = self.backend.get_numrun_directory(level, seed, idx, budget, instance)
+            pred_path = os.path.join(model_directory, filename)
+            # TODO: Ask if this support is required?
+            if not os.path.exists(pred_path) and os.path.exists(f"{pred_path}.gz"):
+                pred_path = f"{pred_path}.gz"
+            if y_ensemble is None:
+                y_ensemble = self._read_np_fn(pred_path)
+            else:
+                np.add(
+                    self._read_np_fn(pred_path),
+                    y_ensemble,
+                    out=y_ensemble,
                 )
+        np.multiply(
+            y_ensemble,
+            1 / len(instances),
+            out=y_ensemble,
+        )
+        return y_ensemble
 
     def _read_np_fn(self, path):
 
