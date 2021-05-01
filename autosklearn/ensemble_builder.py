@@ -1620,9 +1620,9 @@ class EnsembleBuilder(object):
                 continue
 
             if k not in self.read_losses:
-                self.logger.error(
-                    f"Could not find {k} in scored predictions {self.read_losses}"
-                )
+                # This happens when we have a run that just got to level=2 repeat=0
+                # whereas the current repetition of the members are repeat=5
+                # We do not waste time calculating this identifier unless needed
                 continue
             instances = list(self.read_losses[k]['mtime_ens'].keys())
 

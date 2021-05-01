@@ -347,8 +347,9 @@ class TrainEvaluator(AbstractEvaluator):
                 axis=1
             )
             if 'data_preprocessing:categorical_features' in self._init_params:
-                dimensionality = np.shape(idx2predict[self.base_models_[0]])[1]
                 for identifier in self.base_models_:
+                    shape = np.shape(idx2predict[identifier])
+                    dimensionality = shape[1] if len(shape) > 1 else 1
                     for i in range(dimensionality):
                         self._init_params['data_preprocessing:categorical_features'].append(False)
 
@@ -717,10 +718,12 @@ class TrainEvaluator(AbstractEvaluator):
                 opt_fold_weights.append(len(test_split))
 
                 if (
+                    enable_median_rule_prunning and
                     training_folds is not None and
+                    # Just prune for new configurations!
                     i == 0 and
                     self.instance == 0 and
-                    enable_median_rule_prunning
+                    self.level == 1
                 ):
                     # We are on the first fold, and we want to quickly kill runs
                     # that are bad, so we do not waste precious training time specially

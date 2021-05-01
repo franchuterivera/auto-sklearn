@@ -10,6 +10,7 @@ import warnings
 
 import dask.distributed
 import pynisher
+import numpy as np
 
 from smac.facade.smac_ac_facade import SMAC4AC
 from smac.intensification.simple_intensifier import SimpleIntensifier
@@ -416,6 +417,8 @@ class AutoMLSMBO(object):
 
         metalearning_configurations = self.get_metalearning_suggestions()
 
+        enable_heuristic = self.resampling_strategy_args.get('enable_heuristic', True)
+
         if self.resampling_strategy in ['partial-cv',
                                         'partial-cv-iterative-fit']:
             num_folds = self.resampling_strategy_args['folds']
@@ -424,6 +427,7 @@ class AutoMLSMBO(object):
                          for fold_number in range(num_folds)]
         elif self.resampling_strategy in ['intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
+            num_points = np.shape(self.datamanager.data['X_train'])[0]
             repeats = range(num_repeats)
             if 'train_all_repeat_together' in self.resampling_strategy_args:
                 if self.resampling_strategy_args['train_all_repeat_together']:
@@ -438,6 +442,15 @@ class AutoMLSMBO(object):
                                     'level': level,
                                     })
                     ])
+                    if (
+                        level == 1
+                        and enable_heuristic
+                        and not self.enough_time_to_do_repeats(num_points)
+                    ):
+                        # If not enough time to do repetitions at level
+                        # zero, it is more useful to stack models than
+                        # to do a few repetitions
+                        break
 
         else:
             instances = [[json.dumps(
@@ -679,3 +692,37 @@ class AutoMLSMBO(object):
         if meta_features is None:
             metalearning_configurations = []
         return metalearning_configurations
+
+    def enough_time_to_do_repeats(self, num_points: int):
+        """
+        Implements a heuristic to identify if with the allocated
+        time limit in seconds, we can fit a round of repetitions before
+        moving to the next level.
+
+        It is more promising to to stacking than just a few repetitions.
+        Parameters
+        ----------
+
+        Returns
+        -------
+        (bool):
+            True if there is enough time to do repetitions at a given level
+        """
+        num_repeats = self.resampling_strategy_args['repeats']
+        # Todo: Unhardcode this, and take it from the intensifier arguments
+        max_ensemble_members = self.resampling_strategy_args.get('max_ensemble_members', 10)
+        if isinstance(num_repeats, list):
+            required_runs = len(typing.cast(list, num_repeats)
+                                ) * max_ensemble_members * len(self.stacking_levels)
+        else:
+            required_runs = typing.cast(int, num_repeats
+                                        ) * max_ensemble_members * len(self.stacking_levels)
+        self.logger.critical(
+            "{} ({} / (0.01 * {})) > {}".format(
+                (self.total_walltime_limit * self.n_jobs / (0.01 * num_points)) > required_runs,
+                self.total_walltime_limit * self.n_jobs,
+                num_points,
+                required_runs,
+            )
+        )
+        return (self.total_walltime_limit * self.n_jobs / (0.01 * num_points)) > required_runs
