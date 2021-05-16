@@ -174,11 +174,14 @@ class AutoML(BaseEstimator):
         self._seed = seed
         self._max_stacking_level = max_stacking_level
         self._stacking_strategy = stacking_strategy
-        if self._max_stacking_level > 1 and self._stacking_strategy not in [
-            'time_split',
-            'instances_anyasbase',
-            'instances_selfasbase',
-        ]:
+        if (
+            self._max_stacking_level is not None and
+            self._max_stacking_level > 1 and
+            self._stacking_strategy not in [
+                'time_split',
+                'instances_anyasbase',
+                'instances_selfasbase']
+        ):
             raise ValueError(f"Unsupported stacking strategy {self._max_stacking_level}")
         self._memory_limit = memory_limit
         self._data_memory_limit = None
@@ -816,7 +819,7 @@ class AutoML(BaseEstimator):
             )
 
         self.started_registered_time = time.time()
-        if 'time_split' in self._stacking_strategy:
+        if self._stacking_strategy is not None and 'time_split' in self._stacking_strategy:
             # Calculate the time each smac should last. This elapsed time here
             # makes the overhead up to this point which is usually less than 0.5 seconds
             # and is substracted from all smac runs to be safe
@@ -916,6 +919,7 @@ class AutoML(BaseEstimator):
                 dask_client=self._dask_client,
                 start_num_run=self.num_run,
                 num_metalearning_cfgs=0 if (
+                    self._stacking_strategy is not None and
                     'time_split' in self._stacking_strategy and level > 1
                 ) else self._initial_configurations_via_metalearning,
                 initial_configurations=initial_configurations,
@@ -924,7 +928,10 @@ class AutoML(BaseEstimator):
                 # here the stacking levels will be converted as part of the instances,
                 # so that evaluator closures can decide what to do with this
                 stacking_levels=list(
-                    range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
+                    range(1, level + 1)) if (
+                        self._stacking_strategy is not None and
+                        'instances' in self._stacking_strategy
+                    ) else [level],
                 run_id=run_id,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,

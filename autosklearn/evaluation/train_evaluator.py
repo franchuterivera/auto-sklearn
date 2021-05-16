@@ -974,7 +974,12 @@ class TrainEvaluator(AbstractEvaluator):
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
 
-            self.logger.critical(f"FINISHED num_run={self.num_run} instance={self.instance} level={self.level} training_folds={training_folds} with loss={opt_loss} train={np.shape(self.X_train)} and base_models={self.base_models_}")
+            self.logger.critical(
+                f"FINISHED num_run={self.num_run} instance={self.instance} "
+                f"level={self.level} training_folds={training_folds} with "
+                f"loss={opt_loss} train={np.shape(self.X_train)} "
+                f"and base_models={self.base_models_}"
+            )
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -988,12 +993,12 @@ class TrainEvaluator(AbstractEvaluator):
                 opt_losses=opt_losses,
             )
 
-    def end_train_if_worst_than_median(self, optimization_loss: float) -> None:
+    def end_train_if_worst_than_median(self, optimization_loss: float, index: int = 0) -> None:
         # Get all the fold0 repeat0 losses
         older_runs_opt_losses = [
-            losses[0] for losses in self.backend.load_opt_losses(
+            losses[index] for losses in self.backend.load_opt_losses(
                 instances=[0], levels=[1]
-            )
+            ) if (losses is not None and len(losses) > index)
         ]
 
         min_prune_members = cast(int, self.resampling_strategy_args.get('min_prune_members', 10))
@@ -1099,6 +1104,8 @@ class TrainEvaluator(AbstractEvaluator):
                 max_iter = model_max_iter
             model_current_iter = 0
 
+            opt_losses = []
+
             while (
                 not model.configuration_fully_fitted() and model_current_iter < max_iter
             ):
@@ -1124,6 +1131,10 @@ class TrainEvaluator(AbstractEvaluator):
                 loss = self._loss(self.Y_train[test_indices], Y_optimization_pred)
                 additional_run_info = model.get_additional_run_info()
 
+                # Store the opt losses through iterations
+                opt_losses.append(loss[self.metric.name]
+                                  if isinstance(loss, dict) else loss)
+
                 model_current_iter = model.get_current_iter()
                 if model_current_iter < max_iter:
                     status = StatusType.DONOTADVANCE
@@ -1135,6 +1146,21 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     final_call = False
 
+                if final_call is False:
+                    # Do not continue to next iteration if the performance
+                    # is not good, as compared to other configurations
+                    try:
+                        self.end_train_if_worst_than_median(
+                            optimization_loss=loss[self.metric.name]
+                            if isinstance(loss, dict) else loss,
+                            index=iteration
+                        )
+                    except MedianPruneException as e:
+                        self.logger.debug(
+                            f"Stopped num_run={self.num_run} @iteration={iteration}: {str(e)}")
+                        final_call = True
+                        model_current_iter = max_iter
+
                 self.finish_up(
                     loss=loss,
                     train_loss=train_loss,
@@ -1145,6 +1171,7 @@ class TrainEvaluator(AbstractEvaluator):
                     file_output=file_output,
                     final_call=final_call,
                     status=status,
+                    opt_losses=opt_losses,
                 )
                 iteration += 1
 
