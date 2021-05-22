@@ -313,7 +313,8 @@ class AbstractEvaluator(object):
         return model
 
     def _loss(self, y_true: np.ndarray, y_hat: np.ndarray,
-              scoring_functions: Optional[List[Scorer]] = None
+              scoring_functions: Optional[List[Scorer]] = None,
+              metric: Optional[Scorer] = None,
               ) -> Union[float, Dict[str, float]]:
         """Auto-sklearn follows a minimization goal.
         The calculate_loss internally translate a score function to
@@ -330,14 +331,15 @@ class AbstractEvaluator(object):
             if scoring_functions is None
             else scoring_functions
         )
+        metric_ = metric if metric is not None else self.metric
         if not isinstance(self.configuration, Configuration):
             if scoring_functions:
-                return {self.metric.name: self.metric._worst_possible_result}
+                return {metric_.name: metric_._worst_possible_result}
             else:
-                return self.metric._worst_possible_result
+                return metric_._worst_possible_result
 
         return calculate_loss(
-            y_true, y_hat, self.task_type, self.metric,
+            y_true, y_hat, self.task_type, metric_,
             scoring_functions=scoring_functions)
 
     def finish_up(
@@ -352,6 +354,7 @@ class AbstractEvaluator(object):
         final_call: bool,
         status: StatusType,
         opt_losses: Optional[List[float]] = None,
+        loss_log_loss: Optional[float] = None,
     ) -> Tuple[float, Union[float, Dict[str, float]], int,
                Dict[str, Union[str, int, float, Dict, List, Tuple]]]:
         """This function does everything necessary after the fitting is done:
@@ -373,6 +376,7 @@ class AbstractEvaluator(object):
             'status': status,
             'modeltype': modeltype,
             'opt_losses': opt_losses,
+            'loss_log_loss': loss_log_loss,
         }
 
         if file_output:

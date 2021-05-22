@@ -38,7 +38,7 @@ from autosklearn.constants import (
     MULTIOUTPUT_REGRESSION
 )
 from autosklearn.pipeline.components.base import IterativeComponent
-from autosklearn.metrics import Scorer
+from autosklearn.metrics import Scorer, log_loss
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
 
@@ -278,6 +278,8 @@ class TrainEvaluator(AbstractEvaluator):
                 # This is the first time we decide the models to stack
                 # we might want to limit the amount of models we read
                 stack_at_most = self.resampling_strategy_args.get('stack_at_most')
+                stack_based_on_log_loss = self.resampling_strategy_args.get(
+                    'stack_based_on_log_loss', False)
                 if stack_at_most is not None and len(identifiers) > int(stack_at_most):
                     modeltypes = [
                         self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
@@ -293,15 +295,22 @@ class TrainEvaluator(AbstractEvaluator):
                     # of all available repetitions. We do so here, because it is imperative to
                     # stack the best performing models!
                     if not repeats_as_individual_models:
+                        if stack_based_on_log_loss:
+                            loss_type = 'loss_log_loss'
+                        else:
+                            loss_type = 'loss'
                         losses = [
                             self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                                 level=level_, seed=seed_, idx=num_run_,
                                 budget=budget_, instance=instance_[0],
-                            )['loss'] for level_, seed_, num_run_, budget_, instance_ in identifiers
+                            )[
+                                loss_type
+                            ] for level_, seed_, num_run_, budget_, instance_ in identifiers
                         ]
                     else:
                         y_true_ensemble = self.backend.load_targets_ensemble()
-                        losses = [self._loss(y_true_ensemble, idx2predict[identifier])
+                        losses = [self._loss(y_true_ensemble, idx2predict[identifier],
+                                             metric=log_loss if stack_based_on_log_loss else None)
                                   for identifier in identifiers]
                         del y_true_ensemble
 
@@ -977,12 +986,23 @@ class TrainEvaluator(AbstractEvaluator):
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
 
+            loss_log_loss: Optional[float] = None
+            stack_based_on_log_loss = self.resampling_strategy_args.get(
+                'stack_based_on_log_loss', False)
+            if stack_based_on_log_loss:
+                loss_log_loss = cast(float, self._loss(
+                    self.Y_optimization,
+                    Y_optimization_pred,
+                    metric=log_loss,
+                ))
+
             self.logger.critical(
                 f"FINISHED num_run={self.num_run} instance={self.instance} "
                 f"level={self.level} training_folds={training_folds} with "
                 f"loss={opt_loss} train={np.shape(self.X_train)} and "
-                f"base_models={self.base_models_}"
+                f"base_models={self.base_models_} log_loss={loss_log_loss}"
             )
+
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -994,6 +1014,7 @@ class TrainEvaluator(AbstractEvaluator):
                 final_call=True,
                 status=status,
                 opt_losses=opt_losses,
+                loss_log_loss=loss_log_loss,
             )
 
     def end_train_if_worst_than_median(self, optimization_loss: float) -> None:
