@@ -878,6 +878,8 @@ class TrainEvaluator(AbstractEvaluator):
                     status = StatusType.SUCCESS
 
             # We do averaging if requested AND if at least 2 repetition have passed
+            cost_as_avg_of_instances = self.resampling_strategy_args.get(
+                'cost_as_avg_of_instances', True)
             if (
                 # This is only required on intensifier-cv
                 self.resampling_strategy == 'intensifier-cv' and
@@ -926,10 +928,11 @@ class TrainEvaluator(AbstractEvaluator):
                         1/(self.instance + 1),
                         out=Y_optimization_pred,
                     )
-                    opt_loss = cast(Dict, self._loss(
-                        self.Y_optimization,
-                        Y_optimization_pred,
-                    ))
+                    if cost_as_avg_of_instances:
+                        opt_loss = cast(Dict, self._loss(
+                            self.Y_optimization,
+                            Y_optimization_pred,
+                        ))
 
                     # Then TEST
                     lower_prediction = \
@@ -974,7 +977,12 @@ class TrainEvaluator(AbstractEvaluator):
             # repetition from the repeats*folds we use
             self.models = [model for model in self.models if model is not None]
 
-            self.logger.critical(f"FINISHED num_run={self.num_run} instance={self.instance} level={self.level} training_folds={training_folds} with loss={opt_loss} train={np.shape(self.X_train)} and base_models={self.base_models_}")
+            self.logger.critical(
+                f"FINISHED num_run={self.num_run} instance={self.instance} "
+                f"level={self.level} training_folds={training_folds} with "
+                f"loss={opt_loss} train={np.shape(self.X_train)} and "
+                f"base_models={self.base_models_}"
+            )
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
