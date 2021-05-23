@@ -511,7 +511,7 @@ class AbstractEvaluator(object):
 
         models: Optional[BaseEstimator] = None
         if hasattr(self, 'models'):
-            if len(self.models) > 0 and self.models[0] is not None:  # type: ignore[attr-defined]
+            if any([model_ is not None for model_ in self.models]):  # type: ignore[attr-defined]
                 if ('models' not in self.disable_file_output):
 
                     if self.task_type in CLASSIFICATION_TASKS:
@@ -519,7 +519,12 @@ class AbstractEvaluator(object):
                     else:
                         models = VotingRegressor(estimators=None)
                     # Mypy cannot understand hasattr yet
-                    models.estimators_ = self.models  # type: ignore[attr-defined]
+                    models.estimators_ = [
+                        model for model in self.models  # type: ignore[attr-defined]
+                        # Notice that self.models might not have
+                        # every fold fitted if we do a partial fit
+                        if model is not None
+                    ]
                     models.base_models_ = self.base_models_
 
         self.backend.save_numrun_to_dir(

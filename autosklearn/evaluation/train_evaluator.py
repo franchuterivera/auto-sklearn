@@ -46,7 +46,8 @@ from autosklearn.util.repeated_kfold import RepeatedStratifiedMultiKFold
 
 
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
-           'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative', 'eval_intensifier_cv']
+           'eval_cv', 'eval_partial_cv', 'eval_partial_cv_iterative', 'eval_intensifier_cv',
+           'eval_partial_iterative_intensifier_cv']
 
 baseCrossValidator_defaults: Dict[str, Dict[str, Optional[Union[int, float, str]]]] = {
     'GroupKFold': {'n_splits': 3},
@@ -246,7 +247,7 @@ class TrainEvaluator(AbstractEvaluator):
 
         if self.level > 1:
             # For now I only want to use the higesht budget available
-            assert resampling_strategy == 'intensifier-cv'
+            assert resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']
             if self.resampling_strategy_args['stacking_strategy'] == 'instances_anyasbase':
                 idxs = None
             else:
@@ -254,8 +255,8 @@ class TrainEvaluator(AbstractEvaluator):
 
             train_all_repeat_together = self.resampling_strategy_args.get(
                 'train_all_repeat_together', False)
-            repeats_as_individual_models = self.resampling_strategy_args.get(
-                'repeats_as_individual_models', True)
+            fidelities_as_individual_models = self.resampling_strategy_args.get(
+                'fidelities_as_individual_models', False)
             if self.instance == 0 or train_all_repeat_together:
                 idx2predict = self.backend.load_model_predictions(
                     # Ensemble correspond to the OOF prediction that have previously
@@ -267,10 +268,10 @@ class TrainEvaluator(AbstractEvaluator):
                     idxs=idxs,
                     # This means whether we only load the last repetition available
                     # or if we should load all repetitions available and just average
-                    # if repeats_as_individual_models==True backend will do the average
-                    # for us, repeats_as_individual_models==False means that during
+                    # if fidelities_as_individual_models==True backend will do the average
+                    # for us, fidelities_as_individual_models==False means that during
                     # train evaluator, the predictions are progressively averaged
-                    repeats_as_individual_models=repeats_as_individual_models,
+                    fidelities_as_individual_models=fidelities_as_individual_models,
                     train_all_repeat_together=train_all_repeat_together,
                 )
                 identifiers = [k for k in idx2predict.keys()]
@@ -287,12 +288,12 @@ class TrainEvaluator(AbstractEvaluator):
                             instance=instances_[0])['modeltype']
                         for level_, seed_, num_run_, budget_, instances_ in identifiers]
 
-                    # Here is one of the justifiers for repeats_as_individual_models==False
+                    # Here is one of the justifiers for fidelities_as_individual_models==False
                     # If all repetitions are treated as individual models, then the only
                     # way to know the real performance estimate is to recompute the predictions
                     # of all available repetitions. We do so here, because it is imperative to
                     # stack the best performing models!
-                    if not repeats_as_individual_models:
+                    if not fidelities_as_individual_models:
                         losses = [
                             self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
                                 level=level_, seed=seed_, idx=num_run_,
@@ -404,26 +405,32 @@ class TrainEvaluator(AbstractEvaluator):
                 # call this method again without the iterative argument
                 model = self._get_model()
                 if not model.estimator_supports_iterative_fit():
-                    self.fit_predict_and_loss(iterative=False)
+                    self.fit_predict_and_loss(iterative=False, training_folds=training_folds)
                     return
 
                 self.partial = False
 
                 converged = [False] * self.num_cv_folds
-
+                opt_indices: List[int] = []
+                Y_optimization_indices: List[Optional[List[int]]] = [None] * self.num_cv_folds
                 Y_train_pred = [None] * self.num_cv_folds
                 Y_optimization_pred = [None] * self.num_cv_folds
                 Y_valid_pred = [None] * self.num_cv_folds
                 Y_test_pred = [None] * self.num_cv_folds
                 train_splits = [None] * self.num_cv_folds
 
-                self.models = [self._get_model() for i in range(self.num_cv_folds)]
+                if self.resampling_strategy == 'partial-iterative-intensifier-cv':
+                    self.models = [self._get_model() if i == self.instance else None
+                                   for i in range(self.num_cv_folds)]
+                else:
+                    self.models = [self._get_model() for i in range(self.num_cv_folds)]
+
                 iterations = [1] * self.num_cv_folds
                 total_n_iterations = [0] * self.num_cv_folds
                 # model.estimator_supports_iterative_fit -> true
                 # After the if above, we know estimator support iterative fit
                 model_max_iter = [cast(IterativeComponent, model).get_max_iter()
-                                  for model in self.models]
+                                  for model in self.models if model is not None]
 
                 if self.budget_type in ['iterations', 'mixed'] and self.budget is None:
                     raise ValueError(f"When budget type is {self.budget_type} the budget "
@@ -451,6 +458,8 @@ class TrainEvaluator(AbstractEvaluator):
                 opt_losses = [np.NaN] * self.num_cv_folds
                 # weights for opt_losses.
                 opt_fold_weights = [np.NaN] * self.num_cv_folds
+                enable_median_rule_prunning = self.resampling_strategy_args.get(
+                    'enable_median_rule_prunning', True)
 
                 while not all(converged):
 
@@ -463,12 +472,28 @@ class TrainEvaluator(AbstractEvaluator):
                         if converged[i]:
                             continue
 
+                        if training_folds is not None and i not in training_folds:
+                            converged[i] = True
+                            continue
+
+                        # We need to store all the validation points so that
+                        # ensemble builder has as consistent target
+                        if iterations[i] == 1:
+                            self.Y_targets[i] = self.Y_train[test_indices]
+                            opt_indices.extend(test_indices)
+
+                        if (
+                            self.resampling_strategy == 'partial-iterative-intensifier-cv'
+                            and i != self.instance  # Because of partial, only a fold is fitted
+                        ):
+                            converged[i] = True
+                            continue
+
                         model = self.models[i]
 
                         if iterations[i] == 1:
                             self.Y_train_targets[train_indices] = \
                                 self.Y_train[train_indices]
-                            self.Y_targets[i] = self.Y_train[test_indices]
 
                             Xt, fit_params = model.fit_transformer(
                                 self.X_train[train_indices],
@@ -497,6 +522,7 @@ class TrainEvaluator(AbstractEvaluator):
                         Y_valid_pred[i] = valid_pred
                         Y_test_pred[i] = test_pred
                         train_splits[i] = train_indices
+                        Y_optimization_indices[i] = test_indices
 
                         # Compute train loss of this fold and store it. train_loss could
                         # either be a scalar or a dict of scalars with metrics as keys.
@@ -527,15 +553,33 @@ class TrainEvaluator(AbstractEvaluator):
                         ):
                             converged[i] = True
 
+                        if (
+                            enable_median_rule_prunning and
+                            training_folds is not None and
+                            # Just prune for new configurations!
+                            i == 0 and
+                            self.instance == 0 and
+                            self.level == 1
+                        ):
+                            # We are on the first fold, and we want to quickly kill runs
+                            # that are bad, so we do not waste precious training time specially
+                            # on big datasets
+                            self.end_train_if_worst_than_median(
+                                optimization_loss[self.metric.name]
+                                if isinstance(optimization_loss, dict) else optimization_loss
+                            )
+
                         iterations[i] = iterations[i] + 1
 
                     # Compute weights of each fold based on the number of samples in each
                     # fold.
                     train_fold_weights_percentage = [
-                        w / sum(train_fold_weights) for w in train_fold_weights
+                        w / np.nansum(train_fold_weights) for w in train_fold_weights
+                        if not np.isnan(w)
                     ]
                     opt_fold_weights_percentage = [
-                        w / sum(opt_fold_weights) for w in opt_fold_weights
+                        w / np.nansum(opt_fold_weights) for w in opt_fold_weights
+                        if not np.isnan(w)
                     ]
 
                     # train_losses is a list of either scalars or dicts. If it contains
@@ -543,72 +587,97 @@ class TrainEvaluator(AbstractEvaluator):
                     # (self.metric).
                     if all(isinstance(elem, dict) for elem in train_losses):
                         train_loss = np.average([train_losses[i][str(self.metric)]
-                                                 for i in range(self.num_cv_folds)],
+                                                 for i in range(self.num_cv_folds)
+                                                 if not np.isnan(train_losses[i])
+                                                 ],
                                                 weights=train_fold_weights_percentage,
                                                 )
                     else:
-                        train_loss = np.average(train_losses, weights=train_fold_weights_percentage)
+                        train_loss = np.average(
+                            [trainloss for trainloss in train_losses if not np.isnan(trainloss)],
+                            weights=train_fold_weights_percentage)
 
                     # if all_scoring_function is true, return a dict of opt_loss.
                     # Otherwise, return a scalar.
                     if self.scoring_functions:
-                        opt_loss = {}
+                        opt_loss = {}  # type: Union[float, Dict[str, float]]
                         for metric in opt_losses[0].keys():
-                            opt_loss[metric] = np.average(
+                            cast(Dict, opt_loss)[metric] = np.average(
                                 [
                                     opt_losses[i][metric]
                                     for i in range(self.num_cv_folds)
+                                    if not np.isnan(opt_losses[i])
                                 ],
                                 weights=opt_fold_weights_percentage,
                             )
                     else:
-                        opt_loss = np.average(opt_losses, weights=opt_fold_weights_percentage)
+                        opt_loss = np.average(
+                            # Add support for partial fit
+                            [optloss for optloss in opt_losses if not np.isnan(optloss)],
+                            weights=opt_fold_weights_percentage,
+                        )
 
-                    Y_targets = self.Y_targets
-                    Y_train_targets = self.Y_train_targets
-
-                    Y_optimization_preds = np.concatenate(
-                        [Y_optimization_pred[i] for i in range(self.num_cv_folds)
-                         if Y_optimization_pred[i] is not None])
-                    Y_targets = np.concatenate([
-                        Y_targets[i] for i in range(self.num_cv_folds)
-                        if Y_targets[i] is not None
-                    ])
-
-                    if self.X_valid is not None:
-                        Y_valid_preds = np.array([Y_valid_pred[i]
-                                                 for i in range(self.num_cv_folds)
-                                                 if Y_valid_pred[i] is not None])
-                        # Average the predictions of several models
-                        if len(Y_valid_preds.shape) == 3:
-                            Y_valid_preds = np.nanmean(Y_valid_preds, axis=0)
-                    else:
-                        Y_valid_preds = None
-
-                    if self.X_test is not None:
-                        Y_test_preds = np.array([Y_test_pred[i]
-                                                for i in range(self.num_cv_folds)
-                                                if Y_test_pred[i] is not None])
-                        # Average the predictions of several models
-                        if len(Y_test_preds.shape) == 3:
-                            Y_test_preds = np.nanmean(Y_test_preds, axis=0)
-                    else:
-                        Y_test_preds = None
-
-                    self.Y_optimization = Y_targets
-                    self.Y_actual_train = Y_train_targets
+                    (
+                        Y_optimization_pred_,
+                        Y_targets_,
+                        Y_valid_pred_,
+                        Y_test_pred_,
+                    ) = self.reorder_predictions(
+                        Y_optimization_pred=Y_optimization_pred,
+                        Y_targets=self.Y_targets,
+                        Y_valid_pred=Y_valid_pred,
+                        Y_test_pred=Y_test_pred,
+                        Y_optimization_indices=Y_optimization_indices,
+                        opt_indices=opt_indices,
+                    )
+                    self.Y_optimization = Y_targets_
+                    self.Y_actual_train = self.Y_train_targets
 
                     self.model = self._get_model()
                     status = StatusType.DONOTADVANCE
                     if any([model_current_iter == max_iter
                             for model_current_iter in models_current_iters]):
                         status = StatusType.SUCCESS
+
+                    if self.resampling_strategy == 'partial-iterative-intensifier-cv':
+                        folds_with_complete_oof = self.get_folds_with_complete_oof()
+                        if self.instance in folds_with_complete_oof:
+                            # First build the full prediction
+                            (
+                                Y_optimization_pred_,
+                                Y_test_pred_
+                            ) = self.build_full_predictions_from_fold(
+                                Y_optimization_pred_=Y_optimization_pred_,
+                                Y_test_pred_=Y_test_pred_,
+                            )
+
+                            # Then see if we can average with older fully complete repetitions
+                            # The method self.add_lower_instance_information only modify
+                            # the predictions if needed
+                            (
+                                opt_loss,
+                                Y_optimization_pred_,
+                                Y_test_pred_
+                            ) = self.add_lower_instance_information(
+                                opt_loss=opt_loss,
+                                Y_optimization_pred_=Y_optimization_pred_,
+                                Y_test_pred_=Y_test_pred_,
+                            )
+
+                    self.logger.critical(
+                        f"FINISH iter={iterative} num_run={self.num_run} instance={self.instance} "
+                        f"level={self.level} iter={max(iterations)} "
+                        f"training_folds={training_folds} with "
+                        f"loss={opt_loss} train={np.shape(self.X_train)} "
+                        f"and base_models={self.base_models_}"
+                    )
+
                     self.finish_up(
                         loss=opt_loss,
                         train_loss=train_loss,
-                        opt_pred=Y_optimization_preds,
-                        valid_pred=Y_valid_preds,
-                        test_pred=Y_test_preds,
+                        opt_pred=Y_optimization_pred_,
+                        valid_pred=Y_valid_pred_,
+                        test_pred=Y_test_pred_,
                         additional_run_info=additional_run_info,
                         file_output=True,
                         final_call=all(converged),
@@ -619,7 +688,7 @@ class TrainEvaluator(AbstractEvaluator):
 
             self.partial = False
 
-            opt_indices: List[int] = []
+            opt_indices = []
             Y_train_pred = [None] * self.num_cv_folds
             Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
@@ -647,6 +716,14 @@ class TrainEvaluator(AbstractEvaluator):
                     continue
 
                 opt_indices.extend(test_split)
+
+                if (
+                    self.resampling_strategy == 'partial-iterative-intensifier-cv'
+                    and i != self.instance  # Because of partial, only a fold is fitted
+                ):
+                    self.Y_targets[i] = self.Y_train[test_split]
+                    continue
+
                 # TODO add check that split is actually an integer array,
                 # not a boolean array (to allow indexed assignement of
                 # training data later).
@@ -760,91 +837,21 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 opt_loss = np.average(opt_losses, weights=opt_fold_weights)
 
-            Y_targets = self.Y_targets
-            Y_train_targets = self.Y_train_targets
-
-            Y_optimization_pred = np.concatenate(
-                [Y_optimization_pred[i] for i in range(self.num_cv_folds)
-                 if Y_optimization_pred[i] is not None])
-            Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
-                                        if Y_targets[i] is not None])
-
-            if self.X_valid is not None:
-                Y_valid_pred = np.array([Y_valid_pred[i]
-                                         for i in range(self.num_cv_folds)
-                                         if Y_valid_pred[i] is not None])
-                # Average the predictions of several models
-                if len(np.shape(Y_valid_pred)) == 3:
-                    Y_valid_pred = np.nanmean(Y_valid_pred, axis=0)
-
-            if self.X_test is not None:
-                Y_test_pred = np.array([Y_test_pred[i]
-                                        for i in range(self.num_cv_folds)
-                                        if Y_test_pred[i] is not None])
-                # Average the predictions of several models
-                if len(np.shape(Y_test_pred)) == 3:
-                    Y_test_pred = np.nanmean(Y_test_pred, axis=0)
-
-            train_all_repeat_together = self.resampling_strategy_args.get(
-                'train_all_repeat_together', False)
-            repeats_as_individual_models = self.resampling_strategy_args.get(
-                'repeats_as_individual_models', True)
-            if train_all_repeat_together:
-                Y_optimization_indices = np.concatenate(
-                    [Y_optimization_indices[i] for i in range(self.num_cv_folds)
-                     if Y_optimization_indices[i] is not None])
-                self.Y_optimization = Y_targets
-                self.Y_actual_train = Y_train_targets
-                """
-                Repeated splits means that we will have R repetitions and due to this,
-                R times the data size. We want to collapse the R with an average, so we
-                only have 1 set of OOF predictions rather than have them R times concated in
-                an array. This will remove the variance of the predictions and help to
-                reduce the overfit
-                """
-                # Reorder Y_optimization_pred and also the expected ground truth
-                repeats = self.splitter.n_repeats
-
-                # indices contains the indices that will convert
-                # Y_optimization_indices (a 10 datapoints, 3 repeated CV test)
-                # array([7, 0, 4, 5, 3, 2, 1, 8, 9, 6, 9, 6, 2, 1, 7, 0, 5, 3, 4, 8, 9, 7,
-                #        8, 4, 6, 3, 5, 2, 0, 1])
-                # to
-                # array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
-                #        1, 2, 3, 4, 5, 6, 7, 8, 9])
-                # The only tricky thing about this code is that you have to add split.shape[0]
-                # because when reordering the Y_optimization_pred, each split must account for
-                # each OOF prediction
-                indices = [np.concatenate(
-                    [np.argsort(split) + i * split.shape[0] for i, split in enumerate(
-                        np.split(Y_optimization_indices, repeats))])]
-                self.Y_optimization = np.mean(
-                    np.split(
-                        self.Y_optimization[indices],  # type: ignore[call-overload]
-                        repeats
-                    ), axis=0
-                )
-                Y_optimization_pred = np.mean(
-                    np.split(
-                        Y_optimization_pred[indices],  # type: ignore[call-overload]
-                        repeats
-                    ), axis=0
-                )
-                if self.X_test is not None:
-                    # Nothing to do for the test prediction. What is being done
-                    # here is an average of all
-                    # the k folds of all repetitions
-                    pass
-            else:
-                # Any prediction/GT saved to disk most be sorted to be able to compare predictions
-                # in ensemble selection
-                sort_indices = np.argsort(opt_indices)
-
-                # we do not have a fixed repetition number, but repetitions
-                # are split among different instances
-                self.Y_optimization = Y_targets[sort_indices]
-                self.Y_actual_train = Y_train_targets[sort_indices]
-                Y_optimization_pred = Y_optimization_pred[sort_indices]
+            (
+                Y_optimization_pred_,
+                Y_targets_,
+                Y_valid_pred_,
+                Y_test_pred_,
+            ) = self.reorder_predictions(
+                Y_optimization_pred=Y_optimization_pred,
+                Y_targets=self.Y_targets,
+                Y_valid_pred=Y_valid_pred,
+                Y_test_pred=Y_test_pred,
+                Y_optimization_indices=Y_optimization_indices,
+                opt_indices=opt_indices,
+            )
+            self.Y_optimization = Y_targets_
+            self.Y_actual_train = self.Y_train_targets
 
             if self.num_cv_folds > 1:
                 self.model = self._get_model()
@@ -878,6 +885,10 @@ class TrainEvaluator(AbstractEvaluator):
                     status = StatusType.SUCCESS
 
             # We do averaging if requested AND if at least 2 repetition have passed
+            train_all_repeat_together = self.resampling_strategy_args.get(
+                'train_all_repeat_together', False)
+            fidelities_as_individual_models = self.resampling_strategy_args.get(
+                'fidelities_as_individual_models', False)
             if (
                 # This is only required on intensifier-cv
                 self.resampling_strategy == 'intensifier-cv' and
@@ -892,90 +903,45 @@ class TrainEvaluator(AbstractEvaluator):
 
                 # And if we treat models as individual models, then we just output
                 # the fitter cv-split as it is. No need to average
-                not repeats_as_individual_models
+                not fidelities_as_individual_models
             ):
-                # Update the loss to reflect and average. Because we always have the same
-                # number of folds, we can do an average of average
-                try:
-                    # Average predictions -- Ensemble
+                opt_loss, Y_optimization_pred_, Y_test_pred_ = self.add_lower_instance_information(
+                    opt_loss=opt_loss,
+                    Y_optimization_pred_=Y_optimization_pred_,
+                    Y_test_pred_=Y_test_pred_,
+                )
 
-                    # We want to average the predictions only with the past repetition as follows:
-                    # Repeat 0: A/1
-                    # Repeat 1: (        1*A     + B  )/2
-                    # Repeat 2: (    2*(A + B)/2 + c  )/3
-                    # Notice we NEED only repeat N-1 for N averaging
-                    lower_prediction = \
-                        self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                            subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
-                            budget=self.budget, instance=self.instance - 1)
-                    # Remove the division from past iteration
-                    np.multiply(
-                        lower_prediction,
-                        self.instance,
-                        out=lower_prediction,
-                    )
-                    # Add them now that they are within the same range
-                    np.add(
-                        Y_optimization_pred,
-                        lower_prediction,
-                        out=Y_optimization_pred,
-                    )
-                    # Divide by total amount of repetitions
-                    np.multiply(
-                        Y_optimization_pred,
-                        1/(self.instance + 1),
-                        out=Y_optimization_pred,
-                    )
-                    opt_loss = cast(Dict, self._loss(
-                        self.Y_optimization,
-                        Y_optimization_pred,
-                    ))
-
-                    # Then TEST
-                    lower_prediction = \
-                        self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                            subset='test', level=self.level, seed=self.seed, idx=self.num_run,
-                            budget=self.budget, instance=self.instance - 1)
-                    # Remove the division from past iteration
-                    np.multiply(
-                        lower_prediction,
-                        self.instance,
-                        out=lower_prediction,
-                    )
-                    # Add them now that they are within the same range
-                    np.add(
-                        Y_test_pred,
-                        lower_prediction,
-                        out=Y_test_pred,
-                    )
-                    # Divide by total amount of repetitions
-                    np.multiply(
-                        Y_test_pred,
-                        1/(self.instance + 1),
-                        out=Y_test_pred,
+            if self.resampling_strategy == 'partial-iterative-intensifier-cv':
+                folds_with_complete_oof = self.get_folds_with_complete_oof()
+                if self.instance in folds_with_complete_oof:
+                    # First build the full prediction
+                    (
+                        Y_optimization_pred_,
+                        Y_test_pred_
+                    ) = self.build_full_predictions_from_fold(
+                        Y_optimization_pred_=Y_optimization_pred_,
+                        Y_test_pred_=Y_test_pred_,
                     )
 
-                    # And then finally the model needs to be average
-                    old_voting_model = \
-                        self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                            level=self.level, seed=self.seed, idx=self.num_run,
-                            budget=self.budget, instance=self.instance - 1,)
-                    # voting estimator has fitted estimators in a list
-                    # We expect from 0 to training_folds-1 to be taken from old models
-                    # then training_folds folds would be trained properly,
-                    # and the rest of repetition should be none
-                    for i in range(len(old_voting_model.estimators_)):
-                        self.models[i] = old_voting_model.estimators_[i]
-                except Exception as e:
-                    self.logger.error(traceback.format_exc())
-                    self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
+                    # Then see if we can average with older fully complete repetitions
+                    # The method self.add_lower_instance_information only modify
+                    # the predictions if needed
+                    (
+                        opt_loss,
+                        Y_optimization_pred_,
+                        Y_test_pred_
+                    ) = self.add_lower_instance_information(
+                        opt_loss=opt_loss,
+                        Y_optimization_pred_=Y_optimization_pred_,
+                        Y_test_pred_=Y_test_pred_,
+                    )
 
             # We do not train all folds :) -- because instances indicate what
             # repetition from the repeats*folds we use
-            self.models = [model for model in self.models if model is not None]
+            # self.models = [model for model in self.models if model is not None]
 
             self.logger.critical(
-                f"FINISHED num_run={self.num_run} instance={self.instance} "
+                f"FINISH iter={iterative} num_run={self.num_run} instance={self.instance} "
                 f"level={self.level} training_folds={training_folds} with "
                 f"loss={opt_loss} train={np.shape(self.X_train)} "
                 f"and base_models={self.base_models_}"
@@ -983,15 +949,290 @@ class TrainEvaluator(AbstractEvaluator):
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
-                opt_pred=Y_optimization_pred,
-                valid_pred=Y_valid_pred if self.X_valid is not None else None,
-                test_pred=Y_test_pred if self.X_test is not None else None,
+                opt_pred=Y_optimization_pred_,
+                valid_pred=Y_valid_pred_ if self.X_valid is not None else None,
+                test_pred=Y_test_pred_ if self.X_test is not None else None,
                 additional_run_info=additional_run_info,
                 file_output=True,
                 final_call=True,
                 status=status,
                 opt_losses=opt_losses,
             )
+
+    def reorder_predictions(self, Y_optimization_pred: List[np.ndarray],
+                            Y_targets: List[np.ndarray],
+                            Y_valid_pred: List[np.ndarray],
+                            Y_test_pred: List[np.ndarray],
+                            Y_optimization_indices: List[Optional[List[int]]],
+                            opt_indices: List[int],
+                            ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+
+        Y_optimization_pred_ = np.concatenate(
+            [Y_optimization_pred[i] for i in range(self.num_cv_folds)
+             if Y_optimization_pred[i] is not None])
+        Y_targets_ = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
+                                    if Y_targets[i] is not None])
+
+        Y_valid_pred_ = None
+        if self.X_valid is not None:
+            Y_valid_pred_ = np.array([Y_valid_pred[i]
+                                      for i in range(self.num_cv_folds)
+                                      if Y_valid_pred[i] is not None])
+            # Average the predictions of several models
+            if len(np.shape(Y_valid_pred_)) == 3:
+                Y_valid_pred_ = np.nanmean(Y_valid_pred_, axis=0)
+
+        Y_test_pred_ = None
+        if self.X_test is not None:
+            Y_test_pred_ = np.array([Y_test_pred[i]
+                                     for i in range(self.num_cv_folds)
+                                     if Y_test_pred[i] is not None])
+            # Average the predictions of several models
+            if len(np.shape(Y_test_pred_)) == 3:
+                Y_test_pred_ = np.nanmean(Y_test_pred_, axis=0)
+
+        # We act based on the fidelity, that is, for folds, we create
+        # a zero-array for target/prediction and fill it with the available
+        # predictions. For a full repetition, there are more complex strategies
+        # possible
+        fidelity = self.resampling_strategy_args.get('fidelity', 'repeats')
+        if fidelity == 'fold':
+            Y_optimization_pred__ = np.zeros((self.X_train.shape[0],
+                                             Y_optimization_pred_.shape[1]))
+            Y_optimization_indices_ = np.concatenate(
+                [Y_optimization_indices[i] for i in range(self.num_cv_folds)
+                 if Y_optimization_indices[i] is not None])
+            Y_optimization_pred__[Y_optimization_indices_] = Y_optimization_pred_
+
+            # The targets always correspond to the sorted predictions!
+            sort_indices = np.argsort(opt_indices)
+            Y_targets_ = Y_targets_[sort_indices]
+            return Y_optimization_pred__, Y_targets_, Y_valid_pred_, Y_test_pred_
+
+        train_all_repeat_together = self.resampling_strategy_args.get(
+            'train_all_repeat_together', False)
+        if train_all_repeat_together:
+            Y_optimization_indices_ = np.concatenate(
+                [Y_optimization_indices[i] for i in range(self.num_cv_folds)
+                 if Y_optimization_indices[i] is not None])
+            """
+            Repeated splits means that we will have R repetitions and due to this,
+            R times the data size. We want to collapse the R with an average, so we
+            only have 1 set of OOF predictions rather than have them R times concated in
+            an array. This will remove the variance of the predictions and help to
+            reduce the overfit
+            """
+            # Reorder Y_optimization_pred_ and also the expected ground truth
+            repeats = self.splitter.n_repeats
+
+            # indices contains the indices that will convert
+            # Y_optimization_indices (a 10 datapoints, 3 repeated CV test)
+            # array([7, 0, 4, 5, 3, 2, 1, 8, 9, 6, 9, 6, 2, 1, 7, 0, 5, 3, 4, 8, 9, 7,
+            #        8, 4, 6, 3, 5, 2, 0, 1])
+            # to
+            # array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
+            #        1, 2, 3, 4, 5, 6, 7, 8, 9])
+            # The only tricky thing about this code is that you have to add split.shape[0]
+            # because when reordering the Y_optimization_pred_, each split must account for
+            # each OOF prediction
+            indices = [np.concatenate(
+                [np.argsort(split) + i * split.shape[0] for i, split in enumerate(
+                    np.split(Y_optimization_indices_, repeats))])]
+            Y_targets_ = np.mean(
+                np.split(
+                    Y_targets_[indices],  # type: ignore[call-overload]
+                    repeats
+                ), axis=0
+            )
+            Y_optimization_pred_ = np.mean(
+                np.split(
+                    Y_optimization_pred_[indices],  # type: ignore[call-overload]
+                    repeats
+                ), axis=0
+            )
+            if self.X_test is not None:
+                # Nothing to do for the test prediction. What is being done
+                # here is an average of all
+                # the k folds of all repetitions
+                pass
+        else:
+            # Any prediction/GT saved to disk most be sorted to be able to compare predictions
+            # in ensemble selection
+            sort_indices = np.argsort(opt_indices)
+
+            # we do not have a fixed repetition number, but repetitions
+            # are split among different instances
+            Y_targets_ = Y_targets_[sort_indices]
+            Y_optimization_pred_ = Y_optimization_pred_[sort_indices]
+        return Y_optimization_pred_, Y_targets_, Y_valid_pred_, Y_test_pred_
+
+    def get_folds_with_complete_oof(self) -> List[int]:
+        folds = self.resampling_strategy_args.get('folds')
+        repeats = cast(int, self.resampling_strategy_args.get('repeats'))
+        folds_with_complete_oof = []
+        if isinstance(folds, list):
+            for i, fold in enumerate(folds):
+                if i > 0:
+                    folds_with_complete_oof.append(fold - 1 + sum([folds[f] for f in range(i)]))
+                else:
+                    folds_with_complete_oof.append(fold - 1)
+        else:
+            for i, fold in enumerate(range(repeats)):
+                folds_with_complete_oof.append(fold - 1 + fold * i)
+        return folds_with_complete_oof
+
+    def add_lower_instance_information(self,
+                                       opt_loss: Union[float, Dict[str, float]],
+                                       Y_optimization_pred_: np.ndarray,
+                                       Y_test_pred_: np.ndarray
+                                       ) -> Tuple[Union[float, Dict[str, float]],
+                                                  np.ndarray, np.ndarray]:
+        fidelity = self.resampling_strategy_args.get('fidelity', 'repeats')
+        if fidelity == 'fold':
+            # Let us say folds are [0, 1, 2,|| 3, 4, 5, || 6, 7, 8, 9]
+            # and on folds 2, 5, 9 we complete a full repetition.
+            # Then if self.instance is in [2, 5, 9] we can average with a lower
+            # full repetitions. So if self.instance==5, lower instance should be 2
+            lower_instance = -1
+            folds_with_complete_oof = self.get_folds_with_complete_oof()
+            for instance_ in folds_with_complete_oof:
+                if instance_ < self.instance:
+                    lower_instance = instance_
+            if self.instance not in folds_with_complete_oof or lower_instance < 0:
+                return opt_loss, Y_optimization_pred_, Y_test_pred_
+            number_of_repetitions_already_avg = folds_with_complete_oof.index(self.instance)
+            self.logger.critical(f"For num_run={self.num_run} fidelity={fidelity} instance={self.instance} level={self.level} folds_with_complete_oof={folds_with_complete_oof} number_of_repetitions_already_avg={number_of_repetitions_already_avg}")
+        else:
+            lower_instance = self.instance - 1
+            number_of_repetitions_already_avg = self.instance
+        # Update the loss to reflect and average. Because we always have the same
+        # number of folds, we can do an average of average
+        self.logger.critical(f"For num_run={self.num_run} fidelity={fidelity} instance={self.instance} level={self.level} lower_instance={lower_instance} number_of_repetitions_already_avg={number_of_repetitions_already_avg}")
+        try:
+            # Average predictions -- Ensemble
+
+            # We want to average the predictions only with the past repetition as follows:
+            # Repeat 0: A/1
+            # Repeat 1: (        1*A     + B  )/2
+            # Repeat 2: (    2*(A + B)/2 + c  )/3
+            # Notice we NEED only repeat N-1 for N averaging
+            lower_prediction = \
+                self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
+                    budget=self.budget, instance=lower_instance)
+            # Remove the division from past iteration
+            np.multiply(
+                lower_prediction,
+                # self.instance,
+                number_of_repetitions_already_avg,
+                out=lower_prediction,
+            )
+            # Add them now that they are within the same range
+            np.add(
+                Y_optimization_pred_,
+                lower_prediction,
+                out=Y_optimization_pred_,
+            )
+            # Divide by total amount of repetitions
+            np.multiply(
+                Y_optimization_pred_,
+                # 1/(self.instance + 1),
+                1/(number_of_repetitions_already_avg + 1),
+                out=Y_optimization_pred_,
+            )
+            opt_loss_before = opt_loss
+            opt_loss = self._loss(
+                self.Y_optimization,
+                Y_optimization_pred_,
+            )
+            self.logger.critical(f"For num_run={self.num_run} level={self.level} "
+                                 f"instance={self.instance} opt_loss_before={opt_loss_before} "
+                                 f"now it is opt_loss={opt_loss}")
+
+            # Then TEST
+            lower_prediction = \
+                self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    subset='test', level=self.level, seed=self.seed, idx=self.num_run,
+                    budget=self.budget, instance=lower_instance)
+            # Remove the division from past iteration
+            np.multiply(
+                lower_prediction,
+                # self.instance,
+                number_of_repetitions_already_avg,
+                out=lower_prediction,
+            )
+            # Add them now that they are within the same range
+            np.add(
+                Y_test_pred_,
+                lower_prediction,
+                out=Y_test_pred_,
+            )
+            # Divide by total amount of repetitions
+            np.multiply(
+                Y_test_pred_,
+                # 1/(self.instance + 1),
+                1/(number_of_repetitions_already_avg + 1),
+                out=Y_test_pred_,
+            )
+
+            # And then finally the model needs to be average
+            old_voting_model = \
+                self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                    level=self.level, seed=self.seed, idx=self.num_run,
+                    budget=self.budget, instance=lower_instance)
+            # voting estimator has fitted estimators in a list
+            # We expect from 0 to training_folds-1 to be taken from old models
+            # then training_folds folds would be trained properly,
+            # and the rest of repetition should be none
+            for i in range(len(old_voting_model.estimators_)):
+                self.models[i] = old_voting_model.estimators_[i]
+        except Exception as e:
+            self.logger.error(traceback.format_exc())
+            self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
+        return opt_loss, Y_optimization_pred_, Y_test_pred_
+
+    def build_full_predictions_from_fold(self,
+                                         Y_optimization_pred_: np.ndarray,
+                                         Y_test_pred_: np.ndarray
+                                         ) -> Tuple[np.ndarray, np.ndarray]:
+        folds_with_complete_oof = self.get_folds_with_complete_oof()
+        upper_range_for_this_fold = self.instance
+        lower_range_for_this_fold = 0
+        fold_index = folds_with_complete_oof.index(self.instance)
+        if fold_index > 0:
+            lower_range_for_this_fold = folds_with_complete_oof[fold_index - 1] + 1
+
+        self.logger.critical(f"For num_run={self.num_run} instance={self.instance} level={self.level} building full pred folds_with_complete_oof={folds_with_complete_oof} {range(lower_range_for_this_fold, upper_range_for_this_fold)}")
+        for lower_instance in range(lower_range_for_this_fold, upper_range_for_this_fold):
+            self.logger.critical(f"For num_run={self.num_run} instance={self.instance} level={self.level} building full pred lower_instance={lower_instance}")
+            try:
+                # Read all lower folds and add them together to build a full OOF prediction
+                # All lower level folds have zero on the in-fold prediction and a prediction
+                # on the fold's OOF indices.
+                lower_prediction = \
+                    self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
+                        budget=self.budget, instance=lower_instance)
+                np.add(
+                    Y_optimization_pred_,
+                    lower_prediction,
+                    out=Y_optimization_pred_,
+                )
+
+                # Then TEST
+                lower_prediction = \
+                    self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='test', level=self.level, seed=self.seed, idx=self.num_run,
+                        budget=self.budget, instance=lower_instance)
+                np.add(
+                    Y_test_pred_,
+                    lower_prediction,
+                    out=Y_test_pred_,
+                )
+            except Exception as e:
+                self.logger.error(traceback.format_exc())
+                self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
+        return Y_optimization_pred_, Y_test_pred_
 
     def end_train_if_worst_than_median(self, optimization_loss: float, index: int = 0) -> None:
         # Get all the fold0 repeat0 losses
@@ -1433,13 +1674,15 @@ class TrainEvaluator(AbstractEvaluator):
                     cv = PredefinedSplit(test_fold=test_fold)
                     cv.n_splits = 1  # As sklearn is inconsistent here
             elif self.resampling_strategy in ['cv', 'cv-iterative-fit', 'partial-cv',
-                                              'partial-cv-iterative-fit', 'intensifier-cv']:
+                                              'partial-cv-iterative-fit', 'intensifier-cv',
+                                              'partial-iterative-intensifier-cv']:
 
                 # WorkAround -- set here for the time being
                 if isinstance(self.resampling_strategy_args['folds'], list):
                     return RepeatedStratifiedMultiKFold(
                         n_splits=self.resampling_strategy_args['folds'],
                         n_repeats=repeats,
+                        random_state=1,
                     )
 
                 if shuffle:
@@ -1835,5 +2078,85 @@ def eval_intensifier_cv(
             int(folds * int(repeat)),
             int(folds * (int(repeat) + 1)),
         ))
+
+    evaluator.fit_predict_and_loss(iterative=iterative, training_folds=training_folds)
+
+
+def eval_partial_iterative_intensifier_cv(
+    queue: multiprocessing.Queue,
+    config: Union[int, Configuration],
+    backend: Backend,
+    resampling_strategy: Union[str, BaseCrossValidator, _RepeatedSplits, BaseShuffleSplit],
+    resampling_strategy_args: Dict[str, Optional[Union[float, int, str]]],
+    metric: Scorer,
+    seed: int,
+    num_run: int,
+    instance: str,
+    scoring_functions: Optional[List[Scorer]],
+    output_y_hat_optimization: bool,
+    include: Optional[List[str]],
+    exclude: Optional[List[str]],
+    disable_file_output: bool,
+    port: Optional[int],
+    init_params: Optional[Dict[str, Any]] = None,
+    budget: Optional[float] = None,
+    budget_type: Optional[str] = None,
+    iterative: bool = True,
+) -> None:
+    # Instances in this context are repetitions to be selected from the evaluator
+    instance_dict = json.loads(instance) if instance is not None else {}
+    fold = instance_dict.get('fold', 0)
+    level = instance_dict.get('level', 1)
+
+    evaluator = TrainEvaluator(
+        backend=backend,
+        port=port,
+        queue=queue,
+        metric=metric,
+        configuration=config,
+        seed=seed,
+        level=level,
+        num_run=num_run,
+        resampling_strategy=resampling_strategy,
+        resampling_strategy_args=resampling_strategy_args,
+        scoring_functions=scoring_functions,
+        output_y_hat_optimization=output_y_hat_optimization,
+        include=include,
+        exclude=exclude,
+        disable_file_output=disable_file_output,
+        init_params=init_params,
+        budget=budget,
+        budget_type=budget_type,
+        instance=fold,
+    )
+    # Bellow says what folds the current repeat has access two.
+    # By default we have repeats * folds splits to train. Splits not in training_folds
+    # will be None and ignored by the code. All data written to disk is sorted as the training
+    # data for EnsembleBuilder
+    # repeats = resampling_strategy_args.get('repeats')
+    train_all_repeat_together = resampling_strategy_args.get('train_all_repeat_together', False)
+    if train_all_repeat_together:
+        raise NotImplementedError(f"train_all_repeat_together={train_all_repeat_together}")
+    fidelities_as_individual_models = resampling_strategy_args.get(
+        'fidelities_as_individual_models', False)
+    if not fidelities_as_individual_models:
+        raise NotImplementedError("fidelities_as_individual_models=False")
+
+    # Training folds always contains the folds that will make a full OOF prediciton
+    # Yet only self.instance, which is the current fold, is trained.
+    # We do this to be consitent but also to have all self.Y_target ready at any time
+    folds = resampling_strategy_args.get('folds')
+    repeats = cast(int, resampling_strategy_args.get('repeats'))
+    if isinstance(folds, list):
+        all_folds = [range(sum([folds[f] for f in range(i)]),
+                           sum([folds[f] for f in range(i)]) + fold_)
+                     for i, fold_ in enumerate(folds)]
+    else:
+        all_folds = [range(i * fold_,
+                           i * fold_ + fold_)
+                     for i, fold_ in enumerate(range(repeats))]
+
+    # Convert range to list
+    training_folds = list([group for group in all_folds if fold in group][0])
 
     evaluator.fit_predict_and_loss(iterative=iterative, training_folds=training_folds)

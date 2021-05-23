@@ -59,7 +59,7 @@ from autosklearn.util.pipeline import parse_include_exclude_components
 from autosklearn.util.parallel import preload_modules
 from autosklearn.ensemble_builder import EnsembleBuilderManager
 from autosklearn.ensembles.singlebest_ensemble import SingleBest
-from autosklearn.smbo import AutoMLSMBO
+from autosklearn.smbo import AutoMLSMBO, get_instances_to_intensify
 from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION, MULTIOUTPUT_REGRESSION, \
@@ -114,7 +114,7 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, 
                     )
         except Exception as e:
             logger.error(f"Failure on {identifier}")
-            raise e
+            raise Exception(f"Failure on {identifier}/->{str(e)}")
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
             X_.shape[0] < 1 or prediction.shape[0] != X_.shape[0]:
@@ -199,6 +199,7 @@ class AutoML(BaseEstimator):
                                              'cv',
                                              'cv-iterative-fit',
                                              'intensifier-cv',
+                                             'partial-iterative-intensifier-cv',
                                              'partial-cv',
                                              'partial-cv-iterative-fit',
                                              ] \
@@ -221,7 +222,7 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
-        if self._resampling_strategy in ['intensifier-cv']:
+        if self._resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
             if 'repeats' not in self._resampling_strategy_arguments:
                 self._resampling_strategy_arguments['repeats'] = 5
             # We are passing everything through the resampling strategy!
@@ -741,12 +742,19 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         # Dummy prediction always have num_run set to 1
-        if self._resampling_strategy in ['intensifier-cv']:
+        if self._resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
             # In the case of intensifier CV, we need a dummy prediction per repetition
-            num_repeats = self._resampling_strategy_arguments['repeats']
-            instances = [json.dumps({'task_id': self._dataset_name,
-                                     'repeats': repeat})
-                         for repeat in range(num_repeats)]
+            num_points = np.shape(datamanager.data['X_train'])[0]
+            # stacking_levels = list(range(1, self._max_stacking_level + 1))
+            instances = [instance[0] for instance in get_instances_to_intensify(
+                dataset_name=dataset_name,
+                num_points=num_points,
+                resampling_strategy_args=self._resampling_strategy_arguments,
+                # stacking_levels=stacking_levels,
+                stacking_levels=[1],
+                total_walltime_limit=self._time_for_task,
+                n_jobs=self._n_jobs,
+            )]
             for instance in instances:
                 self._do_dummy_prediction(datamanager, num_run=1, instance=instance)
             self.num_run += 1
@@ -892,6 +900,22 @@ class AutoML(BaseEstimator):
                     'time given to SMAC (%f)' % time_left_for_smac
                 )
                 per_run_time_limit = time_left_for_smac
+
+                # If running a large dataset using partial-iterative-intensifier-cv
+                # we must consider that a model is only full when all folds are fitted
+                if self._resampling_strategy in ['partial-iterative-intensifier-cv']:
+                    if 'folds' not in self._resampling_strategy_arguments:
+                        raise ValueError(
+                            "We expect folds to be provide to the resampling strategy "
+                            " via the resampling_strategy_arguments parameter"
+                        )
+                    folds = self._resampling_strategy_arguments['folds']
+                    if isinstance(folds, list):
+                        min_fold = min(folds)
+                    else:
+                        min_fold = folds
+                    per_run_time_limit = max(30, (time_left_for_smac // 2) // min_fold)
+
             else:
                 per_run_time_limit = self._per_run_time_limit
 
@@ -1316,7 +1340,9 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv',
+                'partial-iterative-intensifier-cv'
+            )
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -1497,9 +1523,12 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
-            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv'):
+            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv',
+                                             'partial-iterative-intensifier-cv'):
                 include_base_models = False
-                if self._resampling_strategy == 'intensifier-cv' and self._max_stacking_level > 1:
+                if self._resampling_strategy in [
+                        'intensifier-cv',
+                        'partial-iterative-intensifier-cv'] and self._max_stacking_level > 1:
                     include_base_models = True
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(
                     identifiers,
@@ -1513,7 +1542,9 @@ class AutoML(BaseEstimator):
             ):
                 raise ValueError('No models fitted!')
             if (
-                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv']
+                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv',
+                                              'partial-iterative-intensifier-cv'
+                                              ]
                 and len(self.cv_models_) == 0
             ):
                 raise ValueError('No models fitted!')

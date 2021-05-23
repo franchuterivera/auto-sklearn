@@ -509,7 +509,7 @@ class Backend(object):
                                idxs: Optional[List[int]] = None,
                                budgets: Optional[List[float]] = None,
                                instances: Optional[List[int]] = None,
-                               repeats_as_individual_models: bool = True,
+                               fidelities_as_individual_models: bool = True,
                                train_all_repeat_together: bool = True,
                                ) -> Dict[
                                    Tuple[int, int, int, float, Tuple],
@@ -539,7 +539,7 @@ class Backend(object):
             if instance_ > max_instance and num_run_ > 1:
                 max_instance = instance_
 
-        # Filter the valid runs according to repeats_as_individual_models
+        # Filter the valid runs according to fidelities_as_individual_models
         to_read: Dict[Tuple[int, int, int, float], List[int]] = {}
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if num_run_ <= 1:
@@ -557,7 +557,7 @@ class Backend(object):
                 continue
             elif instances is None:
                 identifier = (level_, seed_, num_run_, budget_)
-                if not repeats_as_individual_models:
+                if not fidelities_as_individual_models:
                     # We have to search for the highest instance and only
                     # this one
 
@@ -576,10 +576,10 @@ class Backend(object):
                     else:
                         to_read[identifier].append(instance_)
 
-        # in the case we have repeats_as_individual_models==True
+        # in the case we have fidelities_as_individual_models==True
         # we only accept models with all desired instances available
         # so we have to post process
-        if repeats_as_individual_models and not train_all_repeat_together:
+        if fidelities_as_individual_models and not train_all_repeat_together:
             to_delete = [identifier for identifier in to_read.keys()
                          if len(to_read[identifier]) < max_instance]
             for identifier in to_delete:
