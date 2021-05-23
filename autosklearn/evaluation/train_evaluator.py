@@ -1442,6 +1442,7 @@ class TrainEvaluator(AbstractEvaluator):
                     return RepeatedStratifiedMultiKFold(
                         n_splits=self.resampling_strategy_args['folds'],
                         n_repeats=repeats,
+                        random_state=1,
                     )
 
                 if shuffle:
