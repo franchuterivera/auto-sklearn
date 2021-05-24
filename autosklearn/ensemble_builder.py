@@ -32,6 +32,7 @@ from autosklearn.ensembles.ensemble_selection import EnsembleSelection
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import get_named_client_logger
 from autosklearn.util.parallel import preload_modules
+from autosklearn.util.common import print_memory
 
 Y_ENSEMBLE = 0
 Y_VALID = 1
@@ -699,6 +700,7 @@ class EnsembleBuilder(object):
             name='EnsembleBuilder',
             port=self.logger_port,
         )
+        self.logger.critical(f"start ensemble {print_memory('start ensemble fit')}")
 
         self.start_time = time.time()
         train_pred, valid_pred, test_pred = None, None, None
@@ -717,6 +719,8 @@ class EnsembleBuilder(object):
             else:
                 return self.ensemble_history, self.ensemble_nbest, None, None, None
 
+        self.logger.critical(f"post compute loss {print_memory('start ensemble fit')}")
+
         # Only the models with the n_best predictions are candidates
         # to be in the ensemble
         candidate_models = self.get_n_best_preds()
@@ -725,6 +729,8 @@ class EnsembleBuilder(object):
                 return self.ensemble_history, self.ensemble_nbest, train_pred, valid_pred, test_pred
             else:
                 return self.ensemble_history, self.ensemble_nbest, None, None, None
+
+        self.logger.critical(f"post get_n_best_preds {print_memory('start ensemble fit')}")
 
         # populates predictions in self.read_preds
         # reduces selected models if file reading failed
@@ -767,7 +773,9 @@ class EnsembleBuilder(object):
                 self._has_been_candidate.add(candidate)
 
         # train ensemble
+        self.logger.critical(f"pre ensemble fit {print_memory('start ensemble fit')}")
         ensemble = self.fit_ensemble(selected_keys=candidate_models)
+        self.logger.critical(f"post ensemble fit {print_memory('start ensemble fit')}")
 
         # Save the ensemble for later use in the main auto-sklearn module!
         if ensemble is not None and self.SAVE2DISC:
@@ -1021,6 +1029,7 @@ class EnsembleBuilder(object):
         # We cannot use old predictions when new ones are available
         # at a higher number of repetitions
         for y_ens_fn, value in self.read_losses.items():
+            self.logger.critical(f"start ensemble " + print_memory(' ensemble reading' + str(y_ens_fn)))
             if value['num_run'] == 1:
                 continue
 
@@ -1150,6 +1159,7 @@ class EnsembleBuilder(object):
                   if max models in disc is exceeded.
         """
 
+        self.logger.critical(f"start ensemble " + print_memory(' ensemble get_n_best_prediction' ))
         sorted_keys = self._get_list_of_sorted_preds()
 
         # number of models available
@@ -1269,6 +1279,7 @@ class EnsembleBuilder(object):
 
         # reduce to keys
         sorted_keys = list(map(lambda x: x[0], sorted_keys))
+        self.logger.critical(f"start ensemble " + print_memory(' ensemble get_n_best_prediction reduce keys' ))
 
         # remove loaded predictions for non-winning models
         for k in sorted_keys[ensemble_n_best:]:
@@ -1288,6 +1299,7 @@ class EnsembleBuilder(object):
                 self.read_losses[k]['loaded'] = 2
 
         # Load the predictions for the winning
+        self.logger.critical(f"start ensemble " + print_memory(f" ensemble get_n_best_prediction read {len(sorted_keys[:ensemble_n_best])}" ))
         for k in sorted_keys[:ensemble_n_best]:
             if (
                 (
@@ -1308,6 +1320,7 @@ class EnsembleBuilder(object):
                 self.read_losses[k]['loaded'] = 1
 
         # return keys of self.read_losses with lowest losses
+        self.logger.critical(f"start ensemble " + print_memory(f" ensemble get_n_best_prediction after read {len(sorted_keys[:ensemble_n_best])}" ))
         return sorted_keys[:ensemble_n_best]
 
     def get_valid_test_preds(self, selected_keys: List[str]) -> Tuple[List[str], List[str]]:
@@ -1457,6 +1470,7 @@ class EnsembleBuilder(object):
                 f"Fitting the ensemble on {len(predictions_train)} models: {include_num_runs}"
             )
             start_time = time.time()
+            self.logger.critical(f"start ensemble " + print_memory(f" ensemble selection fit  {np.shape(predictions_train)}" ))
             ensemble.fit(predictions_train, self.y_true_ensemble,
                          include_num_runs)
             end_time = time.time()

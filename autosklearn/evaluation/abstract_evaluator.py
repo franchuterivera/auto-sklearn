@@ -29,6 +29,7 @@ from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_logger
 
 from ConfigSpace import Configuration
+from autosklearn.util.common import print_memory
 
 
 __all__ = [
@@ -374,6 +375,7 @@ class AbstractEvaluator(object):
             'modeltype': modeltype,
             'opt_losses': opt_losses,
         }
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before file output')}")
 
         if file_output:
             file_out_loss, additional_run_info_ = self.file_output(
@@ -382,6 +384,7 @@ class AbstractEvaluator(object):
         else:
             file_out_loss = None
             additional_run_info_ = {}
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before calculate auxiliary loss')}")
 
         validation_loss, test_loss = self.calculate_auxiliary_losses(
             valid_pred, test_pred,
@@ -475,6 +478,7 @@ class AbstractEvaluator(object):
             )
 
         # Abort if predictions contain NaNs
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before infinity check')}")
         for y, s in [
             # Y_train_pred deleted here. Fix unittest accordingly.
             [Y_optimization_pred, 'optimization'],
@@ -509,6 +513,7 @@ class AbstractEvaluator(object):
             if self.output_y_hat_optimization:
                 self.backend.save_targets_ensemble(self.Y_optimization)
 
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before voting regressor')}")
         models: Optional[BaseEstimator] = None
         if hasattr(self, 'models'):
             if any([model_ is not None for model_ in self.models]):  # type: ignore[attr-defined]
@@ -527,6 +532,7 @@ class AbstractEvaluator(object):
                     ]
                     models.base_models_ = self.base_models_
 
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before save num run')}")
         self.backend.save_numrun_to_dir(
             level=self.level,
             seed=self.seed,
@@ -546,6 +552,7 @@ class AbstractEvaluator(object):
             ),
             run_metadata=run_metadata,
         )
+        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('after save num run')}")
 
         return None, {}
 
