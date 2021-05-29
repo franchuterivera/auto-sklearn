@@ -31,6 +31,7 @@ from autosklearn.pipeline.components.base import IterativeComponent
 from autosklearn.metrics import Scorer
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
+import gc
 
 
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
@@ -190,6 +191,7 @@ class TrainEvaluator(AbstractEvaluator):
         exclude: Optional[List[str]] = None,
         disable_file_output: bool = False,
         init_params: Optional[Dict[str, Any]] = None,
+        compute_train_loss: bool = False,
     ):
 
         super().__init__(
@@ -222,8 +224,7 @@ class TrainEvaluator(AbstractEvaluator):
         self.X_train = self.datamanager.data['X_train']
         self.Y_train = self.datamanager.data['Y_train']
         self.Y_optimization: Optional[Union[List, np.ndarray]] = None
-        self.Y_targets = [None] * self.num_cv_folds
-        self.Y_train_targets = np.ones(self.Y_train.shape) * np.NaN
+        self.Y_optimization_pred: Optional[Union[List, np.ndarray]] = None
         self.models = [None] * self.num_cv_folds
         self.indices: List[Optional[Tuple[List[int], List[int]]]] = [None] * self.num_cv_folds
 
@@ -233,6 +234,11 @@ class TrainEvaluator(AbstractEvaluator):
         # opposite.
         self.partial = True
         self.keep_models = keep_models
+        # By default, we do not calculate train-performance.
+        # Only if the user provided this flag, we compute it
+        self.compute_train_loss = compute_train_loss
+        if self.compute_train_loss:
+            self.Y_train_targets = np.ones(self.Y_train.shape) * np.NaN
 
     def fit_predict_and_loss(self, iterative: bool = False) -> None:
         """Fit, predict and compute the loss for cross-validation and
@@ -267,7 +273,6 @@ class TrainEvaluator(AbstractEvaluator):
                 converged = [False] * self.num_cv_folds
 
                 Y_train_pred = [None] * self.num_cv_folds
-                Y_optimization_pred = [None] * self.num_cv_folds
                 Y_valid_pred = [None] * self.num_cv_folds
                 Y_test_pred = [None] * self.num_cv_folds
                 train_splits = [None] * self.num_cv_folds
@@ -321,9 +326,10 @@ class TrainEvaluator(AbstractEvaluator):
                         model = self.models[i]
 
                         if iterations[i] == 1:
-                            self.Y_train_targets[train_indices] = \
-                                self.Y_train[train_indices]
-                            self.Y_targets[i] = self.Y_train[test_indices]
+                            if self.compute_train_loss:
+                                self.Y_train_targets[train_indices] = self.Y_train[
+                                    train_indices
+                                ]
 
                             Xt, fit_params = model.fit_transformer(
                                 self.X_train[train_indices],
@@ -346,28 +352,40 @@ class TrainEvaluator(AbstractEvaluator):
                             train_indices=train_indices,
                             test_indices=test_indices,
                         )
+                        if self.num_cv_folds == 1:
+                            self.Y_optimization_pred = opt_pred
+                        else:
+                            if self.Y_optimization_pred is None:
+                                y_shape = opt_pred.shape
+                                self.Y_optimization_pred = np.zeros(
+                                    (self.X_train.shape[0], 1 if len(y_shape) == 1 else y_shape[1]),
+                                    dtype=np.float32,
+                                )
+                            self.Y_optimization_pred[test_indices] = opt_pred
+                        del opt_pred
 
                         Y_train_pred[i] = train_pred
-                        Y_optimization_pred[i] = opt_pred
                         Y_valid_pred[i] = valid_pred
                         Y_test_pred[i] = test_pred
-                        train_splits[i] = train_indices
 
                         # Compute train loss of this fold and store it. train_loss could
                         # either be a scalar or a dict of scalars with metrics as keys.
-                        train_loss = self._loss(
-                            self.Y_train_targets[train_indices],
-                            train_pred,
-                        )
-                        train_losses[i] = train_loss
+                        if self.compute_train_loss:
+                            train_splits[i] = train_indices
+                            train_loss: Optional[Union[float, Dict[str, float]]] = self._loss(
+                                self.Y_train_targets[train_indices],
+                                train_pred,
+                            )
+                            train_losses[i] = train_loss
+
                         # number of training data points for this fold. Used for weighting
                         # the average.
                         train_fold_weights[i] = len(train_indices)
 
                         # Compute validation loss of this fold and store it.
                         optimization_loss = self._loss(
-                            self.Y_targets[i],
-                            opt_pred,
+                            self.Y_train[test_indices],
+                            self.Y_optimization_pred[test_indices],
                         )
                         opt_losses[i] = optimization_loss
                         # number of optimization data points for this fold.
@@ -384,6 +402,8 @@ class TrainEvaluator(AbstractEvaluator):
 
                         iterations[i] = iterations[i] + 1
 
+                        gc.collect()
+
                     # Compute weights of each fold based on the number of samples in each
                     # fold.
                     train_fold_weights_percentage = [
@@ -396,13 +416,17 @@ class TrainEvaluator(AbstractEvaluator):
                     # train_losses is a list of either scalars or dicts. If it contains
                     # dicts, then train_loss is computed using the target metric
                     # (self.metric).
-                    if all(isinstance(elem, dict) for elem in train_losses):
-                        train_loss = np.average([train_losses[i][str(self.metric)]
-                                                 for i in range(self.num_cv_folds)],
-                                                weights=train_fold_weights_percentage,
-                                                )
+                    if self.compute_train_loss:
+                        if all(isinstance(elem, dict) for elem in train_losses):
+                            train_loss = np.average([train_losses[i][str(self.metric)]
+                                                     for i in range(self.num_cv_folds)],
+                                                    weights=train_fold_weights_percentage,
+                                                    )
+                        else:
+                            train_loss = np.average(train_losses,
+                                                    weights=train_fold_weights_percentage)
                     else:
-                        train_loss = np.average(train_losses, weights=train_fold_weights_percentage)
+                        train_loss = None
 
                     # if all_scoring_function is true, return a dict of opt_loss.
                     # Otherwise, return a scalar.
@@ -419,16 +443,9 @@ class TrainEvaluator(AbstractEvaluator):
                     else:
                         opt_loss = np.average(opt_losses, weights=opt_fold_weights_percentage)
 
-                    Y_targets = self.Y_targets
-                    Y_train_targets = self.Y_train_targets
-
-                    Y_optimization_preds = np.concatenate(
-                        [Y_optimization_pred[i] for i in range(self.num_cv_folds)
-                         if Y_optimization_pred[i] is not None])
-                    Y_targets = np.concatenate([
-                        Y_targets[i] for i in range(self.num_cv_folds)
-                        if Y_targets[i] is not None
-                    ])
+                    # No need to generate the targets, they are same as y_train
+                    if self.Y_optimization is None:
+                        self.Y_optimization = self.Y_train
 
                     if self.X_valid is not None:
                         Y_valid_preds = np.array([Y_valid_pred[i]
@@ -450,8 +467,8 @@ class TrainEvaluator(AbstractEvaluator):
                     else:
                         Y_test_preds = None
 
-                    self.Y_optimization = Y_targets
-                    self.Y_actual_train = Y_train_targets
+                    if self.compute_train_loss:
+                        self.Y_actual_train = self.Y_train_targets
 
                     self.model = self._get_model()
                     status = StatusType.DONOTADVANCE
@@ -461,7 +478,7 @@ class TrainEvaluator(AbstractEvaluator):
                     self.finish_up(
                         loss=opt_loss,
                         train_loss=train_loss,
-                        opt_pred=Y_optimization_preds,
+                        opt_pred=self.Y_optimization_pred,
                         valid_pred=Y_valid_preds,
                         test_pred=Y_test_preds,
                         additional_run_info=additional_run_info,
@@ -475,7 +492,6 @@ class TrainEvaluator(AbstractEvaluator):
             self.partial = False
 
             Y_train_pred = [None] * self.num_cv_folds
-            Y_optimization_pred = [None] * self.num_cv_folds
             Y_valid_pred = [None] * self.num_cv_folds
             Y_test_pred = [None] * self.num_cv_folds
             train_splits = [None] * self.num_cv_folds
@@ -537,27 +553,38 @@ class TrainEvaluator(AbstractEvaluator):
                         (additional_run_info, i)
                     )
 
+                if self.num_cv_folds == 1:
+                    self.Y_optimization_pred = opt_pred
+                else:
+                    if self.Y_optimization_pred is None:
+                        y_shape = opt_pred.shape
+                        self.Y_optimization_pred = np.zeros(
+                            (self.X_train.shape[0], 1 if len(y_shape) == 1 else y_shape[1]),
+                            dtype=np.float32,
+                        )
+                    self.Y_optimization_pred[test_split] = opt_pred
+
                 Y_train_pred[i] = train_pred
-                Y_optimization_pred[i] = opt_pred
                 Y_valid_pred[i] = valid_pred
                 Y_test_pred[i] = test_pred
-                train_splits[i] = train_split
 
                 # Compute train loss of this fold and store it. train_loss could
                 # either be a scalar or a dict of scalars with metrics as keys.
-                train_loss = self._loss(
-                    self.Y_train_targets[train_split],
-                    train_pred,
-                )
-                train_losses.append(train_loss)
+                if self.compute_train_loss:
+                    train_splits[i] = train_split
+                    train_loss = self._loss(
+                        self.Y_train_targets[train_split],
+                        train_pred,
+                    )
+                    train_losses.append(train_loss)
                 # number of training data points for this fold. Used for weighting
                 # the average.
                 train_fold_weights.append(len(train_split))
 
                 # Compute validation loss of this fold and store it.
                 optimization_loss = self._loss(
-                    self.Y_targets[i],
-                    opt_pred,
+                    self.Y_train[test_split],
+                    self.Y_optimization_pred[test_split],
                 )
                 opt_losses.append(optimization_loss)
                 # number of optimization data points for this fold. Used for weighting
@@ -571,13 +598,16 @@ class TrainEvaluator(AbstractEvaluator):
 
             # train_losses is a list of either scalars or dicts. If it contains dicts,
             # then train_loss is computed using the target metric (self.metric).
-            if all(isinstance(elem, dict) for elem in train_losses):
-                train_loss = np.average([train_losses[i][str(self.metric)]
-                                         for i in range(self.num_cv_folds)],
-                                        weights=train_fold_weights,
-                                        )
+            if self.compute_train_loss:
+                if all(isinstance(elem, dict) for elem in train_losses):
+                    train_loss = np.average([train_losses[i][str(self.metric)]
+                                             for i in range(self.num_cv_folds)],
+                                            weights=train_fold_weights,
+                                            )
+                else:
+                    train_loss = np.average(train_losses, weights=train_fold_weights)
             else:
-                train_loss = np.average(train_losses, weights=train_fold_weights)
+                train_loss = None
 
             # if all_scoring_function is true, return a dict of opt_loss. Otherwise,
             # return a scalar.
@@ -591,14 +621,8 @@ class TrainEvaluator(AbstractEvaluator):
             else:
                 opt_loss = np.average(opt_losses, weights=opt_fold_weights)
 
-            Y_targets = self.Y_targets
-            Y_train_targets = self.Y_train_targets
-
-            Y_optimization_pred = np.concatenate(
-                [Y_optimization_pred[i] for i in range(self.num_cv_folds)
-                 if Y_optimization_pred[i] is not None])
-            Y_targets = np.concatenate([Y_targets[i] for i in range(self.num_cv_folds)
-                                        if Y_targets[i] is not None])
+            if self.Y_optimization is None:
+                self.Y_optimization = self.Y_train
 
             if self.X_valid is not None:
                 Y_valid_pred = np.array([Y_valid_pred[i]
@@ -616,8 +640,8 @@ class TrainEvaluator(AbstractEvaluator):
                 if len(np.shape(Y_test_pred)) == 3:
                     Y_test_pred = np.nanmean(Y_test_pred, axis=0)
 
-            self.Y_optimization = Y_targets
-            self.Y_actual_train = Y_train_targets
+            if self.compute_train_loss:
+                self.Y_actual_train = self.Y_train_targets
 
             if self.num_cv_folds > 1:
                 self.model = self._get_model()
@@ -653,7 +677,7 @@ class TrainEvaluator(AbstractEvaluator):
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
-                opt_pred=Y_optimization_pred,
+                opt_pred=self.Y_optimization_pred,
                 valid_pred=Y_valid_pred if self.X_valid is not None else None,
                 test_pred=Y_test_pred if self.X_test is not None else None,
                 additional_run_info=additional_run_info,
@@ -700,8 +724,12 @@ class TrainEvaluator(AbstractEvaluator):
                     add_model_to_self=True,
                 )
             )
-            train_loss = self._loss(self.Y_actual_train, train_pred)
-            loss = self._loss(self.Y_targets[fold], opt_pred)
+            if self.compute_train_loss:
+                train_loss: Optional[Union[float, Dict[str, float]]] = self._loss(
+                    self.Y_actual_train, train_pred)
+            else:
+                train_loss = None
+            loss = self._loss(self.Y_train[test_split], opt_pred)
 
             if self.model.estimator_supports_iterative_fit():
                 model_max_iter = self.model.get_max_iter()
@@ -741,7 +769,8 @@ class TrainEvaluator(AbstractEvaluator):
             Xt, fit_params = model.fit_transformer(self.X_train[train_indices],
                                                    self.Y_train[train_indices])
 
-            self.Y_train_targets[train_indices] = self.Y_train[train_indices]
+            if self.compute_train_loss:
+                self.Y_train_targets[train_indices] = self.Y_train[train_indices]
 
             iteration = 1
             total_n_iteration = 0
@@ -775,7 +804,11 @@ class TrainEvaluator(AbstractEvaluator):
                 if add_model_to_self:
                     self.model = model
 
-                train_loss = self._loss(self.Y_train[train_indices], Y_train_pred)
+                if self.compute_train_loss:
+                    train_loss: Optional[Union[float, Dict[str, float]]] = self._loss(
+                        self.Y_train[train_indices], Y_train_pred)
+                else:
+                    train_loss = None
                 loss = self._loss(self.Y_train[test_indices], Y_optimization_pred)
                 additional_run_info = model.get_additional_run_info()
 
@@ -814,7 +847,10 @@ class TrainEvaluator(AbstractEvaluator):
                 additional_run_info
             ) = self._partial_fit_and_predict_standard(fold, train_indices, test_indices,
                                                        add_model_to_self)
-            train_loss = self._loss(self.Y_train[train_indices], Y_train_pred)
+            if self.compute_train_loss:
+                train_loss = self._loss(self.Y_train[train_indices], Y_train_pred)
+            else:
+                train_loss = None
             loss = self._loss(self.Y_train[test_indices], Y_optimization_pred)
             if self.model.estimator_supports_iterative_fit():
                 model_max_iter = self.model.get_max_iter()
@@ -861,8 +897,8 @@ class TrainEvaluator(AbstractEvaluator):
         else:
             self.models[fold] = model
 
-        self.Y_targets[fold] = self.Y_train[test_indices]
-        self.Y_train_targets[train_indices] = self.Y_train[train_indices]
+        if self.compute_train_loss:
+            self.Y_train_targets[train_indices] = self.Y_train[train_indices]
 
         train_pred, opt_pred, valid_pred, test_pred = self._predict(
             model=model,
@@ -892,8 +928,8 @@ class TrainEvaluator(AbstractEvaluator):
 
         model = self._get_model()
         self.indices[fold] = ((train_indices, test_indices))
-        self.Y_targets[fold] = self.Y_train[test_indices]
-        self.Y_train_targets[train_indices] = self.Y_train[train_indices]
+        if self.compute_train_loss:
+            self.Y_train_targets[train_indices] = self.Y_train[train_indices]
 
         _fit_with_budget(
             X_train=self.X_train,
@@ -929,9 +965,11 @@ class TrainEvaluator(AbstractEvaluator):
     def _predict(self, model: BaseEstimator, test_indices: List[int],
                  train_indices: List[int]) -> Tuple[np.ndarray, np.ndarray,
                                                     np.ndarray, np.ndarray]:
-        train_pred = self.predict_function(self.X_train[train_indices],
-                                           model, self.task_type,
-                                           self.Y_train[train_indices])
+        train_pred = None
+        if self.compute_train_loss:
+            train_pred = self.predict_function(self.X_train[train_indices],
+                                               model, self.task_type,
+                                               self.Y_train[train_indices])
 
         opt_pred = self.predict_function(self.X_train[test_indices],
                                          model, self.task_type,
