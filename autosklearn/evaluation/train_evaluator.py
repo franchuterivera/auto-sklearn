@@ -590,7 +590,8 @@ class TrainEvaluator(AbstractEvaluator):
                 # Compute validation loss of this fold and store it.
                 optimization_loss = self._loss(
                     self.Y_train[test_split],
-                    self.Y_optimization_pred[test_split],
+                    self.Y_optimization_pred if self.num_cv_folds == 1
+                    else self.Y_optimization_pred[test_split],
                 )
                 opt_losses.append(optimization_loss)
                 # number of optimization data points for this fold. Used for weighting
