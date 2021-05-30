@@ -31,6 +31,7 @@ from autosklearn.pipeline.components.base import IterativeComponent
 from autosklearn.metrics import Scorer
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
+from autosklearn.util.common import print_memory
 import gc
 
 
@@ -320,6 +321,10 @@ class TrainEvaluator(AbstractEvaluator):
                             self.X_train, y,
                             groups=self.resampling_strategy_args.get('groups')
                     )):
+                        self.logger.critical(
+                            f"for num_run={self.num_run} "
+                            f"\n{print_memory('start while loop fold' + str(i))}"
+                        )
                         if converged[i]:
                             continue
 
@@ -475,6 +480,7 @@ class TrainEvaluator(AbstractEvaluator):
                     if any([model_current_iter == max_iter
                             for model_current_iter in models_current_iters]):
                         status = StatusType.SUCCESS
+                    self.logger.critical(f"for num_run={self.num_run} \n{print_memory('finished')}")
                     self.finish_up(
                         loss=opt_loss,
                         train_loss=train_loss,
