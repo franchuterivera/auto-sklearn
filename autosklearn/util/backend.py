@@ -511,6 +511,7 @@ class Backend(object):
                                instances: Optional[List[int]] = None,
                                fidelities_as_individual_models: bool = True,
                                train_all_repeat_together: bool = True,
+                               max_repetition_instance: Optional[int] = None,
                                ) -> Dict[
                                    Tuple[int, int, int, float, Tuple],
                                    np.ndarray
@@ -584,6 +585,12 @@ class Backend(object):
                          if len(to_read[identifier]) < max_instance]
             for identifier in to_delete:
                 del to_read[identifier]
+
+            # Then if repeats_as_individual_models the highest fidelity is already
+            # averaged, it is sufficient to just load this guy
+            for identifier in to_read.keys():
+                if max_repetition_instance in to_read[identifier]:
+                    to_read[identifier] = [max_repetition_instance]
 
         # The read the predictions and average if needed
         for identifier, instances_ in to_read.items():

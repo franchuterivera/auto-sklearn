@@ -29,7 +29,6 @@ from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_logger
 
 from ConfigSpace import Configuration
-from autosklearn.util.common import print_memory
 
 
 __all__ = [
@@ -314,7 +313,8 @@ class AbstractEvaluator(object):
         return model
 
     def _loss(self, y_true: np.ndarray, y_hat: np.ndarray,
-              scoring_functions: Optional[List[Scorer]] = None
+              scoring_functions: Optional[List[Scorer]] = None,
+              metric: Optional[Scorer] = None,
               ) -> Union[float, Dict[str, float]]:
         """Auto-sklearn follows a minimization goal.
         The calculate_loss internally translate a score function to
@@ -331,14 +331,15 @@ class AbstractEvaluator(object):
             if scoring_functions is None
             else scoring_functions
         )
+        metric_ = metric if metric is not None else self.metric
         if not isinstance(self.configuration, Configuration):
             if scoring_functions:
-                return {self.metric.name: self.metric._worst_possible_result}
+                return {metric_.name: metric_._worst_possible_result}
             else:
-                return self.metric._worst_possible_result
+                return metric_._worst_possible_result
 
         return calculate_loss(
-            y_true, y_hat, self.task_type, self.metric,
+            y_true, y_hat, self.task_type, metric_,
             scoring_functions=scoring_functions)
 
     def finish_up(
@@ -353,6 +354,7 @@ class AbstractEvaluator(object):
         final_call: bool,
         status: StatusType,
         opt_losses: Optional[List[float]] = None,
+        loss_log_loss: Optional[float] = None,
     ) -> Tuple[float, Union[float, Dict[str, float]], int,
                Dict[str, Union[str, int, float, Dict, List, Tuple]]]:
         """This function does everything necessary after the fitting is done:
@@ -374,8 +376,8 @@ class AbstractEvaluator(object):
             'status': status,
             'modeltype': modeltype,
             'opt_losses': opt_losses,
+            'loss_log_loss': loss_log_loss,
         }
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before file output')}")
 
         if file_output:
             file_out_loss, additional_run_info_ = self.file_output(
@@ -384,7 +386,6 @@ class AbstractEvaluator(object):
         else:
             file_out_loss = None
             additional_run_info_ = {}
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before calculate auxiliary loss')}")
 
         validation_loss, test_loss = self.calculate_auxiliary_losses(
             valid_pred, test_pred,
@@ -478,7 +479,6 @@ class AbstractEvaluator(object):
             )
 
         # Abort if predictions contain NaNs
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before infinity check')}")
         for y, s in [
             # Y_train_pred deleted here. Fix unittest accordingly.
             [Y_optimization_pred, 'optimization'],
@@ -513,7 +513,6 @@ class AbstractEvaluator(object):
             if self.output_y_hat_optimization:
                 self.backend.save_targets_ensemble(self.Y_optimization)
 
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before voting regressor')}")
         models: Optional[BaseEstimator] = None
         if hasattr(self, 'models'):
             if any([model_ is not None for model_ in self.models]):  # type: ignore[attr-defined]
@@ -532,7 +531,6 @@ class AbstractEvaluator(object):
                     ]
                     models.base_models_ = self.base_models_
 
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('before save num run')}")
         self.backend.save_numrun_to_dir(
             level=self.level,
             seed=self.seed,
@@ -552,7 +550,6 @@ class AbstractEvaluator(object):
             ),
             run_metadata=run_metadata,
         )
-        self.logger.critical(f"for num_run={self.num_run} \n{print_memory('after save num run')}")
 
         return None, {}
 

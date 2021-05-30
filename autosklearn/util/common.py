@@ -1,10 +1,11 @@
 # -*- encoding: utf-8 -*-
-
 import os
+import resource
 import warnings
-import psutil
 
 import numpy as np
+
+import psutil
 
 __all__ = [
     'check_pid',
@@ -12,16 +13,16 @@ __all__ = [
 ]
 
 
-def print_memory(tag: str = ''):
+def print_memory(tag: str = '', extra: bool = True, include_all: bool = False) -> str:
     memory = []
-    processes = [
-        (str(os.getpid()), f"{tag}-current"),
-        (str(os.getppid()), f"{tag}-parent"),
-    ]
-    parent = psutil.Process(os.getpid())
-    for children in parent.children(recursive=True):
-        if children.pid:
-            processes.append((str(children.pid), f"{tag}-children"))
+    processes = [(str(os.getpid()), f"{tag}-current")]
+
+    if include_all:
+        processes.append((str(os.getppid()), f"{tag}-parent"))
+        parent = psutil.Process(os.getpid())
+        for children in parent.children(recursive=True):
+            if children.pid:
+                processes.append((str(children.pid), f"{tag}-children"))
 
     for pid, name in processes:
         filename = '/proc/' + str(pid) + '/status'
@@ -34,6 +35,9 @@ def print_memory(tag: str = ''):
                     data = data.strip().replace('\t', ' ')
                     memory.append(f"{name}-{pid}-{line}")
         memory.append("\n")
+
+    if extra:
+        memory.append(f"rsuage={resource.getrusage(resource.RUSAGE_SELF)}")
 
     return "\n".join(memory)
 

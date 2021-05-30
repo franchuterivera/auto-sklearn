@@ -32,7 +32,6 @@ from autosklearn.ensembles.ensemble_selection import EnsembleSelection
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import get_named_client_logger
 from autosklearn.util.parallel import preload_modules
-from autosklearn.util.common import print_memory
 
 Y_ENSEMBLE = 0
 Y_VALID = 1
@@ -700,7 +699,6 @@ class EnsembleBuilder(object):
             name='EnsembleBuilder',
             port=self.logger_port,
         )
-        self.logger.critical(f"start ensemble {print_memory('start ensemble fit')}")
 
         self.start_time = time.time()
         train_pred, valid_pred, test_pred = None, None, None
@@ -719,8 +717,6 @@ class EnsembleBuilder(object):
             else:
                 return self.ensemble_history, self.ensemble_nbest, None, None, None
 
-        self.logger.critical(f"post compute loss {print_memory('start ensemble fit')}")
-
         # Only the models with the n_best predictions are candidates
         # to be in the ensemble
         candidate_models = self.get_n_best_preds()
@@ -729,8 +725,6 @@ class EnsembleBuilder(object):
                 return self.ensemble_history, self.ensemble_nbest, train_pred, valid_pred, test_pred
             else:
                 return self.ensemble_history, self.ensemble_nbest, None, None, None
-
-        self.logger.critical(f"post get_n_best_preds {print_memory('start ensemble fit')}")
 
         # populates predictions in self.read_preds
         # reduces selected models if file reading failed
@@ -773,9 +767,7 @@ class EnsembleBuilder(object):
                 self._has_been_candidate.add(candidate)
 
         # train ensemble
-        self.logger.critical(f"pre ensemble fit {print_memory('start ensemble fit')}")
         ensemble = self.fit_ensemble(selected_keys=candidate_models)
-        self.logger.critical(f"post ensemble fit {print_memory('start ensemble fit')}")
 
         # Save the ensemble for later use in the main auto-sklearn module!
         if ensemble is not None and self.SAVE2DISC:
@@ -847,21 +839,6 @@ class EnsembleBuilder(object):
             costs += round(this_model_cost / math.pow(1024, 2), 2)
         return costs
 
-    def get_folds_with_complete_oof(self) -> List[int]:
-        folds = self.resampling_strategy_arguments.get('folds')
-        repeats = self.resampling_strategy_arguments.get('repeats')
-        folds_with_complete_oof = []
-        if isinstance(folds, list):
-            for i, fold in enumerate(folds):
-                if i > 0:
-                    folds_with_complete_oof.append(fold - 1 + sum([folds[f] for f in range(i)]))
-                else:
-                    folds_with_complete_oof.append(fold - 1)
-        else:
-            for i, fold in enumerate(range(repeats)):
-                folds_with_complete_oof.append(fold - 1 + fold * i)
-        return folds_with_complete_oof
-
     def compute_loss_per_model(self):
         """
             Compute the loss of the predictions on ensemble building data set;
@@ -910,23 +887,10 @@ class EnsembleBuilder(object):
 
         self.logger.critical(f"Available self.y_ens_files={self.y_ens_files}")
 
-        fidelity = self.resampling_strategy_arguments.get('fidelity', 'repeats')
-        folds_with_complete_oof = []
-        if fidelity == 'fold':
-            folds_with_complete_oof = self.get_folds_with_complete_oof()
-
         # Find the biggest instance per num_run
         highest_instance = {}
         max_instance = 0
         for level_, seed_, num_run_, budget_, instance_ in self.y_ens_files:
-
-            # highest_instance will allow to ensemble only the instance N
-            # of the num_run_. We can use this as a cheap mechanism to only
-            # allow fully complete folds
-            if (fidelity == 'fold' and instance_ not in [0] + folds_with_complete_oof):
-                # Ignore instances of incomplete OOF predictions
-                continue
-
             if level_ not in highest_instance:
                 highest_instance[level_] = {}
             if num_run_ not in highest_instance[level_] or (
@@ -936,21 +900,21 @@ class EnsembleBuilder(object):
             if instance_ > max_instance and num_run_ > 1:
                 max_instance = instance_
 
-        if fidelity == 'fold':
-            max_instance_fulloof = max([f for f in folds_with_complete_oof
-                                        if f <= max_instance] + [0])
-            valid_instance_for_ensemble = [max_instance_fulloof]
-            if max_instance_fulloof > 0:
-                index = folds_with_complete_oof.index(max_instance_fulloof)
-                valid_instance_for_ensemble.append(folds_with_complete_oof[index - 1])
-        else:
-            valid_instance_for_ensemble = [max_instance, max_instance-1]
-
         # First sort files chronologically
         fidelities_as_individual_models = cast(bool, self.resampling_strategy_arguments.get(
             'fidelities_as_individual_models'))
         train_all_repeat_together = cast(bool, self.resampling_strategy_arguments.get(
             'train_all_repeat_together'))
+
+        # ###########################################################################
+        # Same code in backend -- move to utils common
+        # ###########################################################################
+
+        # In the case of repeats_as_individual_models==True, when instance is highest max
+        # repeat possible, the train evaluator produces already averaged instances
+        max_repetition_instance = cast(int, self.resampling_strategy_arguments.get(
+            'repeats')) - 1
+
         to_read = {}
         for _level, _seed, _num_run, _budget, _instance in self.y_ens_files:
             identifier = (_level, _seed, _num_run, _budget)
@@ -982,15 +946,9 @@ class EnsembleBuilder(object):
                     # Only allow the highest instance seen for this config
                     continue
 
-                if _instance not in valid_instance_for_ensemble:
+                if _instance not in [max_instance, max_instance-1]:
                     # Only the highest repetition should be stacked
                     continue
-
-            # Ignore any fold higher than max_instance.
-            # so if we have folds = [0, 1, 2] ready but only [0, 1]
-            # for a full OOF prediction, we ignore [2]
-            if fidelity == 'fold' and _instance > max_instance:
-                continue
 
             if identifier not in to_read:
                 to_read[identifier] = {}
@@ -1007,29 +965,24 @@ class EnsembleBuilder(object):
             #
             # In this case, we only want to deal with predictions that
             # have max_instance, max_instance-1 repetitions
-            num_folds_for_oof = [fold_+1 for fold_ in valid_instance_for_ensemble]
             to_delete = [identifier for identifier in to_read.keys()
-                         if (
-                             identifier[2] > 1
-                             # Max instance starts at zero, whereas len() returns 1
-                             # so we as for at least max_instance - 1 + 1
-                             and (
-                                 (fidelity == 'repeats'
-                                  and len(to_read[identifier]) < max_instance)
-                                 # If intensifying folds, we look for full repetitions only, which
-                                 # are given by valid_instance_for_ensemble.
-                                 or (fidelity == 'fold'
-                                     and len(to_read[identifier]) not in num_folds_for_oof)
-                             )
-                         )]
+                         # Max instance starts at zero, whereas len() returns 1
+                         # so we as for at least max_instance - 1 + 1
+                         if len(to_read[identifier]) < max_instance and identifier[2] > 1]
             for identifier in to_delete:
                 del to_read[identifier]
 
-        self.logger.critical(f"to_read={to_read}")
+            # One last fix for the instances to read! if you are max_repetition_instance
+            # then train evaluator already averaged things for you
+            for identifier in to_read.keys():
+                if max_repetition_instance in to_read[identifier]:
+                    for instance_already_avg in set(to_read[identifier].keys()
+                                                    ) - set([max_repetition_instance]):
+                        del to_read[identifier][instance_already_avg]
+
         # We cannot use old predictions when new ones are available
         # at a higher number of repetitions
         for y_ens_fn, value in self.read_losses.items():
-            self.logger.critical(f"start ensemble " + print_memory(' ensemble reading' + str(y_ens_fn)))
             if value['num_run'] == 1:
                 continue
 
@@ -1159,7 +1112,6 @@ class EnsembleBuilder(object):
                   if max models in disc is exceeded.
         """
 
-        self.logger.critical(f"start ensemble " + print_memory(' ensemble get_n_best_prediction' ))
         sorted_keys = self._get_list_of_sorted_preds()
 
         # number of models available
@@ -1279,7 +1231,6 @@ class EnsembleBuilder(object):
 
         # reduce to keys
         sorted_keys = list(map(lambda x: x[0], sorted_keys))
-        self.logger.critical(f"start ensemble " + print_memory(' ensemble get_n_best_prediction reduce keys' ))
 
         # remove loaded predictions for non-winning models
         for k in sorted_keys[ensemble_n_best:]:
@@ -1299,7 +1250,6 @@ class EnsembleBuilder(object):
                 self.read_losses[k]['loaded'] = 2
 
         # Load the predictions for the winning
-        self.logger.critical(f"start ensemble " + print_memory(f" ensemble get_n_best_prediction read {len(sorted_keys[:ensemble_n_best])}" ))
         for k in sorted_keys[:ensemble_n_best]:
             if (
                 (
@@ -1320,7 +1270,6 @@ class EnsembleBuilder(object):
                 self.read_losses[k]['loaded'] = 1
 
         # return keys of self.read_losses with lowest losses
-        self.logger.critical(f"start ensemble " + print_memory(f" ensemble get_n_best_prediction after read {len(sorted_keys[:ensemble_n_best])}" ))
         return sorted_keys[:ensemble_n_best]
 
     def get_valid_test_preds(self, selected_keys: List[str]) -> Tuple[List[str], List[str]]:
@@ -1470,7 +1419,6 @@ class EnsembleBuilder(object):
                 f"Fitting the ensemble on {len(predictions_train)} models: {include_num_runs}"
             )
             start_time = time.time()
-            self.logger.critical(f"start ensemble " + print_memory(f" ensemble selection fit  {np.shape(predictions_train)}" ))
             ensemble.fit(predictions_train, self.y_true_ensemble,
                          include_num_runs)
             end_time = time.time()

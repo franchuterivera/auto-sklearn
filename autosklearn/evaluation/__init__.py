@@ -210,6 +210,7 @@ class ExecuteTaFuncWithQueue(AbstractTAFunc):
             self._get_test_loss = True
         else:
             self._get_test_loss = False
+        del dm
 
         self.port = port
         self.pynisher_context = pynisher_context

@@ -59,7 +59,7 @@ from autosklearn.util.pipeline import parse_include_exclude_components
 from autosklearn.util.parallel import preload_modules
 from autosklearn.ensemble_builder import EnsembleBuilderManager
 from autosklearn.ensembles.singlebest_ensemble import SingleBest
-from autosklearn.smbo import AutoMLSMBO, get_instances_to_intensify
+from autosklearn.smbo import AutoMLSMBO
 from autosklearn.metrics import f1_macro, accuracy, r2
 from autosklearn.constants import MULTILABEL_CLASSIFICATION, MULTICLASS_CLASSIFICATION, \
     REGRESSION_TASKS, REGRESSION, BINARY_CLASSIFICATION, MULTIOUTPUT_REGRESSION, \
@@ -227,8 +227,8 @@ class AutoML(BaseEstimator):
                 self._resampling_strategy_arguments['repeats'] = 5
             # We are passing everything through the resampling strategy!
             # Think if there is a better way to do this
-            if 'repeats_as_individual_models' not in self._resampling_strategy_arguments:
-                self._resampling_strategy_arguments['repeats_as_individual_models'] = True
+            if 'fidelities_as_individual_models' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['fidelities_as_individual_models'] = False
             if self._max_stacking_level > 1:
                 self._resampling_strategy_arguments['stacking_strategy'] = self._stacking_strategy
         self._n_jobs = n_jobs
@@ -742,19 +742,12 @@ class AutoML(BaseEstimator):
 
         # == Perform dummy predictions
         # Dummy prediction always have num_run set to 1
-        if self._resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
+        if self._resampling_strategy in ['intensifier-cv']:
             # In the case of intensifier CV, we need a dummy prediction per repetition
-            num_points = np.shape(datamanager.data['X_train'])[0]
-            # stacking_levels = list(range(1, self._max_stacking_level + 1))
-            instances = [instance[0] for instance in get_instances_to_intensify(
-                dataset_name=dataset_name,
-                num_points=num_points,
-                resampling_strategy_args=self._resampling_strategy_arguments,
-                # stacking_levels=stacking_levels,
-                stacking_levels=[1],
-                total_walltime_limit=self._time_for_task,
-                n_jobs=self._n_jobs,
-            )]
+            num_repeats = self._resampling_strategy_arguments['repeats']
+            instances = [json.dumps({'task_id': self._dataset_name,
+                                     'repeats': repeat})
+                         for repeat in range(num_repeats)]
             for instance in instances:
                 self._do_dummy_prediction(datamanager, num_run=1, instance=instance)
             self.num_run += 1
@@ -900,22 +893,6 @@ class AutoML(BaseEstimator):
                     'time given to SMAC (%f)' % time_left_for_smac
                 )
                 per_run_time_limit = time_left_for_smac
-
-                # If running a large dataset using partial-iterative-intensifier-cv
-                # we must consider that a model is only full when all folds are fitted
-                if self._resampling_strategy in ['partial-iterative-intensifier-cv']:
-                    if 'folds' not in self._resampling_strategy_arguments:
-                        raise ValueError(
-                            "We expect folds to be provide to the resampling strategy "
-                            " via the resampling_strategy_arguments parameter"
-                        )
-                    folds = self._resampling_strategy_arguments['folds']
-                    if isinstance(folds, list):
-                        min_fold = min(folds)
-                    else:
-                        min_fold = folds
-                    per_run_time_limit = max(30, (time_left_for_smac // 2) // min_fold)
-
             else:
                 per_run_time_limit = self._per_run_time_limit
 
