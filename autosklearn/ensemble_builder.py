@@ -905,6 +905,16 @@ class EnsembleBuilder(object):
             'repeats_as_individual_models'))
         train_all_repeat_together = cast(bool, self.resampling_strategy_arguments.get(
             'train_all_repeat_together'))
+
+        # ###########################################################################
+        # Same code in backend -- move to utils common
+        # ###########################################################################
+
+        # In the case of repeats_as_individual_models==True, when instance is highest max
+        # repeat possible, the train evaluator produces already averaged instances
+        max_repetition_instance = cast(int, self.resampling_strategy_arguments.get(
+            'repeats')) - 1
+
         to_read = {}
         for _level, _seed, _num_run, _budget, _instance in self.y_ens_files:
             identifier = (_level, _seed, _num_run, _budget)
@@ -961,6 +971,14 @@ class EnsembleBuilder(object):
                          if len(to_read[identifier]) < max_instance and identifier[2] > 1]
             for identifier in to_delete:
                 del to_read[identifier]
+
+            # One last fix for the instances to read! if you are max_repetition_instance
+            # then train evaluator already averaged things for you
+            for identifier in to_read.keys():
+                if max_repetition_instance in to_read[identifier]:
+                    for instance_already_avg in set(to_read[identifier].keys()
+                                                    ) - set([max_repetition_instance]):
+                        del to_read[identifier][instance_already_avg]
 
         # We cannot use old predictions when new ones are available
         # at a higher number of repetitions
