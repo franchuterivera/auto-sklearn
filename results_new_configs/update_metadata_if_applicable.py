@@ -64,7 +64,7 @@ if __name__ == "__main__":
             raise ValueError(json_file)
         task = match.group(1)
         openml_task = openml.tasks.get_task(task, download_data=False)
-        name = openml.datasets.get_dataset(openml_task.dataset_id, download_data=False).name
+        name = openml.datasets.get_dataset(openml_task.dataset_id, download_data=False).name.lower()
         metric = match.group(2)
         with open(json_file, 'r') as handle:
             data = json.load(handle)
