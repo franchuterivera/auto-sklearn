@@ -781,6 +781,7 @@ class TrainEvaluator(AbstractEvaluator):
                         file_output=True,
                         final_call=all(converged),
                         status=status,
+                        opt_losses=opt_losses,
                         loss_log_loss=loss_log_loss,
                     )
 

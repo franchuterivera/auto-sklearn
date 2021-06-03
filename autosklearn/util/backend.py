@@ -498,7 +498,9 @@ class Backend(object):
             except Exception as e:
                 if self.logger is not None:
                     self.logger.error(
-                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                        f"Load opt losses Skipping {str(e)}"
+                        f"->{(level_, seed_, num_run_, budget_, instance_)}"
+                    )
                 pass
         return opt_losses
 
@@ -606,7 +608,7 @@ class Backend(object):
             except Exception as e:
                 if self.logger is not None:
                     self.logger.error(
-                        f"Skipping {e}->{(identifier, instances_)}")
+                        f"Skipped {str(e)}->{(identifier, instances_)}")
                 pass
         return identifier_to_prediction
 
