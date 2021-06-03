@@ -41,7 +41,6 @@ from autosklearn.pipeline.components.base import IterativeComponent
 from autosklearn.metrics import Scorer, log_loss
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
-from autosklearn.util.common import print_memory
 import gc
 
 from autosklearn.util.repeated_kfold import RepeatedStratifiedMultiKFold
@@ -493,12 +492,6 @@ class TrainEvaluator(AbstractEvaluator):
                             self.X_train, y,
                             groups=self.resampling_strategy_args.get('groups')
                     )):
-                        self.logger.critical(
-                            f"for num_run={self.num_run} "
-                            f"training_folds={training_folds} self.instance={self.instance} "
-                            f"fold: {i}/{self.num_cv_folds}"
-                            f"\n{print_memory('start while loop fold' + str(i))}"
-                        )
                         if converged[i]:
                             continue
 
@@ -603,12 +596,6 @@ class TrainEvaluator(AbstractEvaluator):
                         iterations[i] = iterations[i] + 1
 
                         gc.collect()
-
-                    self.logger.critical(
-                        f"for num_run={self.num_run} "
-                        f"training_folds={training_folds} self.instance={self.instance} "
-                        f"\n{print_memory('Finish reoeat:' + str(self.instance))}"
-                    )
 
                     # Compute weights of each fold based on the number of samples in each
                     # fold.
@@ -744,11 +731,6 @@ class TrainEvaluator(AbstractEvaluator):
                                 lower_instance=lower_instance,
                             )
 
-                    self.logger.critical(
-                        f"for num_run={self.num_run} "
-                        f"training_folds={training_folds} self.instance={self.instance} "
-                        f"\n{print_memory('before logloss:' + str(self.instance))}"
-                    )
                     loss_log_loss: Optional[float] = None
                     stack_based_on_log_loss = self.resampling_strategy_args.get(
                         'stack_based_on_log_loss', False)
@@ -762,7 +744,6 @@ class TrainEvaluator(AbstractEvaluator):
                         ))
 
                     len_valid_models = len([i for i, m in enumerate(self.models) if m is not None])
-                    self.logger.critical(f"for num_run={self.num_run} \n{print_memory('finished')}")
                     self.logger.critical(
                         f"FINISH iter={iterative} num_run={self.num_run} instance={self.instance} "
                         f"level={self.level} iter={max(iterations)} "
@@ -2102,4 +2083,3 @@ def eval_partial_iterative_intensifier_cv(
         iterative=iterative,
         instance=instance,
     )
-    return
