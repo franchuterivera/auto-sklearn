@@ -34,7 +34,7 @@ X_train, X_test, y_train, y_test = \
 
 ############################################################################
 # Create a logging config
-# ============
+# =======================
 # *auto-sklearn* uses a default
 # `logging config <https://github.com/automl/auto-sklearn/blob/master/autosklearn/util/logging.yaml>`_
 # We will instead create a custom one as follows:
