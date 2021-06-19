@@ -468,9 +468,9 @@ class Backend(object):
                         budgets: Optional[List[float]] = None,
                         instances: Optional[List[int]] = None,
                         ) -> List[List[float]]:
-        runs_directory = self.get_runs_directory()
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 for path in glob.glob(os.path.join(glob.escape(self.get_runs_directory()),
+                                                    '*'))
                  # Temporal files might get in the way, we expect
                  # level, seed, num_run, budget, instance in the name
                  if len(os.path.basename(path).split('_')) == 5
@@ -520,7 +520,8 @@ class Backend(object):
     def get_map_from_run2repeat(self, only_max_instance: bool = False
                                 ) -> Dict[IDENTIFIER_TYPE, List[int]]:
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(self.get_runs_directory(), '*'))
+                 for path in glob.glob(os.path.join(
+                     glob.escape(self.get_runs_directory()), '*'))
                  # Temporal files might get in the way, we expect
                  # level, seed, num_run, budget, instance in the name
                  if len(os.path.basename(path).split('_')) == 5
@@ -548,12 +549,12 @@ class Backend(object):
             biggest_per_num_run[config_id] = max(biggest_per_num_run[config_id],
                                                  len(metadata['repeats_averaged']))
 
-        if not only_max_instance:
-            return mapping
-        else:
+        if only_max_instance:
             return {(level_, seed_, num_run_, budget_, instance_): repeats
                     for ((level_, seed_, num_run_, budget_, instance_), repeats) in mapping.items()
                     if biggest_per_num_run[(level_, seed_, num_run_, budget_)] == len(repeats)}
+        else:
+            return mapping
 
     def load_model_predictions(self,
                                subset: str,
@@ -566,11 +567,11 @@ class Backend(object):
                                    Tuple[int, int, int, float, Tuple],
                                    np.ndarray
                                ]:
-        runs_directory = self.get_runs_directory()
         identifier_to_prediction = {}
 
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 for path in glob.glob(os.path.join(glob.escape(self.get_runs_directory()),
+                                                    '*'))
                  # Temporal files might get in the way, we expect
                  # level, seed, num_run, budget, instance in the name
                  if len(os.path.basename(path).split('_')) == 5

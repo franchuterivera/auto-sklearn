@@ -1,3 +1,4 @@
+import json
 import os
 from typing import List, Tuple, Union
 
@@ -56,19 +57,23 @@ class SingleBest(AbstractEnsemble):
                     or (score < best_model_score and self.metric._sign < 0):
 
                 # Make sure that the individual best model actually exists
+                instance = 0
+                if run_key.instance_id is not None:
+                    instance_dict = json.loads(run_key.instance_id)
+                    instance = instance_dict.get('repeats', 0)
                 model_dir = self.backend.get_numrun_directory(
                     run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
-                    run_key.instance,
+                    instance,
                 )
                 model_file_name = self.backend.get_model_filename(
                     run_value.additional_info['level'],
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
-                    run_key.instance,
+                    instance,
                 )
                 file_path = os.path.join(model_dir, model_file_name)
                 if not os.path.exists(file_path):
@@ -79,7 +84,7 @@ class SingleBest(AbstractEnsemble):
                     self.seed,
                     run_value.additional_info['num_run'],
                     run_key.budget,
-                    run_key.instance,
+                    (instance,),
                 )]
                 best_model_score = score
 
@@ -107,9 +112,10 @@ class SingleBest(AbstractEnsemble):
         output = []
         for i, weight in enumerate(self.weights_):
             if weight > 0.0:
-                identifier = self.identifiers_[i]
-                model = models[identifier]
-                output.append((weight, model))
+                level, seed, num_run, budget, instances = self.identifiers_[i]
+                for instance in instances:
+                    model = models[(level, seed, num_run, budget, instance)]
+                    output.append((weight, model))
 
         output.sort(reverse=True, key=lambda t: t[0])
 

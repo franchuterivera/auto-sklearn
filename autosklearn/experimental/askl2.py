@@ -71,10 +71,12 @@ class SmacObjectCallback:
     def __call__(
         self,
         scenario_dict,
+        run_id,
         seed,
         ta,
         ta_kwargs,
         metalearning_configurations,
+        initial_configurations,
         n_jobs,
         dask_client,
     ):
@@ -98,7 +100,7 @@ class SmacObjectCallback:
             tae_runner_kwargs=ta_kwargs,
             initial_configurations=initial_configurations,
             intensifier=SimpleIntensifier,
-            run_id=seed,
+            run_id=run_id,
             n_jobs=n_jobs,
             dask_client=dask_client,
         )
@@ -167,6 +169,8 @@ class AutoSklearn2Classifier(AutoSklearnClassifier):
         ensemble_size: int = 50,
         ensemble_nbest: Union[float, int] = 50,
         max_models_on_disc: int = 50,
+        max_stacking_level=1,
+        stacking_strategy=None,
         seed: int = 1,
         memory_limit: int = 3072,
         tmp_folder: Optional[str] = None,
@@ -181,6 +185,7 @@ class AutoSklearn2Classifier(AutoSklearnClassifier):
         metric: Optional[Scorer] = None,
         scoring_functions: Optional[List[Scorer]] = None,
         load_models: bool = True,
+        ensemble_folds: Optional[str] = None,
     ):
 
         """
@@ -337,6 +342,9 @@ class AutoSklearn2Classifier(AutoSklearnClassifier):
             metric=metric,
             scoring_functions=scoring_functions,
             load_models=load_models,
+            ensemble_folds=ensemble_folds,
+            max_stacking_level=max_stacking_level,
+            stacking_strategy=stacking_strategy,
         )
 
     def fit(self, X, y,

@@ -88,17 +88,21 @@ def test_fit_n_jobs(tmp_dir, output_dir):
             available_num_runs.add(run_value.additional_info['num_run'])
     available_predictions = set()
     predictions = glob.glob(
-        os.path.join(automl.automl_._backend.get_runs_directory(), '*', 'predictions_ensemble*.npy')
+        os.path.join(
+            glob.escape(automl.automl_._backend.get_runs_directory()),
+            '*', 'predictions_ensemble*.npy')
     )
+    print(predictions)
     seeds = set()
     for prediction in predictions:
         prediction = os.path.split(prediction)[1]
-        match = re.match(MODEL_FN_RE, prediction.replace("predictions_ensemble", ""))
+        match = re.match(MODEL_FN_RE, prediction.replace("predictions_ensemble_", ""))
+        print(f"checking on {prediction.replace('predictions_ensemble', '')} match={match}")
         if match:
-            num_run = int(match.group(2))
-            available_predictions.add(num_run)
-            seed = int(match.group(1))
+            seed = int(match.group(2))
+            num_run = int(match.group(3))
             seeds.add(seed)
+            available_predictions.add(num_run)
 
     # Remove the dummy prediction, it is not part of the runhistory
     available_predictions.remove(1)
@@ -770,15 +774,16 @@ def test_fit_pipeline(dask_client, task_type, resampling_strategy, disable_file_
 
     # Num run should be 2, as 1 is for dummy classifier and we have not launch
     # another pipeline
+    level = 1
     num_run = 2
 
     # Check the re-sampling strategy
     num_run_dir = automl.automl_._backend.get_numrun_directory(
-        seed, num_run, budget=0.0)
+        level, seed, num_run, budget=0.0, instance=0)
     cv_model_path = os.path.join(num_run_dir, automl.automl_._backend.get_cv_model_filename(
-        seed, num_run, budget=0.0))
+        level, seed, num_run, budget=0.0, instance=0))
     model_path = os.path.join(num_run_dir, automl.automl_._backend.get_model_filename(
-        seed, num_run, budget=0.0))
+        level, seed, num_run, budget=0.0, instance=0))
     if resampling_strategy == 'test' or disable_file_output:
         # No file output is expected
         assert not os.path.exists(num_run_dir)

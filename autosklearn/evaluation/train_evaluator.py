@@ -506,6 +506,7 @@ class TrainEvaluator(AbstractEvaluator):
                             test_indices=test_indices,
                         )
                         if self.num_cv_folds == 1:
+                            self.Y_optimization = self.Y_train[test_indices]
                             self.Y_optimization_pred = opt_pred
                         else:
                             if self.Y_optimization_pred is None:
@@ -729,6 +730,7 @@ class TrainEvaluator(AbstractEvaluator):
                     )
 
                 if self.num_cv_folds == 1:
+                    self.Y_optimization = self.Y_train[test_split]
                     self.Y_optimization_pred = opt_pred
                 else:
                     if self.Y_optimization_pred is None:

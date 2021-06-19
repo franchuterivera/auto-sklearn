@@ -17,6 +17,7 @@ class AutoMLStub(AutoML):
         self._task = None
         self._dask_client = None
         self._is_dask_client_internally_created = False
+        self._max_stacking_level = 1
 
     def __del__(self):
         pass

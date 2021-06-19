@@ -157,7 +157,6 @@ class AutoML(BaseEstimator):
                  metric=None,
                  scoring_functions=None,
                  ensemble_folds=None,
-                 warmstart_with_initial_configurations=False,
                  ):
         super(AutoML, self).__init__()
         self.configuration_space = None
@@ -294,7 +293,6 @@ class AutoML(BaseEstimator):
         # By default try to use the TCP logging port or get a new port
         self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
         self._ensemble_folds = ensemble_folds
-        self._warmstart_with_initial_configurations = warmstart_with_initial_configurations
 
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
@@ -661,8 +659,6 @@ class AutoML(BaseEstimator):
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
-        self._logger.debug("  warmstart_with_initial_configurations: {}".format(
-            self._warmstart_with_initial_configurations))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
         self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
@@ -813,11 +809,6 @@ class AutoML(BaseEstimator):
         self._stopwatch.start_task(smac_task_name)
 
         initial_configurations = []
-        if self._warmstart_with_initial_configurations:
-            initial_configurations = self.get_initial_configurations(
-                self.configuration_space,
-                datamanager,
-            )
 
         self.started_registered_time = time.time()
         if self._stacking_strategy is not None and 'time_split' in self._stacking_strategy:
@@ -1238,7 +1229,7 @@ class AutoML(BaseEstimator):
                 load_function = \
                     self._backend.load_model_by_level_seed_and_id_and_budget_and_instance
             pipeline = load_function(
-                level=0,
+                level=1,
                 seed=self._seed,
                 idx=run_info.config.config_id + 1,
                 budget=run_info.budget,

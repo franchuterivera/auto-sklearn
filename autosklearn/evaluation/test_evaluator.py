@@ -1,5 +1,6 @@
 # -*- encoding: utf-8 -*-
 import multiprocessing
+import json
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ConfigSpace import Configuration
@@ -113,7 +114,6 @@ def eval_t(
     config: Union[int, Configuration],
     backend: Backend,
     metric: Scorer,
-    level: int,
     seed: int,
     num_run: int,
     instance: Dict[str, Any],
@@ -127,6 +127,9 @@ def eval_t(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
 ) -> None:
+    instance_dict = json.loads(instance) if instance is not None else {}
+    level = instance_dict.get('level', 1)
+
     evaluator = TestEvaluator(configuration=config,
                               backend=backend, metric=metric, level=level, seed=seed,
                               port=port,

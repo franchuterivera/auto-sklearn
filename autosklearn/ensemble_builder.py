@@ -890,6 +890,7 @@ class EnsembleBuilder(object):
         # Find the biggest instance per num_run
         mapping = self.backend.get_map_from_run2repeat()
         highest_per_run = self.backend.get_map_from_run2repeat(only_max_instance=True)
+        self.logger.critical(f"mapping={mapping} and highest_per_run={highest_per_run}")
 
         max_instance = 0
         if len(mapping) > 0:

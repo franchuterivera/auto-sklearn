@@ -43,6 +43,7 @@ class AutoMLStub(AutoML):
         self._task = None
         self._dask_client = None
         self._is_dask_client_internally_created = False
+        self._max_stacking_level = 1
 
     def __del__(self):
         pass
@@ -71,13 +72,16 @@ def test_fit(dask_client, backend):
 
 def test_fit_roar(dask_client_single_worker, backend):
     def get_roar_object_callback(
-            scenario_dict,
-            seed,
-            ta,
-            ta_kwargs,
-            dask_client,
-            n_jobs,
-            **kwargs
+        scenario_dict,
+        run_id,
+        seed,
+        ta,
+        ta_kwargs,
+        metalearning_configurations,
+        initial_configurations,
+        n_jobs,
+        dask_client,
+        **kwargs
     ):
         """Random online adaptive racing.
 
@@ -90,6 +94,7 @@ def test_fit_roar(dask_client_single_worker, backend):
             tae_runner_kwargs=ta_kwargs,
             dask_client=dask_client,
             n_jobs=n_jobs,
+            run_id=run_id,
         )
 
     X_train, Y_train, X_test, Y_test = putil.get_dataset('iris')
@@ -228,12 +233,9 @@ def test_delete_non_candidate_models(backend, dask_client):
         assert 'Failed to lock model' not in log_content, log_content
 
     # Assert that the files of the models used by the ensemble weren't deleted
-    model_files = backend.list_all_models(seed=seed)
-    model_files_idx = set()
-    for m_file in model_files:
-        # Extract the model identifiers from the filename
-        m_file = os.path.split(m_file)[1].replace('.model', '').split('.', 2)
-        model_files_idx.add((int(m_file[0]), int(m_file[1]), float(m_file[2])))
+    model_files_idx = set([(level, seed, num_run, budget, (instance,))
+                           for level, seed, num_run, budget, instance
+                           in backend.get_map_from_run2repeat().keys()])
     ensemble_members_idx = set(automl.ensemble_.identifiers_)
     assert ensemble_members_idx.issubset(model_files_idx), (ensemble_members_idx, model_files_idx)
 
@@ -328,7 +330,7 @@ def test_automl_outputs(backend, dask_client):
     assert len(fixture) > 0
 
     fixture = glob.glob(os.path.join(backend.temporary_directory, '.auto-sklearn',
-                                     'runs', '*', '100.*.model'))
+                                     'runs', '*', '1.100.*.model'))
     assert len(fixture) > 0
 
     fixture = os.listdir(os.path.join(backend.temporary_directory,
@@ -423,13 +425,13 @@ def test_do_dummy_prediction(backend, dask_client, datasets):
     # directory, but in the temporary directory.
     assert not os.path.exists(os.path.join(os.getcwd(), '.auto-sklearn'))
     assert os.path.exists(os.path.join(
-        backend.temporary_directory, '.auto-sklearn', 'runs', '1_1_0.0',
-        'predictions_ensemble_1_1_0.0.npy')
+        backend.temporary_directory, '.auto-sklearn', 'runs', '1_1_1_0.0_0',
+        'predictions_ensemble_1_1_1_0.0_0.npy')
     )
 
     model_path = os.path.join(backend.temporary_directory, '.auto-sklearn',
-                              'runs', '1_1_0.0',
-                              '1.1.0.0.model')
+                              'runs', '1_1_1_0.0_0',
+                              '1.1.1.0.0.0.model')
 
     # Make sure the dummy model complies with scikit learn
     # get/set params
@@ -474,7 +476,7 @@ def test_fail_if_dummy_prediction_fails(ta_run_mock, backend, dask_client):
     # First of all, check that ta.run() is actually called.
     ta_run_mock.return_value = StatusType.SUCCESS, None, None, {}
     auto._do_dummy_prediction(datamanager, 1)
-    ta_run_mock.assert_called_once_with(1, cutoff=time_for_this_task)
+    ta_run_mock.assert_called_once_with(1, cutoff=time_for_this_task, instance=None)
 
     # Case 1. Check that function raises no error when statustype == success.
     # ta.run() returns status, cost, runtime, and additional info.

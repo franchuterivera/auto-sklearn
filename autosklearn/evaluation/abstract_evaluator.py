@@ -416,9 +416,10 @@ class AbstractEvaluator(object):
                     number_of_repetitions_already_avg=number_of_repetitions_already_avg,
                     lower_instance=lower_instance,
                 )
-                averaged_repetitions.extend(repeats_avg)
+                # Preserve order of avg for debug
+                averaged_repetitions = [instance for instance in repeats_avg + averaged_repetitions]
 
-        return loss, opt_pred, Y_test_pred, sorted(averaged_repetitions)
+        return loss, opt_pred, Y_test_pred, averaged_repetitions
 
     def add_lower_instance_information(self,
                                        Y_test_pred: Optional[np.ndarray],
@@ -640,6 +641,7 @@ class AbstractEvaluator(object):
         rval_dict = {'loss': loss,
                      'additional_run_info': additional_run_info,
                      'status': status}
+
         if final_call:
             rval_dict['final_queue_element'] = True
 
