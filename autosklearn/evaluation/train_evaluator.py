@@ -1,4 +1,3 @@
-import traceback
 import logging
 import multiprocessing
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
@@ -38,7 +37,7 @@ from autosklearn.constants import (
     MULTIOUTPUT_REGRESSION
 )
 from autosklearn.pipeline.components.base import IterativeComponent
-from autosklearn.metrics import Scorer, log_loss
+from autosklearn.metrics import Scorer
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
 import gc
@@ -232,21 +231,14 @@ class TrainEvaluator(AbstractEvaluator):
             init_params=init_params,
             budget=budget,
             budget_type=budget_type,
+            resampling_strategy=resampling_strategy,
+            resampling_strategy_args=resampling_strategy_args,
             instance=instance,
         )
-        self.resampling_strategy = resampling_strategy
-        if resampling_strategy_args is None:
-            self.resampling_strategy_args = {}
-        else:
-            self.resampling_strategy_args = resampling_strategy_args
         self.splitter = self.get_splitter(self.datamanager)
         self.num_cv_folds = self.splitter.get_n_splits(
             groups=self.resampling_strategy_args.get('groups')
         )
-        self.X_train = self.datamanager.data['X_train']
-        self.Y_train = self.datamanager.data['Y_train']
-        self.Y_optimization: Optional[Union[List, np.ndarray]] = None
-        self.Y_optimization_pred: Optional[Union[List, np.ndarray]] = None
 
         if self.level > 1:
             # For now I only want to use the higesht budget available
@@ -258,13 +250,6 @@ class TrainEvaluator(AbstractEvaluator):
 
             train_all_repeat_together = self.resampling_strategy_args.get(
                 'train_all_repeat_together', False)
-            fidelities_as_individual_models = self.resampling_strategy_args.get(
-                'fidelities_as_individual_models', True)
-            # In the case of fidelities_as_individual_models==True, when instance is highest max
-            # repeat possible, the train evaluator produces already averaged instances
-            max_repetition_instance = cast(int, self.resampling_strategy_args.get(
-                'repeats')) - 1
-
             if self.instance == 0 or train_all_repeat_together:
                 idx2predict = self.backend.load_model_predictions(
                     # Ensemble correspond to the OOF prediction that have previously
@@ -274,14 +259,6 @@ class TrainEvaluator(AbstractEvaluator):
                     levels=list(range(1, level)),
                     # When doing instances_selfasbase strategy, we do towers
                     idxs=idxs,
-                    # This means whether we only load the last repetition available
-                    # or if we should load all repetitions available and just average
-                    # if fidelities_as_individual_models==True backend will do the average
-                    # for us, fidelities_as_individual_models==False means that during
-                    # train evaluator, the predictions are progressively averaged
-                    fidelities_as_individual_models=fidelities_as_individual_models,
-                    train_all_repeat_together=train_all_repeat_together,
-                    max_repetition_instance=max_repetition_instance,
                 )
                 identifiers = [k for k in idx2predict.keys()]
 
@@ -668,90 +645,6 @@ class TrainEvaluator(AbstractEvaluator):
                             for model_current_iter in models_current_iters]):
                         status = StatusType.SUCCESS
 
-                    # We do averaging if requested AND if at least 2 repetition have passed
-                    train_all_repeat_together = self.resampling_strategy_args.get(
-                        'train_all_repeat_together', False)
-                    fidelities_as_individual_models = self.resampling_strategy_args.get(
-                        'fidelities_as_individual_models', False)
-                    if (
-                        self.resampling_strategy in ['intensifier-cv',
-                                                     'partial-iterative-intensifier-cv'] and
-
-                        # We need to do average of the previous repetitions only if there
-                        # are previous repetitions
-                        self.instance > 0 and
-
-                        # train_all_repeat_together means that all repetitions happen
-                        # in a single fit() call, so no need to average previous repetitions
-                        not train_all_repeat_together and
-
-                        # And if we treat models as individual models, then we just output
-                        # the fitter cv-split as it is. No need to average
-                        not fidelities_as_individual_models
-                    ):
-                        lower_instance = self.instance - 1
-                        number_of_repetitions_already_avg = self.instance
-                        Y_test_pred_, opt_loss = self.add_lower_instance_information(
-                            Y_test_pred=Y_test_pred_,
-                            opt_loss=opt_loss,
-                            number_of_repetitions_already_avg=number_of_repetitions_already_avg,
-                            lower_instance=lower_instance,
-                        )
-
-                    highest_instance = cast(int, self.resampling_strategy_args.get(
-                        'repeats', 1)) - 1
-                    if (
-                        self.resampling_strategy in ['intensifier-cv',
-                                                     'partial-iterative-intensifier-cv'] and
-
-                        # We need to do average of the previous repetitions only if there
-                        # are previous repetitions
-                        self.instance == highest_instance and
-
-                        # train_all_repeat_together means that all repetitions happen
-                        # in a single fit() call, so no need to average previous repetitions
-                        not train_all_repeat_together and
-
-                        # Then we need to average all previous repetitions
-                        # so smac sees a nice averaged score
-                        fidelities_as_individual_models
-                    ):
-                        for i, lower_instance in enumerate(range(self.instance)):
-                            # Notice that we have to average ALL past repetitions
-                            # so we start from 0 -- first instance
-                            # and range above only gets to self.instance - 1
-                            number_of_repetitions_already_avg = i + 1
-                            (
-                                Y_test_pred_,
-                                opt_loss
-                            ) = self.add_lower_instance_information(
-                                Y_test_pred=Y_test_pred_,
-                                opt_loss=opt_loss,
-                                number_of_repetitions_already_avg=number_of_repetitions_already_avg,
-                                lower_instance=lower_instance,
-                            )
-
-                    loss_log_loss: Optional[float] = None
-                    stack_based_on_log_loss = self.resampling_strategy_args.get(
-                        'stack_based_on_log_loss', False)
-                    stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
-                        'stack_tiebreak_w_log_loss', True)
-                    if stack_based_on_log_loss or stack_tiebreak_w_log_loss:
-                        loss_log_loss = cast(float, self._loss(
-                            self.Y_optimization,
-                            self.Y_optimization_pred,
-                            metric=log_loss,
-                        ))
-
-                    len_valid_models = len([i for i, m in enumerate(self.models) if m is not None])
-                    self.logger.critical(
-                        f"FINISH iter={iterative} num_run={self.num_run} instance={self.instance} "
-                        f"level={self.level} iter={max(iterations)} "
-                        f"training_folds={training_folds} with "
-                        f"loss={opt_loss} train={np.shape(self.X_train)} "
-                        f"and base_models={self.base_models_} log_loss={loss_log_loss}"
-                        f"models={len_valid_models}"
-                    )
                     self.finish_up(
                         loss=opt_loss,
                         train_loss=train_loss,
@@ -763,7 +656,6 @@ class TrainEvaluator(AbstractEvaluator):
                         final_call=all(converged),
                         status=status,
                         opt_losses=opt_losses,
-                        loss_log_loss=loss_log_loss,
                     )
 
         else:
@@ -964,89 +856,6 @@ class TrainEvaluator(AbstractEvaluator):
                 else:
                     status = StatusType.SUCCESS
 
-            # We do averaging if requested AND if at least 2 repetition have passed
-            train_all_repeat_together = self.resampling_strategy_args.get(
-                'train_all_repeat_together', False)
-            fidelities_as_individual_models = self.resampling_strategy_args.get(
-                'fidelities_as_individual_models', False)
-            if (
-                self.resampling_strategy in ['intensifier-cv',
-                                             'partial-iterative-intensifier-cv'] and
-
-                # We need to do average of the previous repetitions only if there
-                # are previous repetitions
-                self.instance > 0 and
-
-                # train_all_repeat_together means that all repetitions happen
-                # in a single fit() call, so no need to average previous repetitions
-                not train_all_repeat_together and
-
-                # And if we treat models as individual models, then we just output
-                # the fitter cv-split as it is. No need to average
-                not fidelities_as_individual_models
-            ):
-                lower_instance = self.instance - 1
-                number_of_repetitions_already_avg = self.instance
-                Y_test_pred_, opt_loss = self.add_lower_instance_information(
-                    Y_test_pred=Y_test_pred_,
-                    opt_loss=opt_loss,
-                    number_of_repetitions_already_avg=number_of_repetitions_already_avg,
-                    lower_instance=lower_instance,
-                )
-
-            highest_instance = cast(int, self.resampling_strategy_args.get(
-                'repeats', 1)) - 1
-            if (
-                self.resampling_strategy in ['intensifier-cv',
-                                             'partial-iterative-intensifier-cv'] and
-
-                # We need to do average of the previous repetitions only if there
-                # are previous repetitions
-                self.instance == highest_instance and
-
-                # train_all_repeat_together means that all repetitions happen
-                # in a single fit() call, so no need to average previous repetitions
-                not train_all_repeat_together and
-
-                # Then we need to average all previous repetitions
-                # so smac sees a nice averaged score
-                fidelities_as_individual_models
-            ):
-                for i, lower_instance in enumerate(range(self.instance)):
-                    # Notice that we have to average ALL past repetitions
-                    # so we start from 0 -- first instance
-                    # and range above only gets to self.instance - 1
-                    number_of_repetitions_already_avg = i + 1
-                    (
-                        Y_test_pred_,
-                        opt_loss
-                    ) = self.add_lower_instance_information(
-                        Y_test_pred=Y_test_pred_,
-                        opt_loss=opt_loss,
-                        number_of_repetitions_already_avg=number_of_repetitions_already_avg,
-                        lower_instance=lower_instance,
-                    )
-
-            loss_log_loss = None
-            stack_based_on_log_loss = self.resampling_strategy_args.get(
-                'stack_based_on_log_loss', False)
-            stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
-                'stack_tiebreak_w_log_loss', True)
-            if stack_based_on_log_loss or stack_tiebreak_w_log_loss:
-                loss_log_loss = cast(float, self._loss(
-                    self.Y_optimization,
-                    self.Y_optimization_pred,
-                    metric=log_loss,
-                ))
-
-            len_valid_models = len([i for i, m in enumerate(self.models) if m is not None])
-            self.logger.critical(
-                f"FINISH iter={iterative} num_run={self.num_run} instance={self.instance} "
-                f"level={self.level} training_folds={training_folds} with "
-                f"loss={opt_loss} train={np.shape(self.X_train)} "
-                f"and base_models={self.base_models_} log_loss={loss_log_loss}"
-                f"models={len_valid_models}"
-            )
             self.finish_up(
                 loss=opt_loss,
                 train_loss=train_loss,
@@ -1058,7 +867,6 @@ class TrainEvaluator(AbstractEvaluator):
                 final_call=True,
                 status=status,
                 opt_losses=opt_losses,
-                loss_log_loss=loss_log_loss,
             )
 
     def reorder_predictions(self,
@@ -1084,100 +892,6 @@ class TrainEvaluator(AbstractEvaluator):
             if len(np.shape(Y_test_pred_)) == 3:
                 Y_test_pred_ = np.nanmean(Y_test_pred_, axis=0)
         return Y_valid_pred_, Y_test_pred_
-
-    def add_lower_instance_information(self,
-                                       Y_test_pred: np.ndarray,
-                                       opt_loss: Union[float, Dict[str, float]],
-                                       lower_instance: int,
-                                       number_of_repetitions_already_avg: int,
-                                       ) -> Tuple[np.ndarray, Union[float, Dict[str, float]]]:
-        # Update the loss to reflect and average. Because we always have the same
-        # number of folds, we can do an average of average
-        self.logger.critical(
-            f"For num_run={self.num_run} "
-            f"instance={self.instance} level={self.level} "
-            f"lower_instance={lower_instance} "
-            f"number_of_repetitions_already_avg={number_of_repetitions_already_avg}"
-        )
-        try:
-            # Average predictions -- Ensemble
-
-            # We want to average the predictions only with the past repetition as follows:
-            # Repeat 0: A/1
-            # Repeat 1: (        1*A     + B  )/2
-            # Repeat 2: (    2*(A + B)/2 + c  )/3
-            # Notice we NEED only repeat N-1 for N averaging
-            lower_prediction = \
-                self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                    subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
-                    budget=self.budget, instance=lower_instance)
-            # Remove the division from past iteration
-            np.multiply(
-                lower_prediction,
-                number_of_repetitions_already_avg,
-                out=lower_prediction,
-            )
-            # Add them now that they are within the same range
-            np.add(
-                self.Y_optimization_pred,
-                lower_prediction,
-                out=self.Y_optimization_pred,
-            )
-            # Divide by total amount of repetitions
-            np.multiply(
-                self.Y_optimization_pred,
-                1/(number_of_repetitions_already_avg + 1),
-                out=self.Y_optimization_pred,
-            )
-            opt_loss_before = opt_loss
-            opt_loss = self._loss(
-                self.Y_optimization,
-                self.Y_optimization_pred,
-            )
-            self.logger.critical(f"For num_run={self.num_run} level={self.level} "
-                                 f"instance={self.instance} opt_loss_before={opt_loss_before} "
-                                 f"now it is opt_loss={opt_loss}")
-
-            # Then TEST
-            if self.X_test is not None:
-                lower_prediction = \
-                    self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
-                        subset='test', level=self.level, seed=self.seed, idx=self.num_run,
-                        budget=self.budget, instance=lower_instance)
-                # Remove the division from past iteration
-                np.multiply(
-                    lower_prediction,
-                    number_of_repetitions_already_avg,
-                    out=lower_prediction,
-                )
-                # Add them now that they are within the same range
-                np.add(
-                    Y_test_pred,
-                    lower_prediction,
-                    out=Y_test_pred,
-                )
-                # Divide by total amount of repetitions
-                np.multiply(
-                    Y_test_pred,
-                    1/(number_of_repetitions_already_avg + 1),
-                    out=Y_test_pred,
-                )
-
-            # And then finally the model needs to be average
-            old_voting_model = \
-                self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
-                    level=self.level, seed=self.seed, idx=self.num_run,
-                    budget=self.budget, instance=lower_instance)
-            # voting estimator has fitted estimators in a list
-            # We expect from 0 to training_folds-1 to be taken from old models
-            # then training_folds folds would be trained properly,
-            # and the rest of repetition should be none
-            for i in range(len(old_voting_model.estimators_)):
-                self.models[i] = old_voting_model.estimators_[i]
-        except Exception as e:
-            self.logger.error(traceback.format_exc())
-            self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
-        return Y_test_pred, opt_loss
 
     def end_train_if_worst_than_median(self, optimization_loss: float, index: int = 0) -> None:
         # Get all the fold0 repeat0 losses

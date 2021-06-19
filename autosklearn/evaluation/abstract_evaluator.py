@@ -1,14 +1,19 @@
+import traceback
 import logging
 import multiprocessing
 import time
 import warnings
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Type, Union, cast
 
+from filelock import FileLock
+
 import numpy as np
 
 from sklearn.base import BaseEstimator
 from sklearn.dummy import DummyClassifier, DummyRegressor
 from sklearn.ensemble import VotingClassifier, VotingRegressor
+from sklearn.model_selection._split import _RepeatedSplits, BaseShuffleSplit
+from sklearn.model_selection import BaseCrossValidator
 
 from smac.tae import StatusType
 
@@ -24,7 +29,7 @@ from autosklearn.constants import (
 from autosklearn.pipeline.implementations.util import (
     convert_multioutput_multiclass_to_multilabel
 )
-from autosklearn.metrics import calculate_loss, Scorer
+from autosklearn.metrics import calculate_loss, Scorer, log_loss
 from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_logger
 
@@ -193,6 +198,9 @@ class AbstractEvaluator(object):
         init_params: Optional[Dict[str, Any]] = None,
         budget: Optional[float] = None,
         budget_type: Optional[str] = None,
+        resampling_strategy: Optional[Union[str, BaseCrossValidator,
+                                            _RepeatedSplits, BaseShuffleSplit]] = None,
+        resampling_strategy_args: Optional[Dict[str, Optional[Union[float, int, str]]]] = None,
     ):
 
         self.starttime = time.time()
@@ -202,10 +210,18 @@ class AbstractEvaluator(object):
         self.port = port
         self.queue = queue
 
+        self.resampling_strategy = resampling_strategy
+        if resampling_strategy_args is None:
+            self.resampling_strategy_args = {}
+        else:
+            self.resampling_strategy_args = resampling_strategy_args
+
         self.datamanager = self.backend.load_datamanager()
         self.include = include
         self.exclude = exclude
 
+        self.X_train = self.datamanager.data.get('X_train')
+        self.Y_train = self.datamanager.data.get('Y_train')
         self.X_valid = self.datamanager.data.get('X_valid')
         self.y_valid = self.datamanager.data.get('Y_valid')
         self.X_test = self.datamanager.data.get('X_test')
@@ -216,6 +232,8 @@ class AbstractEvaluator(object):
         self.level = level
         self.seed = seed
 
+        self.Y_optimization: Optional[Union[List, np.ndarray]] = None
+        self.Y_optimization_pred: Optional[Union[List, np.ndarray]] = None
         self.output_y_hat_optimization = output_y_hat_optimization
         self.scoring_functions = scoring_functions
 
@@ -271,7 +289,6 @@ class AbstractEvaluator(object):
                 port=self.port,
             )
 
-        self.Y_optimization: Optional[Union[List, np.ndarray]] = None
         self.Y_actual_train = None
 
         self.budget = budget
@@ -342,6 +359,161 @@ class AbstractEvaluator(object):
             y_true, y_hat, self.task_type, metric_,
             scoring_functions=scoring_functions)
 
+    def handle_lower_level_repeats(self, Y_test_pred: Optional[np.ndarray]
+                                   ) -> Tuple[Union[float, Dict[str, float]],
+                                              Optional[np.ndarray],
+                                              Optional[np.ndarray],
+                                              List[int]]:
+        """
+        Incorporates repetitions available for previous instances.
+
+        Returns
+        -------
+        loss (float):
+            The loss after de-noising with repetitions
+        opt_pred (np.ndarray):
+            Predictions on the out-of-fold
+        test_pred (np.ndarray):
+            Predictions on the test array
+        averaged_repetitions: List[int]
+            The repetitions averaged so far
+        """
+
+        averaged_repetitions = [self.instance]
+
+        # We do averaging if requested AND if at least 2 repetition have passed
+        train_all_repeat_together = self.resampling_strategy_args.get(
+            'train_all_repeat_together', False)
+
+        prev_run_on_max_repeat = {(level, seed, num_run, budget, instance): repeats
+                                  for (
+                                      (level, seed, num_run, budget, instance)
+                                  ), repeats in self.backend.get_map_from_run2repeat(
+                                      only_max_instance=True
+                                  ).items()
+                                  if (
+                                      level == self.level
+                                      and seed == self.seed
+                                      and num_run == self.num_run
+                                      and budget == self.budget
+                                  )}
+        if (
+            # We need to do average of the previous repetitions only if there
+            # are previous repetitions
+            len(prev_run_on_max_repeat) > 0 and
+
+            # train_all_repeat_together means that all repetitions happen
+            # in a single fit() call, so no need to average previous repetitions
+            not train_all_repeat_together
+        ):
+            for identifier, repeats_avg in prev_run_on_max_repeat.items():
+                # This foreach might be misleading. It only runs once because
+                # prev_run_on_max_repeat contains ONLY the run with highest repeat
+                level, seed, num_run, budget, lower_instance = identifier
+                number_of_repetitions_already_avg = len(repeats_avg)
+                loss, opt_pred, test_pred = self.add_lower_instance_information(
+                    Y_test_pred=Y_test_pred,
+                    number_of_repetitions_already_avg=number_of_repetitions_already_avg,
+                    lower_instance=lower_instance,
+                )
+                averaged_repetitions.extend(repeats_avg)
+
+        return loss, opt_pred, Y_test_pred, sorted(averaged_repetitions)
+
+    def add_lower_instance_information(self,
+                                       Y_test_pred: Optional[np.ndarray],
+                                       lower_instance: int,
+                                       number_of_repetitions_already_avg: int,
+                                       ) -> Tuple[Union[float, Dict[str, float]],
+                                                  np.ndarray,
+                                                  Optional[np.ndarray]]:
+        # Update the loss to reflect and average. Because we always have the same
+        # number of folds, we can do an average of average
+        self.logger.critical(
+            f"For num_run={self.num_run} "
+            f"instance={self.instance} level={self.level} "
+            f"lower_instance={lower_instance} "
+            f"number_of_repetitions_already_avg={number_of_repetitions_already_avg}"
+        )
+        try:
+            # Average predictions -- Ensemble
+
+            # We want to average the predictions only with the past repetition as follows:
+            # Repeat 0: A/1
+            # Repeat 1: (        1*A     + B  )/2
+            # Repeat 2: (    2*(A + B)/2 + c  )/3
+            # Notice we NEED only repeat N-1 for N averaging
+            lower_prediction = \
+                self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                    subset='ensemble', level=self.level, seed=self.seed, idx=self.num_run,
+                    budget=self.budget, instance=lower_instance)
+            # Remove the division from past iteration
+            np.multiply(
+                lower_prediction,
+                number_of_repetitions_already_avg,
+                out=lower_prediction,
+            )
+            # Add them now that they are within the same range
+            np.add(
+                self.Y_optimization_pred,
+                lower_prediction,
+                out=self.Y_optimization_pred,
+            )
+            # Divide by total amount of repetitions
+            np.multiply(
+                self.Y_optimization_pred,
+                1/(number_of_repetitions_already_avg + 1),
+                out=self.Y_optimization_pred,
+            )
+            opt_loss = self._loss(
+                self.Y_optimization,
+                self.Y_optimization_pred,
+            )
+
+            # Then TEST
+            if self.X_test is not None:
+                lower_prediction = \
+                    self.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+                        subset='test', level=self.level, seed=self.seed, idx=self.num_run,
+                        budget=self.budget, instance=lower_instance)
+                # Remove the division from past iteration
+                np.multiply(
+                    lower_prediction,
+                    number_of_repetitions_already_avg,
+                    out=lower_prediction,
+                )
+                # Add them now that they are within the same range
+                np.add(
+                    Y_test_pred,
+                    lower_prediction,
+                    out=Y_test_pred,
+                )
+                # Divide by total amount of repetitions
+                np.multiply(
+                    Y_test_pred,
+                    1/(number_of_repetitions_already_avg + 1),
+                    out=Y_test_pred,
+                )
+
+            # And then finally the model needs to be average
+            old_voting_model = \
+                self.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+                    level=self.level, seed=self.seed, idx=self.num_run,
+                    budget=self.budget, instance=lower_instance)
+            # voting estimator has fitted estimators in a list
+            # We expect from 0 to training_folds-1 to be taken from old models
+            # then training_folds folds would be trained properly,
+            # and the rest of repetition should be none
+            # order does not matter!
+            self.models: List[Union[VotingClassifier, VotingRegressor]] = [
+                model for model in self.models if model is not None]
+            for i in range(len(old_voting_model.estimators_)):
+                self.models.append(old_voting_model.estimators_[i])
+        except Exception as e:
+            self.logger.error(traceback.format_exc())
+            self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
+        return opt_loss, self.Y_optimization_pred, Y_test_pred
+
     def finish_up(
         self,
         loss: Union[Dict[str, float], float],
@@ -354,7 +526,6 @@ class AbstractEvaluator(object):
         final_call: bool,
         status: StatusType,
         opt_losses: Optional[List[float]] = None,
-        loss_log_loss: Optional[float] = None,
     ) -> Tuple[float, Union[float, Dict[str, float]], int,
                Dict[str, Union[str, int, float, Dict, List, Tuple]]]:
         """This function does everything necessary after the fitting is done:
@@ -367,6 +538,52 @@ class AbstractEvaluator(object):
 
         self.duration = time.time() - self.starttime
 
+        # If fidelities are individual models, then we use a file based synchronization
+        # scheme. All instances can be ran at the same time. So the first of them that
+        # finished, regardless of the instance numbers gets write access to the runs directory.
+        # After that one has written, write rights are release and next instance can avg
+        # the predictions of self and past instance 'serially' after gaining right permissions
+        fidelities_as_individual_models = cast(bool,
+                                               self.resampling_strategy_args.get(
+                                                   'fidelities_as_individual_models', False)
+                                               )
+        if fidelities_as_individual_models:
+            lock_path = self.backend.get_lock_path(level=self.level, seed=self.seed,
+                                                   num_run=self.num_run, budget=self.budget)
+            lock = FileLock(lock_path)
+            lock.adquire()
+
+        # De-noise the predictions of the models if repetitions are available
+        repeats_averaged = [0]
+        loss_log_loss: Optional[float] = None
+        if self.resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
+            opt_loss_before = loss
+            loss, opt_pred, test_pred, repeats_averaged = self.handle_lower_level_repeats(
+                Y_test_pred=test_pred,
+            )
+            self.logger.critical(f"For num_run={self.num_run} level={self.level} "
+                                 f"instance={self.instance} opt_loss_before={opt_loss_before} "
+                                 f"now it is opt_loss={loss}")
+            stack_based_on_log_loss = self.resampling_strategy_args.get(
+                'stack_based_on_log_loss', False)
+            stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
+                'stack_tiebreak_w_log_loss', True)
+            if stack_based_on_log_loss or stack_tiebreak_w_log_loss:
+                loss_log_loss = cast(float, self._loss(
+                    self.Y_optimization,
+                    self.Y_optimization_pred,
+                    metric=log_loss,
+                ))
+
+            len_valid_models = len([i for i, m in enumerate(self.models) if m is not None])
+            self.logger.critical(
+                f"FINISHED num_run={self.num_run} instance={self.instance} "
+                f"level={self.level}"
+                f"loss={loss} train={np.shape(self.X_train)} "
+                f"and base_models={self.base_models_} log_loss={loss_log_loss}"
+                f"models={len_valid_models}"
+            )
+
         modeltype = 'N/A'
         if hasattr(self.model, 'steps'):
             modeltype = self.model.steps[-1][-1].choice.__class__.__name__
@@ -377,6 +594,7 @@ class AbstractEvaluator(object):
             'modeltype': modeltype,
             'opt_losses': opt_losses,
             'loss_log_loss': loss_log_loss,
+            'repeats_averaged': repeats_averaged,
         }
 
         if file_output:
@@ -386,6 +604,10 @@ class AbstractEvaluator(object):
         else:
             file_out_loss = None
             additional_run_info_ = {}
+
+        # Release the lock iff all info has been written to disk
+        if fidelities_as_individual_models:
+            lock.release()
 
         validation_loss, test_loss = self.calculate_auxiliary_losses(
             valid_pred, test_pred,
