@@ -109,7 +109,7 @@ class TestMetadataGeneration(unittest.TestCase):
                                                       'validation_trajectory_1.json')
             self.assertTrue(os.path.exists(expected_validation_output))
             trajectory = os.path.join(expected_output_directory,
-                                      'smac3-output', 'run_1', 'trajectory.json')
+                                      'smac3-output', 'run_2', 'trajectory.json')
 
             with open(expected_validation_output) as fh_validation:
                 with open(trajectory) as fh_trajectory:
