@@ -155,7 +155,8 @@ class FunctionsTest(unittest.TestCase):
         additional_run_info = rval[0]['additional_run_info']
         for key, value in fixture.items():
             self.assertAlmostEqual(additional_run_info[key], fixture[key], msg=key)
-        self.assertEqual(len(additional_run_info), len(fixture) + 1,
+        # Level is also included, not only duration as as extra
+        self.assertEqual(len(additional_run_info), len(fixture) + 2,
                          msg=sorted(additional_run_info.items()))
         self.assertIn('duration', additional_run_info)
         self.assertAlmostEqual(rval[0]['loss'], 0.040000000000000036)

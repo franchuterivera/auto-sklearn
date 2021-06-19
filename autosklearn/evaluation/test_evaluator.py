@@ -116,7 +116,7 @@ def eval_t(
     metric: Scorer,
     seed: int,
     num_run: int,
-    instance: Dict[str, Any],
+    instance: str,
     scoring_functions: Optional[List[Scorer]],
     output_y_hat_optimization: bool,
     include: Optional[List[str]],

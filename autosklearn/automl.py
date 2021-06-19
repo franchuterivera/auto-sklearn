@@ -793,7 +793,6 @@ class AutoML(BaseEstimator):
                 logger_port=self._logger_port,
                 pynisher_context=self._multiprocessing_context,
                 ensemble_folds=self._ensemble_folds,
-                resampling_strategy_arguments=self._resampling_strategy_arguments,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -1467,7 +1466,6 @@ class AutoML(BaseEstimator):
             logger_port=self._logger_port,
             pynisher_context=self._multiprocessing_context,
             ensemble_folds=self._ensemble_folds,
-            resampling_strategy_arguments=self._resampling_strategy_arguments,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()

@@ -97,6 +97,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    configuration=configuration,
                                    resampling_strategy='holdout',
                                    resampling_strategy_args={'train_size': 0.66},
@@ -164,6 +165,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='holdout',
@@ -262,6 +264,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='holdout-iterative-fit',
@@ -332,6 +335,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='holdout-iterative-fit',
@@ -380,6 +384,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
                                    resampling_strategy_args={'folds': 5},
                                    scoring_functions=None,
                                    output_y_hat_optimization=True,
+                                   compute_train_loss=True,
                                    metric=accuracy)
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
@@ -428,6 +433,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='partial-cv',
@@ -488,6 +494,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(backend_api, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='partial-cv-iterative-fit',
@@ -557,6 +564,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         model_mock.return_value = None
 
         evaluator = TrainEvaluator(self.backend_mock, queue=queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -572,14 +580,16 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             D.data['Y_train'],
             D.data['Y_valid'],
             D.data['Y_test'],
+            run_metadata={'something': 'important'},
         )
 
         self.assertEqual(rval, (None, {}))
         self.assertEqual(self.backend_mock.save_targets_ensemble.call_count, 1)
         self.assertEqual(self.backend_mock.save_numrun_to_dir.call_count, 1)
-        self.assertEqual(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1].keys(),
-                         {'seed', 'idx', 'budget', 'model', 'cv_model',
-                          'ensemble_predictions', 'valid_predictions', 'test_predictions'})
+        self.assertCountEqual(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1].keys(),
+                              {'level', 'seed', 'idx', 'budget', 'model', 'cv_model',
+                              'ensemble_predictions', 'valid_predictions', 'test_predictions',
+                               'instance', 'run_metadata'})
         self.assertIsNotNone(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1]['model'])
         self.assertIsNone(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1]['cv_model'])
 
@@ -588,13 +598,15 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             D.data['Y_train'],
             D.data['Y_valid'],
             D.data['Y_test'],
+            run_metadata={'something': 'important'},
         )
         self.assertEqual(rval, (None, {}))
         self.assertEqual(self.backend_mock.save_targets_ensemble.call_count, 2)
         self.assertEqual(self.backend_mock.save_numrun_to_dir.call_count, 2)
-        self.assertEqual(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1].keys(),
-                         {'seed', 'idx', 'budget', 'model', 'cv_model',
-                          'ensemble_predictions', 'valid_predictions', 'test_predictions'})
+        self.assertCountEqual(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1].keys(),
+                              {'level', 'seed', 'idx', 'budget', 'model', 'cv_model',
+                              'ensemble_predictions', 'valid_predictions', 'test_predictions',
+                               'instance', 'run_metadata'})
         self.assertIsNotNone(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1]['model'])
         self.assertIsNotNone(self.backend_mock.save_numrun_to_dir.call_args_list[-1][1]['cv_model'])
 
@@ -605,6 +617,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             D.data['Y_train'],
             D.data['Y_valid'],
             D.data['Y_test'],
+            run_metadata={'something': 'important'},
         )
         self.assertEqual(
             rval,
@@ -621,6 +634,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             D.data['Y_train'],
             D.data['Y_valid'],
             D.data['Y_test'],
+            run_metadata={'something': 'important'},
         )
         self.assertEqual(
             rval,
@@ -643,6 +657,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         backend_mock.load_datamanager.return_value = D
         backend_mock.temporary_directory = tempfile.gettempdir()
         evaluator = TrainEvaluator(backend_mock, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -691,6 +706,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
         backend_mock.temporary_directory = tempfile.gettempdir()
         evaluator = TrainEvaluator(backend_mock, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -736,6 +752,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         queue_ = multiprocessing.Queue()
 
         evaluator = TrainEvaluator(self.backend_mock, queue_,
+                                   compute_train_loss=True,
                                    port=self.port,
                                    configuration=configuration,
                                    resampling_strategy='cv',
@@ -748,7 +765,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             'ensemble_predictions']
 
         for i in range(7):
-            self.assertEqual(0.9, Y_optimization_pred[i][1])
+            self.assertAlmostEqual(0.9, Y_optimization_pred[i][1])
 
     @unittest.mock.patch.object(TrainEvaluator, 'file_output')
     @unittest.mock.patch.object(TrainEvaluator, '_partial_fit_and_predict_standard')
@@ -785,9 +802,8 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
         evaluator.model = unittest.mock.Mock()
+        evaluator.model.steps = [('dummy', unittest.mock.Mock())]
         evaluator.model.estimator_supports_iterative_fit.return_value = False
-        evaluator.Y_targets[0] = np.array([1] * 23)
-        evaluator.Y_train_targets = np.array([1] * 69)
         rval = evaluator.fit_predict_and_loss(iterative=False)
         self.assertIsNone(rval)
         element = queue_.get()
@@ -826,11 +842,10 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             resampling_strategy_args={'folds': 2},
             output_y_hat_optimization=False,
             metric=accuracy,
+            compute_train_loss=True,
         )
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
-        evaluator.Y_targets[0] = np.array([1] * 35)
-        evaluator.Y_targets[1] = np.array([1] * 34)
         evaluator.Y_train_targets = np.array([1] * 69)
 
         self.assertRaisesRegex(
@@ -878,12 +893,11 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             resampling_strategy='holdout',
             output_y_hat_optimization=False,
             metric=accuracy,
-            budget=0.0
+            budget=0.0,
+            compute_train_loss=True,
         )
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
-        evaluator.Y_targets[0] = np.array([1] * 23).reshape((-1, 1))
-        evaluator.Y_train_targets = np.array([1] * 69).reshape((-1, 1))
         rval = evaluator.fit_predict_and_loss(iterative=True)
         self.assertIsNone(rval)
         self.assertEqual(finish_up_mock.call_count, 1)
@@ -916,12 +930,11 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             resampling_strategy='holdout',
             output_y_hat_optimization=False,
             metric=accuracy,
+            compute_train_loss=True,
         )
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
 
-        evaluator.Y_targets[0] = np.array([1] * 23).reshape((-1, 1))
-        evaluator.Y_train_targets = np.array([1] * 69).reshape((-1, 1))
         rval = evaluator.fit_predict_and_loss(iterative=True)
         self.assertIsNone(rval)
         self.assertEqual(finish_up_mock.call_count, 1)
@@ -966,12 +979,11 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             metric=accuracy,
             budget_type='iterations',
             budget=50,
+            compute_train_loss=True,
         )
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
 
-        evaluator.Y_targets[0] = np.array([1] * 23).reshape((-1, 1))
-        evaluator.Y_train_targets = np.array([1] * 69).reshape((-1, 1))
         rval = evaluator.fit_predict_and_loss(iterative=False)
         self.assertIsNone(rval)
         self.assertEqual(finish_up_mock.call_count, 1)
@@ -1006,12 +1018,11 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
             metric=accuracy,
             budget_type='subsample',
             budget=50,
+            compute_train_loss=True,
         )
         evaluator.file_output = unittest.mock.Mock(spec=evaluator.file_output)
         evaluator.file_output.return_value = (None, {})
 
-        evaluator.Y_targets[0] = np.array([1] * 23).reshape((-1, 1))
-        evaluator.Y_train_targets = np.array([1] * 69).reshape((-1, 1))
         rval = evaluator.fit_predict_and_loss(iterative=False)
         self.assertIsNone(rval)
         self.assertEqual(finish_up_mock.call_count, 1)
@@ -1045,6 +1056,7 @@ class TestTrainEvaluator(BaseEvaluatorTest, unittest.TestCase):
                                  MULTICLASS_CLASSIFICATION: accuracy,
                                  REGRESSION: r2}
                 evaluator = TrainEvaluator(self.backend_mock, queue_,
+                                           compute_train_loss=True,
                                            port=self.port,
                                            resampling_strategy='cv',
                                            resampling_strategy_args={'folds': 2},
@@ -2260,6 +2272,7 @@ class FunctionsTest(unittest.TestCase):
             shutil.rmtree(self.ev_path)
         os.makedirs(self.ev_path, exist_ok=False)
         self.backend = unittest.mock.Mock()
+        self.backend.load_opt_losses.return_value = []
         self.backend.temporary_directory = tempfile.gettempdir()
         self.backend.get_model_dir.return_value = self.ev_path
         self.backend.get_cv_model_dir.return_value = self.ev_path
@@ -2319,6 +2332,7 @@ class FunctionsTest(unittest.TestCase):
             disable_file_output=False,
             instance=self.dataset_name,
             metric=accuracy,
+            compute_train_loss=True,
         )
         rval = read_queue(self.queue)
         self.assertEqual(len(rval), 1)
@@ -2347,7 +2361,8 @@ class FunctionsTest(unittest.TestCase):
             self.assertAlmostEqual(additional_run_info[key], fixture[key],
                                    msg=key)
         self.assertIn('duration', additional_run_info)
-        self.assertEqual(len(additional_run_info), len(fixture) + 1,
+        # We have the duration and the level in the additional run info
+        self.assertEqual(len(additional_run_info), len(fixture) + 2,
                          msg=sorted(additional_run_info.items()))
 
         self.assertAlmostEqual(rval[0]['loss'], 0.030303030303030276, places=3)
@@ -2558,6 +2573,7 @@ class FunctionsTest(unittest.TestCase):
             disable_file_output=False,
             instance=self.dataset_name,
             metric=accuracy,
+            compute_train_loss=True,
         )
         rval = read_queue(self.queue)
         self.assertEqual(len(rval), 1)
@@ -2585,7 +2601,7 @@ class FunctionsTest(unittest.TestCase):
         for key, value in fixture.items():
             self.assertAlmostEqual(additional_run_info[key], fixture[key], msg=key)
         self.assertIn('duration', additional_run_info)
-        self.assertEqual(len(additional_run_info), len(fixture) + 1,
+        self.assertEqual(len(additional_run_info), len(fixture) + 2,
                          msg=sorted(additional_run_info.items()))
 
         self.assertAlmostEqual(rval[0]['loss'], 0.04999999999999997)

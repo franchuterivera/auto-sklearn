@@ -34,11 +34,25 @@ class BackendMock(object):
         array = np.load(os.path.join(
             self.temporary_directory,
             '.auto-sklearn',
-            'runs', '0_3_100.0',
-            'predictions_test_0_3_100.0.npy'
+            'runs', '1_0_3_100.0_0',
+            'predictions_test_1_0_3_100.0_0.npy'
         ))
         manager.data.get.return_value = array
         return manager
+
+    def get_map_from_run2repeat(self, only_max_instance=False):
+        return {
+            (1, 0, 1, 0, 0): [0],
+            (1, 0, 2, 0, 0): [0],
+            (1, 0, 3, 100, 0): [0],
+        }
+
+    def get_prediction_filename(self, subset, level, seed, idx, budget, instance):
+        return 'predictions_%s_%s_%s_%s_%s_%s.npy' % (
+            subset, level, seed, idx, budget, instance)
+
+    def get_prediction_mtime_by_level_seed_and_id_and_budget_and_instance(self, *args, **kwargs):
+        return 12345
 
     def load_targets_ensemble(self):
         with open(os.path.join(
@@ -58,11 +72,14 @@ class BackendMock(object):
     def get_runs_directory(self) -> str:
         return os.path.join(self.temporary_directory, '.auto-sklearn', 'runs')
 
-    def get_numrun_directory(self, seed: int, num_run: int, budget: float) -> str:
-        return os.path.join(self.get_runs_directory(), '%d_%d_%s' % (seed, num_run, budget))
+    def get_numrun_directory(self, level: int, seed: int, num_run: int,
+                             budget: float, instance: int) -> str:
+        return os.path.join(self.get_runs_directory(), '%d_%d_%d_%s_%d' % (
+            level, seed, num_run, budget, instance))
 
-    def get_model_filename(self, seed: int, idx: int, budget: float) -> str:
-        return '%s.%s.%s.model' % (seed, idx, budget)
+    def get_model_filename(self, level: int, seed: int, idx: int, budget: float, instance: int
+                           ) -> str:
+        return '%s.%s.%s.%s.%s.model' % (level, seed, idx, budget, instance)
 
 
 def compare_read_preds(read_preds1, read_preds2):

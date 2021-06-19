@@ -147,6 +147,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
                 predictions_ensemble,
                 predictions_valid,
                 predictions_test,
+                run_metadata={'something': 'important'}
             )
         )
 
@@ -173,6 +174,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
                     predictions_ensemble,
                     predictions_valid,
                     predictions_test,
+                    run_metadata={'something': 'important'}
                 )
             )
 
@@ -219,6 +221,7 @@ class AbstractEvaluatorTest(unittest.TestCase):
                 predictions_ensemble,
                 predictions_valid,
                 predictions_test,
+                run_metadata={'something': 'important'}
             )
         )
 
@@ -274,9 +277,10 @@ class AbstractEvaluatorTest(unittest.TestCase):
                 Y_optimization_pred=predictions_ensemble,
                 Y_valid_pred=predictions_valid,
                 Y_test_pred=predictions_test,
+                run_metadata={'something': 'important'}
             )
 
             self.assertTrue(os.path.exists(os.path.join(self.working_directory, 'tmp',
-                                                        '.auto-sklearn', 'runs', '1_0_None')))
+                                                        '.auto-sklearn', 'runs', '1_1_0_None_0')))
 
             shutil.rmtree(self.working_directory, ignore_errors=True)

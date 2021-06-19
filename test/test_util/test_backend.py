@@ -27,15 +27,17 @@ class BackendModelsTest(unittest.TestCase):
             open_mock,
             create=True,
         ):
+            level = 1
             seed = 13
             idx = 17
             budget = 50.0
+            instance = 0
             expected_model = self._setup_load_model_mocks(open_mock,
                                                           pickleLoadMock,
-                                                          seed, idx, budget)
+                                                          level, seed, idx, budget, instance)
 
-            actual_model = self.backend.load_model_by_seed_and_id_and_budget(
-                seed, idx, budget)
+            actual_model = self.backend.load_model_by_level_seed_and_id_and_budget_and_instance(
+                level, seed, idx, budget, instance)
 
             self.assertEqual(expected_model, actual_model)
 
@@ -44,20 +46,24 @@ class BackendModelsTest(unittest.TestCase):
     @unittest.mock.patch('os.path.exists')
     def test_loads_models_by_identifiers(self, exists_mock, openMock, pickleLoadMock):
         exists_mock.return_value = True
+        level = 1
         seed = 13
         idx = 17
         budget = 50.0
+        instance = 0
         expected_model = self._setup_load_model_mocks(
-            openMock, pickleLoadMock, seed, idx, budget)
-        expected_dict = {(seed, idx, budget): expected_model}
+            openMock, pickleLoadMock, level, seed, idx, budget, instance)
+        expected_dict = {(level, seed, idx, budget, instance): expected_model}
 
-        actual_dict = self.backend.load_models_by_identifiers([(seed, idx, budget)])
+        actual_dict = self.backend.load_models_by_identifiers([
+            (level, seed, idx, budget, (instance,))])
 
         self.assertIsInstance(actual_dict, dict)
         self.assertDictEqual(expected_dict, actual_dict)
 
-    def _setup_load_model_mocks(self, openMock, pickleLoadMock, seed, idx, budget):
-        model_path = '/runs/%s_%s_%s/%s.%s.%s.model' % (seed, idx, budget, seed, idx, budget)
+    def _setup_load_model_mocks(self, openMock, pickleLoadMock, level, seed, idx, budget, instance):
+        model_path = '/runs/%s_%s_%s_%s_%s/%s.%s.%s.%s.%s.model' % (
+            level, seed, idx, budget, instance, level, seed, idx, budget, instance)
         file_handler = 'file_handler'
         expected_model = 'model'
 

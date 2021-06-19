@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, cast
 
 import numpy as np
 
@@ -38,7 +38,8 @@ class SingleBest(AbstractEnsemble):
         self.run_history = run_history
         self.identifiers_ = self.get_identifiers_from_run_history()
 
-    def get_identifiers_from_run_history(self) -> List[Tuple[int, int, int, float, Tuple]]:
+    def get_identifiers_from_run_history(self
+                                         ) -> List[Tuple[int, int, int, float, Tuple[int, ...]]]:
         """
         This method parses the run history, to identify
         the best performing model
@@ -46,7 +47,7 @@ class SingleBest(AbstractEnsemble):
         It populates the identifiers attribute, which is used
         by the backend to access the actual model
         """
-        best_model_identifier = []
+        best_model_identifier: List[Tuple[int, int, int, float, Tuple[int, ...]]] = []
         best_model_score = self.metric._worst_possible_result
 
         for run_key in self.run_history.data.keys():
@@ -60,7 +61,7 @@ class SingleBest(AbstractEnsemble):
                 instance = 0
                 if run_key.instance_id is not None:
                     instance_dict = json.loads(run_key.instance_id)
-                    instance = instance_dict.get('repeats', 0)
+                    instance = cast(int, instance_dict.get('repeats', 0))
                 model_dir = self.backend.get_numrun_directory(
                     run_value.additional_info['level'],
                     self.seed,
@@ -80,10 +81,10 @@ class SingleBest(AbstractEnsemble):
                     continue
 
                 best_model_identifier = [(
-                    run_value.additional_info['level'],
-                    self.seed,
-                    run_value.additional_info['num_run'],
-                    run_key.budget,
+                    int(run_value.additional_info['level']),
+                    int(self.seed),
+                    int(run_value.additional_info['num_run']),
+                    float(run_key.budget),
                     (instance,),
                 )]
                 best_model_score = score

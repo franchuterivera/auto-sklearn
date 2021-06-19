@@ -44,6 +44,7 @@ def test_smbo_metalearning_configurations(backend, context, dask_client):
         data_memory_limit=None,
         num_metalearning_cfgs=25,
         pynisher_context=context,
+        run_id=0,
     )
     assert smbo.pynisher_context == context
 

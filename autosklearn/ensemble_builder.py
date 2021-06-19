@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 import zlib
 
 import dask.distributed
@@ -65,7 +65,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         pynisher_context: str = 'fork',
         ensemble_folds: Optional[str] = None,
-        resampling_strategy_arguments: Dict = {}
     ):
         """ SMAC callback to handle ensemble building
 
@@ -119,9 +118,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
             How to ensemble the repetitions. We can ensemble any repetitions,
             or only trusted repetitions -- like when we have many repetitions, we
             only want to use the models at a high repetition
-        resampling_strategy_arguments:
-            Temporary added this here to support multiple experimental settings.
-            TODO: Remove/cleanup for final push
 
     Returns
     -------
@@ -149,7 +145,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_folds = ensemble_folds
         if self.ensemble_folds not in [None, 'highest_repeat_trusted']:
             raise NotImplementedError(self.ensemble_folds)
-        self.resampling_strategy_arguments = resampling_strategy_arguments
         self.pynisher_context = pynisher_context
 
         # Store something similar to SMAC's runhistory
@@ -255,7 +250,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     pynisher_context=self.pynisher_context,
                     logger_port=self.logger_port,
                     ensemble_folds=self.ensemble_folds,
-                    resampling_strategy_arguments=self.resampling_strategy_arguments,
                     unit_test=unit_test,
                 ))
 
@@ -297,7 +291,6 @@ def fit_and_return_ensemble(
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
     ensemble_folds: str = None,
-    resampling_strategy_arguments: Dict = {},
     unit_test: bool = False,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
@@ -384,7 +377,6 @@ def fit_and_return_ensemble(
         random_state=random_state,
         logger_port=logger_port,
         ensemble_folds=ensemble_folds,
-        resampling_strategy_arguments=resampling_strategy_arguments,
         unit_test=unit_test,
     ).run(
         end_at=end_at,
@@ -414,7 +406,6 @@ class EnsembleBuilder(object):
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         ensemble_folds: str = None,
-        resampling_strategy_arguments: Dict = {},
         unit_test: bool = False,
     ):
         """
@@ -516,7 +507,6 @@ class EnsembleBuilder(object):
             port=self.logger_port,
         )
         self.ensemble_folds = ensemble_folds
-        self.resampling_strategy_arguments = resampling_strategy_arguments
 
         if ensemble_nbest == 1:
             self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %

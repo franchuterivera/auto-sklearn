@@ -72,6 +72,7 @@ def ensemble_run_history(request):
             additional_info={
                 'duration': 0.20323538780212402,
                 'num_run': 3,
+                'level': 1,
                 'configuration_origin': 'Random Search'}
         ),
         status=None,
@@ -93,6 +94,7 @@ def ensemble_run_history(request):
             additional_info={
                 'duration': 0.20323538780212402,
                 'num_run': 6,
+                'level': 1,
                 'configuration_origin': 'Random Search'}
         ),
         status=None,
@@ -108,6 +110,7 @@ def testRead(ensemble_backend):
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
         metric=roc_auc,
+        max_stacking_level=1,
         seed=0,  # important to find the test files
     )
 
@@ -116,17 +119,11 @@ def testRead(ensemble_backend):
     assert len(ensbuilder.read_preds) == 3, ensbuilder.read_preds.keys()
     assert len(ensbuilder.read_losses) == 3, ensbuilder.read_losses.keys()
 
-    filename = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
-    )
-    assert ensbuilder.read_losses[filename]["ens_loss"] == 0.5
+    # ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
+    assert ensbuilder.read_losses[(1, 0, 1, 0.0)]["ens_loss"] == 0.5
 
-    filename = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
-    )
-    assert ensbuilder.read_losses[filename]["ens_loss"] == 0.0
+    # ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
+    assert ensbuilder.read_losses[(1, 0, 2, 0.0)]["ens_loss"] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -142,6 +139,7 @@ def testRead(ensemble_backend):
 )
 def testNBest(ensemble_backend, ensemble_nbest, max_models_on_disc, exp):
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -156,11 +154,8 @@ def testNBest(ensemble_backend, ensemble_nbest, max_models_on_disc, exp):
 
     assert len(sel_keys) == exp
 
-    fixture = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
-    )
-    assert sel_keys[0] == fixture
+    # ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
+    assert sel_keys[0] == (1, 0, 2, 0.0)
 
 
 @pytest.mark.parametrize("test_case,exp", [
@@ -181,6 +176,7 @@ def testNBest(ensemble_backend, ensemble_nbest, max_models_on_disc, exp):
 def testMaxModelsOnDisc(ensemble_backend, test_case, exp):
     ensemble_nbest = 4
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -201,6 +197,7 @@ def testMaxModelsOnDisc2(ensemble_backend):
     # Test for Extreme scenarios
     # Make sure that the best predictions are kept
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -216,6 +213,7 @@ def testMaxModelsOnDisc2(ensemble_backend):
             'num_run': i,
             'loaded': 1,
             "seed": 1,
+            "level": 1,
             "disc_space_cost_mb": 50*i,
         }
         ensbuilder.read_preds['pred'+str(i)] = {Y_ENSEMBLE: True}
@@ -234,6 +232,7 @@ def testMaxModelsOnDisc2(ensemble_backend):
 )
 def testPerformanceRangeThreshold(ensemble_backend, performance_range_threshold, exp):
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -243,11 +242,11 @@ def testPerformanceRangeThreshold(ensemble_backend, performance_range_threshold,
         performance_range_threshold=performance_range_threshold
     )
     ensbuilder.read_losses = {
-        'A': {'ens_loss': -1, 'num_run': 1, 'loaded': -1, "seed": 1},
-        'B': {'ens_loss': -2, 'num_run': 2, 'loaded': -1, "seed": 1},
-        'C': {'ens_loss': -3, 'num_run': 3, 'loaded': -1, "seed": 1},
-        'D': {'ens_loss': -4, 'num_run': 4, 'loaded': -1, "seed": 1},
-        'E': {'ens_loss': -5, 'num_run': 5, 'loaded': -1, "seed": 1},
+        'A': {'ens_loss': -1, 'num_run': 1, 'loaded': -1, "seed": 1, "level": 1},
+        'B': {'ens_loss': -2, 'num_run': 2, 'loaded': -1, "seed": 1, "level": 1},
+        'C': {'ens_loss': -3, 'num_run': 3, 'loaded': -1, "seed": 1, "level": 1},
+        'D': {'ens_loss': -4, 'num_run': 4, 'loaded': -1, "seed": 1, "level": 1},
+        'E': {'ens_loss': -5, 'num_run': 5, 'loaded': -1, "seed": 1, "level": 1},
     }
     ensbuilder.read_preds = {
         key: {key_2: True for key_2 in (Y_ENSEMBLE, Y_VALID, Y_TEST)}
@@ -268,6 +267,7 @@ def testPerformanceRangeThreshold(ensemble_backend, performance_range_threshold,
 def testPerformanceRangeThresholdMaxBest(ensemble_backend, performance_range_threshold,
                                          ensemble_nbest, exp):
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -278,11 +278,11 @@ def testPerformanceRangeThresholdMaxBest(ensemble_backend, performance_range_thr
         max_models_on_disc=None,
     )
     ensbuilder.read_losses = {
-        'A': {'ens_loss': -1, 'num_run': 1, 'loaded': -1, "seed": 1},
-        'B': {'ens_loss': -2, 'num_run': 2, 'loaded': -1, "seed": 1},
-        'C': {'ens_loss': -3, 'num_run': 3, 'loaded': -1, "seed": 1},
-        'D': {'ens_loss': -4, 'num_run': 4, 'loaded': -1, "seed": 1},
-        'E': {'ens_loss': -5, 'num_run': 5, 'loaded': -1, "seed": 1},
+        'A': {'ens_loss': -1, 'num_run': 1, 'loaded': -1, "seed": 1, "level": 1},
+        'B': {'ens_loss': -2, 'num_run': 2, 'loaded': -1, "seed": 1, "level": 1},
+        'C': {'ens_loss': -3, 'num_run': 3, 'loaded': -1, "seed": 1, "level": 1},
+        'D': {'ens_loss': -4, 'num_run': 4, 'loaded': -1, "seed": 1, "level": 1},
+        'E': {'ens_loss': -5, 'num_run': 5, 'loaded': -1, "seed": 1, "level": 1},
     }
     ensbuilder.read_preds = {
         key: {key_2: True for key_2 in (Y_ENSEMBLE, Y_VALID, Y_TEST)}
@@ -296,6 +296,7 @@ def testPerformanceRangeThresholdMaxBest(ensemble_backend, performance_range_thr
 def testFallBackNBest(ensemble_backend):
 
     ensbuilder = EnsembleBuilder(backend=ensemble_backend,
+                                 max_stacking_level=1,
                                  dataset_name="TEST",
                                  task_type=BINARY_CLASSIFICATION,
                                  metric=roc_auc,
@@ -304,42 +305,27 @@ def testFallBackNBest(ensemble_backend):
                                  )
 
     ensbuilder.compute_loss_per_model()
-    print()
-    print(ensbuilder.read_preds.keys())
-    print(ensbuilder.read_losses.keys())
-    print(ensemble_backend.temporary_directory)
 
-    filename = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
-    )
-    ensbuilder.read_losses[filename]["ens_loss"] = -1
+    # ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
+    ensbuilder.read_losses[(1, 0, 2, 0.0)]["ens_loss"] = -1
 
-    filename = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_3_100.0/predictions_ensemble_0_3_100.0.npy"
-    )
-    ensbuilder.read_losses[filename]["ens_loss"] = -1
+    # ".auto-sklearn/runs/0_3_100.0/predictions_ensemble_0_3_100.0.npy"
+    ensbuilder.read_losses[(1, 0, 2, 0.0)]["ens_loss"] = -1
 
-    filename = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
-    )
-    ensbuilder.read_losses[filename]["ens_loss"] = -1
+    # ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
+    ensbuilder.read_losses[(1, 0, 1, 0.0)]["ens_loss"] = -1
 
     sel_keys = ensbuilder.get_n_best_preds()
 
-    fixture = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
-    )
+    # ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
     assert len(sel_keys) == 1
-    assert sel_keys[0] == fixture
+    assert sel_keys[0] == (1, 0, 1, 0.0)
 
 
 def testGetValidTestPreds(ensemble_backend):
 
     ensbuilder = EnsembleBuilder(backend=ensemble_backend,
+                                 max_stacking_level=1,
                                  dataset_name="TEST",
                                  task_type=BINARY_CLASSIFICATION,
                                  metric=roc_auc,
@@ -351,18 +337,12 @@ def testGetValidTestPreds(ensemble_backend):
 
     # d1 is a dummt prediction. d2 and d3 have the same prediction with
     # different name. num_run=2 is selected when doing sorted()
-    d1 = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
-    )
-    d2 = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
-    )
-    d3 = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_3_100.0/predictions_ensemble_0_3_100.0.npy"
-    )
+    # ".auto-sklearn/runs/0_1_0.0/predictions_ensemble_0_1_0.0.npy"
+    d1 = (1, 0, 1, 0.0)
+    # ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
+    d2 = (1, 0, 2, 0.0)
+    # ".auto-sklearn/runs/0_3_100.0/predictions_ensemble_0_3_100.0.npy"
+    d3 = (1, 0, 3, 100.0)
 
     sel_keys = ensbuilder.get_n_best_preds()
     assert len(sel_keys) == 1
@@ -371,10 +351,8 @@ def testGetValidTestPreds(ensemble_backend):
     # Number of read files should be three and
     # predictions_ensemble_0_4_0.0.npy must not be in there
     assert len(ensbuilder.read_preds) == 3
-    assert os.path.join(
-            ensemble_backend.temporary_directory,
-            ".auto-sklearn/runs/0_4_0.0/predictions_ensemble_0_4_0.0.npy"
-    ) not in ensbuilder.read_preds
+    # ".auto-sklearn/runs/0_4_0.0/predictions_ensemble_0_4_0.0.npy"
+    assert (1, 0, 4, 0.0) not in ensbuilder.read_preds
 
     # not selected --> should still be None
     assert ensbuilder.read_preds[d1][Y_VALID] is None
@@ -390,6 +368,7 @@ def testGetValidTestPreds(ensemble_backend):
 def testEntireEnsembleBuilder(ensemble_backend):
 
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=BINARY_CLASSIFICATION,
@@ -401,16 +380,13 @@ def testEntireEnsembleBuilder(ensemble_backend):
 
     ensbuilder.compute_loss_per_model()
 
-    d2 = os.path.join(
-        ensemble_backend.temporary_directory,
-        ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
-    )
+    # ".auto-sklearn/runs/0_2_0.0/predictions_ensemble_0_2_0.0.npy"
+    d2 = (1, 0, 2, 0.0)
 
     sel_keys = ensbuilder.get_n_best_preds()
     assert len(sel_keys) > 0
 
     ensemble = ensbuilder.fit_ensemble(selected_keys=sel_keys)
-    print(ensemble, sel_keys)
 
     n_sel_valid, n_sel_test = ensbuilder.get_valid_test_preds(selected_keys=sel_keys)
 
@@ -447,6 +423,7 @@ def testEntireEnsembleBuilder(ensemble_backend):
 def test_main(ensemble_backend):
 
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=MULTILABEL_CLASSIFICATION,  # Multilabel Classification
@@ -494,6 +471,7 @@ def test_main(ensemble_backend):
 def test_run_end_at(ensemble_backend):
     with unittest.mock.patch('pynisher.enforce_limits') as pynisher_mock:
         ensbuilder = EnsembleBuilder(
+            max_stacking_level=1,
             backend=ensemble_backend,
             dataset_name="TEST",
             task_type=MULTILABEL_CLASSIFICATION,  # Multilabel Classification
@@ -514,6 +492,7 @@ def test_run_end_at(ensemble_backend):
 
 def testLimit(ensemble_backend):
     ensbuilder = EnsembleBuilderMemMock(backend=ensemble_backend,
+                                        max_stacking_level=1,
                                         dataset_name="TEST",
                                         task_type=BINARY_CLASSIFICATION,
                                         metric=roc_auc,
@@ -603,6 +582,7 @@ def test_read_pickle_read_preds(ensemble_backend):
     them safely after
     """
     ensbuilder = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=MULTILABEL_CLASSIFICATION,  # Multilabel Classification
@@ -643,6 +623,7 @@ def test_read_pickle_read_preds(ensemble_backend):
 
     # Then create a new instance, which should automatically read this file
     ensbuilder2 = EnsembleBuilder(
+        max_stacking_level=1,
         backend=ensemble_backend,
         dataset_name="TEST",
         task_type=MULTILABEL_CLASSIFICATION,  # Multilabel Classification
@@ -671,7 +652,8 @@ def test_get_identifiers_from_run_history(exists, metric, ensemble_run_history, 
     assert len(ensemble.identifiers_) == 1
 
     # That model must be the best
-    seed, num_run, budget = ensemble.identifiers_[0]
+    level, seed, num_run, budget, intances = ensemble.identifiers_[0]
+    assert level == 1
     assert num_run == 3
     assert seed == 1
     assert budget == 3.0
@@ -680,6 +662,7 @@ def test_get_identifiers_from_run_history(exists, metric, ensemble_run_history, 
 def test_ensemble_builder_process_realrun(dask_client_single_worker, ensemble_backend):
     manager = EnsembleBuilderManager(
         start_time=time.time(),
+        max_stacking_level=1,
         time_left_for_ensembles=1000,
         backend=ensemble_backend,
         dataset_name='Test',
@@ -694,6 +677,7 @@ def test_ensemble_builder_process_realrun(dask_client_single_worker, ensemble_ba
         read_at_most=np.inf,
         ensemble_memory_limit=None,
         random_state=0,
+        ensemble_folds=None,
     )
     manager.build_ensemble(dask_client_single_worker)
     future = manager.futures.pop()
@@ -720,6 +704,7 @@ def test_ensemble_builder_nbest_remembered(
 
     manager = EnsembleBuilderManager(
         start_time=time.time(),
+        max_stacking_level=1,
         time_left_for_ensembles=1000,
         backend=ensemble_backend,
         dataset_name='Test',
@@ -734,6 +719,7 @@ def test_ensemble_builder_nbest_remembered(
         ensemble_memory_limit=1000,
         random_state=0,
         max_iterations=None,
+        ensemble_folds=None,
     )
 
     manager.build_ensemble(dask_client_single_worker, unit_test=True)

@@ -1434,6 +1434,7 @@ def eval_holdout(
     budget: Optional[float] = 100.0,
     budget_type: Optional[str] = None,
     iterative: bool = False,
+    compute_train_loss: bool = False,
 ) -> None:
     evaluator = TrainEvaluator(
         backend=backend,
@@ -1453,6 +1454,7 @@ def eval_holdout(
         init_params=init_params,
         budget=budget,
         budget_type=budget_type,
+        compute_train_loss=compute_train_loss,
     )
     evaluator.fit_predict_and_loss(iterative=iterative)
 
@@ -1476,6 +1478,7 @@ def eval_iterative_holdout(
     init_params: Optional[Dict[str, Any]] = None,
     budget: Optional[float] = 100.0,
     budget_type: Optional[str] = None,
+    compute_train_loss: bool = False,
 ) -> None:
     return eval_holdout(
         queue=queue,
@@ -1520,6 +1523,7 @@ def eval_partial_cv(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
     iterative: bool = False,
+    compute_train_loss: bool = False,
 ) -> None:
     if budget_type is not None:
         raise NotImplementedError()
@@ -1546,6 +1550,7 @@ def eval_partial_cv(
         init_params=init_params,
         budget=budget,
         budget_type=budget_type,
+        compute_train_loss=compute_train_loss,
     )
 
     evaluator.partial_fit_predict_and_loss(fold=fold, iterative=iterative)
@@ -1570,6 +1575,7 @@ def eval_partial_cv_iterative(
     init_params: Optional[Dict[str, Any]] = None,
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
+    compute_train_loss: bool = False,
 ) -> None:
     if budget_type is not None:
         raise NotImplementedError()
@@ -1616,6 +1622,7 @@ def eval_cv(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
     iterative: bool = False,
+    compute_train_loss: bool = False,
 ) -> None:
 
     evaluator = TrainEvaluator(
@@ -1637,6 +1644,7 @@ def eval_cv(
         init_params=init_params,
         budget=budget,
         budget_type=budget_type,
+        compute_train_loss=compute_train_loss,
     )
 
     evaluator.fit_predict_and_loss(iterative=iterative)
@@ -1662,6 +1670,7 @@ def eval_iterative_cv(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
     iterative: bool = True,
+    compute_train_loss: bool = False,
 ) -> None:
     eval_cv(
         backend=backend,
@@ -1708,6 +1717,7 @@ def eval_intensifier_cv(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
     iterative: bool = False,
+    compute_train_loss: bool = False,
 ) -> None:
     # Instances in this context are repetitions to be selected from the evaluator
     instance_dict = json.loads(instance) if instance is not None else {}
@@ -1734,6 +1744,7 @@ def eval_intensifier_cv(
         budget=budget,
         budget_type=budget_type,
         instance=repeat,
+        compute_train_loss=compute_train_loss,
     )
     # Bellow says what folds the current repeat has access two.
     # By default we have repeats * folds splits to train. Splits not in training_folds
@@ -1777,6 +1788,7 @@ def eval_partial_iterative_intensifier_cv(
     budget: Optional[float] = None,
     budget_type: Optional[str] = None,
     iterative: bool = True,
+    compute_train_loss: bool = False,
 ) -> None:
     eval_intensifier_cv(
         backend=backend,
