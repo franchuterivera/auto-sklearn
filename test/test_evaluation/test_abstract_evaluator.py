@@ -7,11 +7,18 @@ import unittest
 import unittest.mock
 import tempfile
 
+from ConfigSpace import Configuration
+
 import numpy as np
 import sklearn.dummy
 
+import pytest
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_validate
+
 from autosklearn.evaluation.abstract_evaluator import AbstractEvaluator
-from autosklearn.metrics import accuracy
+from autosklearn.metrics import accuracy, log_loss
 from autosklearn.util.backend import Backend, BackendContext
 from smac.tae import StatusType
 
@@ -284,3 +291,333 @@ class AbstractEvaluatorTest(unittest.TestCase):
                                                         '.auto-sklearn', 'runs', '1_1_0_None_0')))
 
             shutil.rmtree(self.working_directory, ignore_errors=True)
+
+
+@pytest.fixture
+def dummy_abstract_evaluator():
+    backend = unittest.mock.Mock()
+    backend.load_datamanager.return_value = get_multiclass_classification_datamanager()
+    evaluator = AbstractEvaluator(backend=backend, queue=unittest.mock.Mock(),
+                                  metric=accuracy, port=None)
+    evaluator.configuration = unittest.mock.Mock(spec=Configuration)
+    return evaluator
+
+
+def test_abstract_evaluator_loss(dummy_abstract_evaluator):
+    prediction = np.array([[0.6, 0.4], [0.1, 0.9], [0, 1.0]])
+    labels = np.ones(3)
+    assert dummy_abstract_evaluator._loss(labels, prediction) == pytest.approx(
+        0.33333333333333337)
+    assert dummy_abstract_evaluator._loss(labels, prediction, metric=log_loss) == pytest.approx(
+        0.3405504158439941)
+
+
+def test_handle_lower_level_repeats(dummy_abstract_evaluator):
+
+    # We will mimic a run where we average the predictions of multiple repetitions
+    dummy_abstract_evaluator.level = 1
+    dummy_abstract_evaluator.instance = 0
+    dummy_abstract_evaluator.seed = 0
+    dummy_abstract_evaluator.num_run = 5
+    dummy_abstract_evaluator.budget = 0.0
+    dummy_abstract_evaluator.add_lower_instance_information = unittest.mock.Mock()
+    dummy_abstract_evaluator.add_lower_instance_information.return_value = (
+        0.2,
+        [4, 5, 6],
+        [4, 5, 6],
+    )
+
+    # First, no previous run exist
+    dummy_abstract_evaluator.backend.get_map_from_run2repeat.return_value = {}
+    (
+        loss,
+        opt_pred,
+        test_pred,
+        repeats_averaged,
+    ) = dummy_abstract_evaluator.handle_lower_level_repeats(
+        loss=0.1,
+        opt_pred=[1, 2, 3, 4],
+        test_pred=[1, 2, 3, 4],
+    )
+    # No call to add_lower_instance_information. This is the first instance!
+    assert loss == 0.1
+    assert opt_pred == [1, 2, 3, 4]
+    assert test_pred == [1, 2, 3, 4]
+    assert repeats_averaged == [0]
+    assert dummy_abstract_evaluator.add_lower_instance_information.call_count == 0
+
+    # Then we mimic an instance already there
+    dummy_abstract_evaluator.instance = 1  # test a new instance run!
+    dummy_abstract_evaluator.backend.get_map_from_run2repeat.return_value = {
+        (1, 0, 5, 0.0, 0): [0],
+    }
+    (
+        loss,
+        opt_pred,
+        test_pred,
+        repeats_averaged,
+    ) = dummy_abstract_evaluator.handle_lower_level_repeats(
+        loss=0.1,
+        opt_pred=[1, 2, 3, 4],
+        test_pred=[1, 2, 3, 4],
+    )
+    # add_lower_instance_information is called so we should avg past pred
+    assert loss == 0.2
+    assert opt_pred == [4, 5, 6]
+    assert test_pred == [4, 5, 6]
+    assert repeats_averaged == [0, 1]
+    assert dummy_abstract_evaluator.add_lower_instance_information.call_count == 1
+    assert list(dummy_abstract_evaluator.add_lower_instance_information.call_args)[1] == dict(
+        lower_instance=0, number_of_repetitions_already_avg=1, opt_loss=0.1, test_pred=[1, 2, 3, 4])
+
+    # One last instance with noise
+    dummy_abstract_evaluator.instance = 2  # test a new instance run!
+    dummy_abstract_evaluator.backend.get_map_from_run2repeat.return_value = {
+        (1, 0, 5, 0.0, 1): [0, 1, 3],  # we should be robust to order
+        (1, 0, 6, 0.0, 0): [0, 1, 2, 3],
+    }
+    (
+        loss,
+        opt_pred,
+        test_pred,
+        repeats_averaged,
+    ) = dummy_abstract_evaluator.handle_lower_level_repeats(
+        loss=0.1,
+        opt_pred=[1, 2, 3, 4],
+        test_pred=[1, 2, 3, 4],
+    )
+    # add_lower_instance_information is called, and order of avg is preserved
+    assert loss == 0.2
+    assert repeats_averaged == [0, 1, 3, 2]
+    assert dummy_abstract_evaluator.add_lower_instance_information.call_count == 2
+    assert list(dummy_abstract_evaluator.add_lower_instance_information.call_args)[1] == dict(
+        lower_instance=1, number_of_repetitions_already_avg=3, opt_loss=0.1, test_pred=[1, 2, 3, 4])
+
+
+def test_add_lower_instance_information(dummy_abstract_evaluator):
+
+    # We will mimic a run where we average the predictions of multiple repetitions
+    dummy_abstract_evaluator.X_test = None
+    dummy_abstract_evaluator.models = ['A', None]
+    dummy_abstract_evaluator.level = 1
+    dummy_abstract_evaluator.instance = 0
+    dummy_abstract_evaluator.seed = 0
+    dummy_abstract_evaluator.num_run = 5
+    dummy_abstract_evaluator.budget = 0.0
+    dummy_abstract_evaluator.Y_optimization = np.array([1, 0, 1, 0])
+    dummy_abstract_evaluator.Y_optimization_pred = np.array(
+        [[0.2, 0.8], [0.3, 0.7], [1.0, 0], [0, 1.0]])
+    dummy_abstract_evaluator.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance =\
+        unittest.mock.Mock()
+    dummy_abstract_evaluator.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance\
+        .return_value = np.array([[0.1, 0.9], [0.5, 0.5], [1.0, 0], [0, 1.0]])
+    dummy_abstract_evaluator.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance =\
+        unittest.mock.Mock()
+    cv_model = unittest.mock.Mock()
+    cv_model.estimators_ = ['B', 'C']
+    dummy_abstract_evaluator.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance\
+        .return_value = cv_model
+
+    loss, opt_pred, test_pred = dummy_abstract_evaluator.add_lower_instance_information(
+        opt_loss=0.5,
+        test_pred=None,
+        lower_instance=1,
+        number_of_repetitions_already_avg=1,
+    )
+    # If not test prediction is provided, then it should remain None
+    assert loss == 0.75
+    np.testing.assert_array_almost_equal(
+        opt_pred,
+        np.array([[(0.1 + 0.2) / 2, (0.8 + 0.9)/2],
+                  [(0.5 + 0.3) / 2, (0.5 + 0.7) / 2],
+                  [1., 0.], [0., 1.]])
+    )
+    assert test_pred is None
+    assert dummy_abstract_evaluator.models == ['A', 'B', 'C']
+    np.testing.assert_array_equal(
+        opt_pred,
+        dummy_abstract_evaluator.Y_optimization_pred,
+    )
+
+    assert list(
+        dummy_abstract_evaluator.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance.call_args  # noqa: E501
+    )[1] == dict(subset='ensemble', level=1, seed=0, idx=5, budget=0.0, instance=1)
+
+    # Then test with X_test and another average
+    # We return the new lower level pred to mimic a real run
+    dummy_abstract_evaluator.Y_optimization_pred = np.array(
+        [[0.3, 0.7], [0.2, 0.8], [1.0, 0], [0, 1.0]])
+    dummy_abstract_evaluator.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance\
+        .return_value = np.array([[0.15, 0.85], [0.4, 0.6], [1.0, 0], [0, 1.0]])
+    dummy_abstract_evaluator.X_test = unittest.mock.Mock()
+    loss, opt_pred, test_pred = dummy_abstract_evaluator.add_lower_instance_information(
+        opt_loss=0.5,
+        test_pred=np.array([[0.5, 0.5], [0.5, 0.5], [1.0, 0], [0, 1.0]]),
+        lower_instance=2,
+        number_of_repetitions_already_avg=2,
+    )
+    # If not test prediction is provided, then it should remain None
+    assert loss == 0.75
+    np.testing.assert_array_almost_equal(
+        opt_pred,
+        np.array([[(0.1 + 0.2 + 0.3) / 3, (0.8 + 0.9 + 0.7) / 3],
+                  [(0.3 + 0.5 + 0.2) / 3, (0.5 + 0.7 + 0.8) / 3], [1., 0.], [0., 1.]])
+    )
+    np.testing.assert_array_almost_equal(
+        test_pred,
+        np.array([[0.36666667, 1.3], [0.7, 0.96666667], [1.66666667, 0.], [0., 1.66666667]])
+    )
+    assert dummy_abstract_evaluator.models == ['A', 'B', 'C', 'B', 'C']
+    np.testing.assert_array_equal(
+        opt_pred,
+        dummy_abstract_evaluator.Y_optimization_pred,
+    )
+    assert list(
+        dummy_abstract_evaluator.backend.load_prediction_by_level_seed_and_id_and_budget_and_instance.call_args  # noqa: E501
+    )[-1] == dict(subset='test', level=1, seed=0, idx=5, budget=0.0, instance=2)
+
+
+def get_evaluator_for_instance(instance, backend, dummy_datamanager, queue,
+                               fidelities_as_individual_models):
+    with unittest.mock.patch.object(AbstractEvaluator, '_get_model') as mock:
+        mock.return_value = RandomForestClassifier(random_state=instance, max_depth=10)
+        evaluator = AbstractEvaluator(
+            backend=backend,
+            queue=queue,
+            metric=accuracy,
+            port=None,
+            configuration=unittest.mock.Mock(spec=Configuration),
+            instance=instance,
+            seed=0,
+            budget=0.0,
+            resampling_strategy='intensifier-cv',
+            resampling_strategy_args={
+                'fidelities_as_individual_models': fidelities_as_individual_models,
+            }
+        )
+    evaluator.num_run = 7
+
+    # create an evaluator fit and save to disc
+    # make sure what was saved make sense
+    cv_results = cross_validate(evaluator.model,
+                                X=dummy_datamanager.data.get('X_train'),
+                                y=dummy_datamanager.data.get('Y_train'),
+                                return_estimator=True,
+                                return_train_score=True,
+                                cv=3,)
+    loss = 1 - np.mean(cv_results['test_score'])
+    train_loss = 1 - np.mean(cv_results['train_score'])
+    opt_pred = np.mean([estimator.predict_proba(dummy_datamanager.data.get('X_train'))
+                        for estimator in cv_results['estimator']], axis=0)
+    test_pred = np.mean([estimator.predict_proba(dummy_datamanager.data.get('X_test'))
+                         for estimator in cv_results['estimator']], axis=0)
+    evaluator.models = cv_results['estimator']
+    evaluator.Y_optimization = dummy_datamanager.data.get('Y_train')
+    evaluator.Y_optimization_pred = opt_pred
+    return evaluator, loss, train_loss, opt_pred, test_pred
+
+
+@pytest.mark.parametrize("fidelities_as_individual_models", [False])
+def test_abstract_eval_finishup_ensemble_intensifier(backend, dummy_datamanager,
+                                                     fidelities_as_individual_models):
+    backend.save_datamanager(dummy_datamanager)
+    queue = unittest.mock.Mock()
+    instance = 0
+    evaluator1, loss, train_loss, opt_pred, test_pred = get_evaluator_for_instance(
+        instance, backend, dummy_datamanager, queue, fidelities_as_individual_models)
+
+    evaluator1.finish_up(
+        loss=loss,
+        train_loss=train_loss,
+        opt_pred=opt_pred,
+        valid_pred=None,
+        test_pred=test_pred,
+        additional_run_info={},
+        file_output=True,
+        final_call=True,
+        status=StatusType.SUCCESS,
+        opt_losses=[loss],
+    )
+
+    # Check that we output a desired number of things:
+    # No change to the predictions as no prev instance to average
+    saved_opt_pred = backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+        'ensemble', level=1, seed=0, idx=7, budget=0.0, instance=instance
+    )
+    np.testing.assert_array_almost_equal(saved_opt_pred, opt_pred)
+    saved_models = backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+        level=1, seed=0, idx=7, budget=0.0, instance=instance
+    )
+    assert len(saved_models.estimators_) == len(evaluator1.models)
+    metadata = backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+        level=1, seed=0, idx=7, budget=0.0, instance=instance
+    )
+    assert metadata == {'loss': loss, 'duration': evaluator1.duration, 'status': StatusType.SUCCESS,
+                        'modeltype': 'N/A', 'opt_losses': [loss],
+                        'loss_log_loss': evaluator1._loss(
+                            evaluator1.Y_optimization,
+                            evaluator1.Y_optimization_pred,
+                            metric=log_loss
+                        ), 'repeats_averaged': [0]}
+
+    assert list(queue.put.call_args)[0][0] == {
+        'loss': loss,
+        'additional_run_info': {
+            'duration': evaluator1.duration,
+            'level': 1,
+            'num_run': 7,
+            'train_loss': train_loss,
+            'test_loss': evaluator1._loss(dummy_datamanager.data.get('Y_test'),
+                                          test_pred)},
+        'status': StatusType.SUCCESS,
+        'final_queue_element': True
+    }
+
+    # Then average a new instance!
+    instance2 = 2
+    evaluator2, loss2, train_loss2, opt_pred2, test_pred2 = get_evaluator_for_instance(
+        instance2, backend, dummy_datamanager, queue, fidelities_as_individual_models)
+
+    # we need a copy to make sure the avg happen correctly
+    opt_pred2_copy = opt_pred2.copy()
+
+    evaluator2.finish_up(
+        loss=loss2,
+        train_loss=train_loss2,
+        opt_pred=opt_pred2,
+        valid_pred=None,
+        test_pred=test_pred2,
+        additional_run_info={},
+        file_output=True,
+        final_call=True,
+        status=StatusType.SUCCESS,
+        opt_losses=[loss, loss2],
+    )
+
+    # Check that we output a desired number of things:
+    # No change to the predictions as no prev instance to average
+    saved_opt_pred2 = backend.load_prediction_by_level_seed_and_id_and_budget_and_instance(
+        'ensemble', level=1, seed=0, idx=7, budget=0.0, instance=instance2
+    )
+    np.testing.assert_array_almost_equal(saved_opt_pred2,
+                                         np.mean([opt_pred, opt_pred2_copy], axis=0))
+
+    saved_models = backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+        level=1, seed=0, idx=7, budget=0.0, instance=instance2
+    )
+    assert len(saved_models.estimators_) == 6
+    metadata = backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+        level=1, seed=0, idx=7, budget=0.0, instance=instance2
+    )
+    assert metadata == {'loss': evaluator2._loss(
+                            evaluator2.Y_optimization,
+                            evaluator2.Y_optimization_pred,
+                        ),
+                        'duration': evaluator2.duration,
+                        'status': StatusType.SUCCESS,
+                        'modeltype': 'N/A', 'opt_losses': [loss, loss2],
+                        'loss_log_loss': evaluator2._loss(
+                            evaluator2.Y_optimization,
+                            evaluator2.Y_optimization_pred,
+                            metric=log_loss
+                        ), 'repeats_averaged': [0, 2]}

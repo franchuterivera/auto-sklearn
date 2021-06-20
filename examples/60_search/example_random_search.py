@@ -36,10 +36,12 @@ X_train, X_test, y_train, y_test = \
 # ===========================
 def get_roar_object_callback(
     scenario_dict,
+    run_id,
     seed,
     ta,
     ta_kwargs,
     metalearning_configurations,
+    initial_configurations,
     n_jobs,
     dask_client,
 ):
@@ -85,13 +87,15 @@ print("Accuracy score", sklearn.metrics.accuracy_score(y_test, predictions))
 # Fit a classifier using Random Search
 # ====================================
 def get_random_search_object_callback(
-        scenario_dict,
-        seed,
-        ta,
-        ta_kwargs,
-        metalearning_configurations,
-        n_jobs,
-        dask_client
+    scenario_dict,
+    run_id,
+    seed,
+    ta,
+    ta_kwargs,
+    metalearning_configurations,
+    initial_configurations,
+    n_jobs,
+    dask_client
 ):
     """Random search."""
 

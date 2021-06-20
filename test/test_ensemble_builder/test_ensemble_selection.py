@@ -106,3 +106,45 @@ def testPredict():
 
     with pytest.raises(ValueError):
         ensemble.predict(per_model_pred)
+
+
+def test_prune_to_best():
+    ensemble = EnsembleSelection(ensemble_size=10,
+                                 task_type=BINARY_CLASSIFICATION,
+                                 random_state=np.random.RandomState(0),
+                                 metric=accuracy,
+                                 )
+    predictions = [np.full(shape=(5, 2), fill_value=0.5)] * 5
+    identifiers = ['A', 'B', 'C', 'D', 'E']
+    labels = np.ones(5)
+    ensemble.fit(predictions=predictions, labels=labels, identifiers=identifiers)
+
+    # We prune to best which is zero
+    assert len(ensemble.indices_) == 1
+    assert ensemble.trajectory_ == [1.0]
+    assert ensemble.train_loss_ == 1.0
+    assert ensemble.identifiers_ == identifiers
+
+
+def test_tie_break_log_loss():
+    ensemble = EnsembleSelection(ensemble_size=10,
+                                 task_type=BINARY_CLASSIFICATION,
+                                 random_state=np.random.RandomState(0),
+                                 metric=accuracy,
+                                 )
+    predictions = [
+        np.array([[0.55, 0.45], [0.56, 0.44], [0.57, 0.43], [0.55, 0.45], [0.55, 0.45]]),
+        np.array([[0.90, 0.10], [0.95, 0.05], [0.90, 0.10], [0.95, 0.05], [0.95, 0.05]]),
+        np.array([[0.55, 0.45], [0.56, 0.44], [0.57, 0.43], [0.55, 0.45], [0.55, 0.45]]),
+        np.array([[0.55, 0.45], [0.56, 0.44], [0.57, 0.43], [0.55, 0.45], [0.55, 0.45]]),
+        np.array([[0.55, 0.45], [0.56, 0.44], [0.57, 0.43], [0.55, 0.45], [0.55, 0.45]]),
+    ]
+    identifiers = ['A', 'B', 'C', 'D', 'E']
+    labels = np.zeros(5)
+    ensemble.fit(predictions=predictions, labels=labels, identifiers=identifiers)
+
+    # We deterministically have to chose B as it has a better log loss
+    assert len(ensemble.indices_) == 1
+    assert ensemble.indices_ == [1]
+    assert ensemble.trajectory_ == [0.0]
+    assert ensemble.train_loss_ == 0.0

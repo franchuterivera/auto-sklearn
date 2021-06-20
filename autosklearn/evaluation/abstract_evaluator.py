@@ -359,7 +359,9 @@ class AbstractEvaluator(object):
             y_true, y_hat, self.task_type, metric_,
             scoring_functions=scoring_functions)
 
-    def handle_lower_level_repeats(self, Y_test_pred: Optional[np.ndarray]
+    def handle_lower_level_repeats(self, loss: Union[float, Dict[str, float]],
+                                   opt_pred: Optional[np.ndarray],
+                                   test_pred: Optional[np.ndarray],
                                    ) -> Tuple[Union[float, Dict[str, float]],
                                               Optional[np.ndarray],
                                               Optional[np.ndarray],
@@ -412,17 +414,19 @@ class AbstractEvaluator(object):
                 level, seed, num_run, budget, lower_instance = identifier
                 number_of_repetitions_already_avg = len(repeats_avg)
                 loss, opt_pred, test_pred = self.add_lower_instance_information(
-                    Y_test_pred=Y_test_pred,
+                    opt_loss=loss,
+                    test_pred=test_pred,
                     number_of_repetitions_already_avg=number_of_repetitions_already_avg,
                     lower_instance=lower_instance,
                 )
                 # Preserve order of avg for debug
                 averaged_repetitions = [instance for instance in repeats_avg + averaged_repetitions]
 
-        return loss, opt_pred, Y_test_pred, averaged_repetitions
+        return loss, opt_pred, test_pred, averaged_repetitions
 
     def add_lower_instance_information(self,
-                                       Y_test_pred: Optional[np.ndarray],
+                                       opt_loss: Union[float, Dict[str, float]],
+                                       test_pred: Optional[np.ndarray],
                                        lower_instance: int,
                                        number_of_repetitions_already_avg: int,
                                        ) -> Tuple[Union[float, Dict[str, float]],
@@ -485,15 +489,15 @@ class AbstractEvaluator(object):
                 )
                 # Add them now that they are within the same range
                 np.add(
-                    Y_test_pred,
+                    test_pred,
                     lower_prediction,
-                    out=Y_test_pred,
+                    out=test_pred,
                 )
                 # Divide by total amount of repetitions
                 np.multiply(
-                    Y_test_pred,
+                    test_pred,
                     1/(number_of_repetitions_already_avg + 1),
-                    out=Y_test_pred,
+                    out=test_pred,
                 )
 
             # And then finally the model needs to be average
@@ -513,7 +517,7 @@ class AbstractEvaluator(object):
         except Exception as e:
             self.logger.error(traceback.format_exc())
             self.logger.error(f"Run into {e}/{str(e)} for num_run={self.num_run}")
-        return opt_loss, self.Y_optimization_pred, Y_test_pred
+        return opt_loss, self.Y_optimization_pred, test_pred
 
     def finish_up(
         self,
@@ -560,7 +564,9 @@ class AbstractEvaluator(object):
         if self.resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
             opt_loss_before = loss
             loss, opt_pred, test_pred, repeats_averaged = self.handle_lower_level_repeats(
-                Y_test_pred=test_pred,
+                loss=loss,
+                opt_pred=opt_pred,
+                test_pred=test_pred,
             )
             self.logger.critical(f"For num_run={self.num_run} level={self.level} "
                                  f"instance={self.instance} opt_loss_before={opt_loss_before} "

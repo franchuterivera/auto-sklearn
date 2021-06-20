@@ -4,11 +4,18 @@ import time
 import unittest.mock
 
 from dask.distributed import Client, get_client
+
 import psutil
+
 import pytest
 
-from autosklearn.util.backend import create, Backend
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+
 from autosklearn.automl import AutoML
+from autosklearn.constants import BINARY_CLASSIFICATION
+from autosklearn.data.xy_data_manager import XYDataManager
+from autosklearn.util.backend import Backend, create
 
 
 class AutoMLStub(AutoML):
@@ -164,6 +171,20 @@ def dask_client_single_worker(request):
     request.addfinalizer(get_finalizer(client.scheduler_info()['address']))
 
     return client
+
+
+@pytest.fixture
+def dummy_datamanager():
+    X, y = make_classification(random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+    return XYDataManager(
+        X_train, y_train,
+        X_test=X_test,
+        y_test=y_test,
+        task=BINARY_CLASSIFICATION,
+        feat_type=None,
+        dataset_name='dummy',
+    )
 
 
 def pytest_sessionfinish(session, exitstatus):

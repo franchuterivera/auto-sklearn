@@ -30,10 +30,12 @@ import autosklearn.classification
 def get_smac_object_callback(budget_type):
     def get_smac_object(
         scenario_dict,
+        run_id,
         seed,
         ta,
         ta_kwargs,
         metalearning_configurations,
+        initial_configurations,
         n_jobs,
         dask_client,
     ):
@@ -63,7 +65,7 @@ def get_smac_object_callback(budget_type):
             tae_runner=ta,
             tae_runner_kwargs=ta_kwargs,
             initial_configurations=initial_configurations,
-            run_id=seed,
+            run_id=run_id,
             intensifier=SuccessiveHalving,
             intensifier_kwargs={
                 'initial_budget': 10.0,
