@@ -19,10 +19,22 @@ from sklearn.model_selection import GroupKFold, GroupShuffleSplit, \
 import sklearn.model_selection
 from smac.tae import StatusType, TAEAbortException
 
+from sklearn.dummy import DummyClassifier
+
+import pytest
+
 from autosklearn.data.abstract_data_manager import AbstractDataManager
 from autosklearn.evaluation.util import read_queue
-from autosklearn.evaluation.train_evaluator import TrainEvaluator, \
-    eval_holdout, eval_iterative_holdout, eval_cv, eval_partial_cv, subsample_indices
+from autosklearn.evaluation.train_evaluator import (
+    MedianPruneException,
+    TrainEvaluator,
+    eval_holdout,
+    eval_iterative_holdout,
+    eval_cv,
+    eval_partial_cv,
+    subsample_indices,
+    eval_intensifier_cv,
+)
 from autosklearn.util import backend
 from autosklearn.util.pipeline import get_configuration_space
 from autosklearn.constants import BINARY_CLASSIFICATION, \
@@ -2475,7 +2487,6 @@ class FunctionsTest(unittest.TestCase):
         self.assertNotIn('bac_metric', info[0]['additional_run_info'])
 
     def test_eval_holdout_budget_mixed_iterations(self):
-        print(self.configuration)
         eval_holdout(
             queue=self.queue,
             port=self.port,
@@ -2647,3 +2658,225 @@ class FunctionsTest(unittest.TestCase):
             self.assertEqual(len(rval), 1)
             self.assertAlmostEqual(rval[0]['loss'], results[fold])
             self.assertEqual(rval[0]['status'], StatusType.SUCCESS)
+
+
+def build_train_evaluator(level, seed, num_run, budget, instance, backend, dummy_datamanager):
+
+    # Minimal things to reproduce
+    folds = 3
+    repeats = 2
+    configuration = get_configuration_space(
+        {'task': BINARY_CLASSIFICATION,
+         'is_sparse': False}).get_default_configuration()
+    backend.save_datamanager(dummy_datamanager)
+
+    # If level is greater than one, save a couple of fake models
+    if level > 1:
+        for i in range(5):
+            backend.save_numrun_to_dir(
+                level=level-1,
+                seed=seed,
+                idx=i,
+                budget=budget,
+                instance=1,  # max instance
+                model=DummyClassifier(),
+                cv_model=DummyClassifier(),
+                ensemble_predictions=np.zeros((dummy_datamanager.data['Y_train'].shape[0], 2)),
+                test_predictions=np.zeros((dummy_datamanager.data['Y_test'].shape[0], 2)),
+                valid_predictions=None,
+                run_metadata={
+                    'loss': 1.0,
+                    'duration': 2,
+                    'status': StatusType.SUCCESS,
+                    'modeltype': str(i),
+                    'opt_losses': [1.0],
+                    'loss_log_loss': 0.1 * i,
+                    'repeats_averaged': [0, 1],
+                }
+            )
+
+    # Pre-populate runs in the backend if needed
+    for _instance in range(instance):
+        if os.path.exists(backend.get_numrun_directory(level, seed, num_run, budget, _instance)):
+            continue
+        evaluator_ = build_train_evaluator(level, seed, num_run, budget, _instance, backend,
+                                           dummy_datamanager)
+        training_folds = list(range(int(folds * _instance), int(folds * (int(_instance) + 1))))
+        evaluator_.fit_predict_and_loss(iterative=False, training_folds=training_folds)
+
+    evaluator = TrainEvaluator(
+        backend=backend,
+        queue=unittest.mock.Mock(),
+        metric=accuracy,
+        port=None,
+        configuration=configuration,
+        level=level,
+        seed=seed,
+        num_run=num_run,
+        budget=budget,
+        instance=instance,
+        resampling_strategy='intensifier-cv',
+        resampling_strategy_args={
+            # Have all features on by default
+            'stacking_strategy': 'instances_anyasbase',
+            'fidelities_as_individual_models': False,
+            'stack_at_most': 2,
+            'stack_tiebreak_w_log_loss': True,
+            'enable_median_rule_prunning': True,
+            'repeats': repeats,
+            'folds': folds,
+            'train_all_repeat_together': False,
+        }
+    )
+    return evaluator
+
+
+@pytest.fixture
+def rf_train_evaluator(request, backend, dummy_datamanager):
+    level, seed, num_run, budget, instance = request.param
+    return build_train_evaluator(level, seed, num_run, budget, instance, backend, dummy_datamanager)
+
+
+@pytest.mark.parametrize(
+    'rf_train_evaluator',
+    [
+        # level, seed, num_run, budget, instance
+        (1, 2, 3, 0.0, 0),
+        (1, 2, 3, 0.0, 1),
+        (2, 2, 3, 0.0, 0),
+    ],
+    indirect=True
+)
+def test_ensemble_intensifier_fitted(rf_train_evaluator):
+    # The train data should not be enriched if level did not change
+    datamanager = rf_train_evaluator.backend.load_datamanager()
+    X_train = datamanager.data.get('X_train')
+    y_train = datamanager.data.get('Y_train')
+
+    # Let us fit this evaluator using 3 folds!
+    training_folds = list(range(int(3 * rf_train_evaluator.instance),
+                                int(3 * (int(rf_train_evaluator.instance) + 1))))
+    rf_train_evaluator.fit_predict_and_loss(iterative=False, training_folds=training_folds)
+
+    # Our optimization target is y_train
+    np.testing.assert_array_equal(
+        rf_train_evaluator.Y_optimization,
+        y_train,
+    )
+    assert rf_train_evaluator.Y_optimization_pred.shape[0] == (
+        rf_train_evaluator.Y_optimization.shape[0])
+
+    # Num cv folds should be 6 as there are 2 repeats of 3 folds
+    assert rf_train_evaluator.num_cv_folds == 6
+    model = rf_train_evaluator.backend.load_cv_model_by_level_seed_and_id_and_budget_and_instance(
+        level=rf_train_evaluator.level,
+        seed=rf_train_evaluator.seed,
+        idx=rf_train_evaluator.num_run,
+        budget=rf_train_evaluator.budget,
+        instance=rf_train_evaluator.instance,
+    )
+    assert len(model.estimators_) == 3 * (rf_train_evaluator.instance + 1)
+
+    # Level checks
+    if rf_train_evaluator.level == 1:
+        assert rf_train_evaluator.X_train.shape == X_train.shape
+        assert rf_train_evaluator.base_models_ == []
+    else:
+        assert len(rf_train_evaluator.base_models_) > 1
+        # lower level prediction in base models
+        assert (1, 2, 3, 0.0, (1,)) in rf_train_evaluator.base_models_
+        assert rf_train_evaluator.X_train.shape[0] == X_train.shape[0]
+        assert rf_train_evaluator.X_train.shape[1] >= X_train.shape[1]
+
+    # Repetition checks
+    meta = rf_train_evaluator.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+        level=rf_train_evaluator.level,
+        seed=rf_train_evaluator.seed,
+        idx=rf_train_evaluator.num_run,
+        budget=rf_train_evaluator.budget,
+        instance=rf_train_evaluator.instance,
+    )
+    assert meta['loss'] < 0.3
+    assert meta['status'] == StatusType.SUCCESS
+    assert meta['modeltype'] == 'RandomForest'
+    assert len(meta['opt_losses']) == 3
+    assert meta['repeats_averaged'] == list(range(rf_train_evaluator.instance + 1))
+
+
+@pytest.mark.parametrize(
+    "resampling_strategy_args,instance,expected_training_folds",
+    [({'folds': 5, 'repeats': 5}, '{"repeats": 0, "level": 1}', [0, 1, 2, 3, 4]),
+     ({'folds': 5, 'repeats': 5}, '{"repeats": 2, "level": 1}', [10, 11, 12, 13, 14]),
+     ({'folds': [2, 2, 2], 'repeats': 3}, '{"repeats": 0, "level": 1}', [0, 1]),
+     ({'folds': [2, 2, 2], 'repeats': 3}, '{"repeats": 1, "level": 1}', [2, 3]),
+     ({'folds': [2, 2, 2], 'repeats': 3}, '{"repeats": 2, "level": 1}', [4, 5]),
+     ]
+)
+def test_training_folds_in_line_w_splitter(resampling_strategy_args,
+                                           instance, expected_training_folds):
+
+    init_mock = unittest.mock.Mock()
+    init_mock.return_value = None
+    fit_mock = unittest.mock.Mock()
+    with unittest.mock.patch.multiple(TrainEvaluator,
+                                      __init__=init_mock,
+                                      fit_predict_and_loss=fit_mock,
+                                      ):
+        eval_intensifier_cv(
+            queue=unittest.mock.Mock(),
+            config=unittest.mock.Mock(),
+            backend=unittest.mock.Mock(),
+            resampling_strategy='intensifier-cv',
+            resampling_strategy_args=resampling_strategy_args,
+            metric=accuracy,
+            seed=0,
+            num_run=9,
+            instance=instance,
+            scoring_functions=None,
+            output_y_hat_optimization=True,
+            include=None,
+            exclude=None,
+            disable_file_output=False,
+            port=None,
+            init_params=None,
+            budget=0.0,
+        )
+        assert list(fit_mock.call_args)[1]['training_folds'] == expected_training_folds
+
+
+@pytest.mark.parametrize(
+    'rf_train_evaluator',
+    [
+        # level, seed, num_run, budget, instance
+        (1, 2, 17, 0.0, 0),
+    ],
+    indirect=True
+)
+def test_median_rule_prunning(rf_train_evaluator, dummy_datamanager):
+
+    # We create some runs that are un-beatable
+    for i in range(12):
+        rf_train_evaluator.backend.save_numrun_to_dir(
+            level=1,
+            seed=2,
+            idx=i,
+            budget=0.0,
+            instance=0,  # min instance
+            model=DummyClassifier(),
+            cv_model=DummyClassifier(),
+            ensemble_predictions=np.zeros((dummy_datamanager.data['Y_train'].shape[0], 2)),
+            test_predictions=np.zeros((dummy_datamanager.data['Y_test'].shape[0], 2)),
+            valid_predictions=None,
+            run_metadata={
+                'loss': 0.0,
+                'duration': 2,
+                'status': StatusType.SUCCESS,
+                'modeltype': str(i),
+                'opt_losses': [0.0],
+                'loss_log_loss': 0.1 * i,
+                'repeats_averaged': [0, 1],
+            }
+        )
+    # fitting this configuration should raise a prune exception
+    with pytest.raises(MedianPruneException):
+        rf_train_evaluator.fit_predict_and_loss(iterative=False, training_folds=[0, 1])
