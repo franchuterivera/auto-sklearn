@@ -578,7 +578,7 @@ class AbstractEvaluator(object):
                 f"level={self.level} "
                 f"loss={loss} train={np.shape(self.X_train)} "
                 f"and base_models={self.base_models_} log_loss={loss_log_loss} "
-                f"models={len_valid_models}"
+                f"models={len_valid_models} repeats_averaged={repeats_averaged}"
             )
 
         modeltype = 'N/A'
