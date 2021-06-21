@@ -103,14 +103,14 @@ if __name__ == "__main__":
     #repeats = 5
     repeats = len(k_folds)
     train_all_repeat_together = False
-    fidelities_as_individual_models = False
+    fidelities_as_individual_models = True
     enable_median_rule_prunning = True
     max_ensemble_members = 5
     min_challengers = 6
     enable_heuristic = True
     automl = autosklearn.classification.AutoSklearnClassifier(
         n_jobs=4,
-        time_left_for_this_task=600,
+        time_left_for_this_task=800,
         #per_run_time_limit=50,
         tmp_folder='/tmp/autosklearn_classification_example_tmp',
         output_folder='/tmp/autosklearn_classification_example_out',

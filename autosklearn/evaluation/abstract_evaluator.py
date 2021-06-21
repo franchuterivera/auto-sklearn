@@ -434,12 +434,6 @@ class AbstractEvaluator(object):
                                                   Optional[np.ndarray]]:
         # Update the loss to reflect and average. Because we always have the same
         # number of folds, we can do an average of average
-        self.logger.critical(
-            f"For num_run={self.num_run} "
-            f"instance={self.instance} level={self.level} "
-            f"lower_instance={lower_instance} "
-            f"number_of_repetitions_already_avg={number_of_repetitions_already_avg}"
-        )
         try:
             # Average predictions -- Ensemble
 
@@ -556,21 +550,17 @@ class AbstractEvaluator(object):
             lock_path = self.backend.get_lock_path(level=self.level, seed=self.seed,
                                                    num_run=self.num_run, budget=self.budget)
             lock = FileLock(lock_path)
-            lock.adquire()
+            lock.acquire()
 
         # De-noise the predictions of the models if repetitions are available
         repeats_averaged = [0]
         loss_log_loss: Optional[float] = None
         if self.resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
-            opt_loss_before = loss
             loss, opt_pred, test_pred, repeats_averaged = self.handle_lower_level_repeats(
                 loss=loss,
                 opt_pred=opt_pred,
                 test_pred=test_pred,
             )
-            self.logger.critical(f"For num_run={self.num_run} level={self.level} "
-                                 f"instance={self.instance} opt_loss_before={opt_loss_before} "
-                                 f"now it is opt_loss={loss}")
             stack_based_on_log_loss = self.resampling_strategy_args.get(
                 'stack_based_on_log_loss', False)
             stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
@@ -585,9 +575,9 @@ class AbstractEvaluator(object):
             len_valid_models = len([i for i, m in enumerate(self.models) if m is not None])
             self.logger.critical(
                 f"FINISHED num_run={self.num_run} instance={self.instance} "
-                f"level={self.level}"
+                f"level={self.level} "
                 f"loss={loss} train={np.shape(self.X_train)} "
-                f"and base_models={self.base_models_} log_loss={loss_log_loss}"
+                f"and base_models={self.base_models_} log_loss={loss_log_loss} "
                 f"models={len_valid_models}"
             )
 

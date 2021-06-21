@@ -305,6 +305,14 @@ class TrainEvaluator(AbstractEvaluator):
                             ] for level_, seed_, num_run_, budget_, instance_ in identifiers
                         ]
 
+                    # Get the lower level instance in a robust fashion.
+                    lower_instance = None
+                    lower_instances = [(level_, seed_, num_run_, budget_, instance_)
+                                       for level_, seed_, num_run_, budget_, instance_
+                                       in identifiers if num_run_ == self.num_run]
+                    if len(lower_instances) > 0:
+                        lower_instance = sorted(lower_instances)[-1]
+
                     identifiers = [idx_ for _, idx_ in sorted(zip(losses, identifiers))]
                     modeltypes = [idx_ for _, idx_ in sorted(zip(losses, modeltypes))]
                     index_first_ocurrence = [modeltypes.index(x) for x in set(modeltypes)]
@@ -316,6 +324,10 @@ class TrainEvaluator(AbstractEvaluator):
                     total_remaining = int(stack_at_most) - len(diversity)
                     identifiers = [idx_ for idx_ in identifiers
                                    if idx_ not in diversity][:total_remaining+1] + diversity
+
+                    # Force the lower level if not already in
+                    if lower_instance is not None and lower_instance not in identifiers:
+                        identifiers.append(lower_instance)
 
                     # Get the memory back
                     for to_delete_key in set(list(idx2predict.keys())) - set(identifiers):
