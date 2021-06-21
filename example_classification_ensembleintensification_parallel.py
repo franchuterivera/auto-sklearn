@@ -110,7 +110,7 @@ if __name__ == "__main__":
     enable_heuristic = True
     automl = autosklearn.classification.AutoSklearnClassifier(
         n_jobs=4,
-        time_left_for_this_task=800,
+        time_left_for_this_task=900,
         #per_run_time_limit=50,
         tmp_folder='/tmp/autosklearn_classification_example_tmp',
         output_folder='/tmp/autosklearn_classification_example_out',

@@ -585,7 +585,9 @@ class Backend(object):
         max_instance = 0
         if len(mapping) > 0:
             # Take the maximum repetition so far
-            max_instance = max([len(value) for value in mapping.values()])
+            max_instance = max([len(repeats)
+                                for ((level, seed, num_run, budget, instance), repeats)
+                                in mapping.items() if num_run != 1])
 
         # Filter the valid runs
         to_read: Dict[Tuple[int, int, int, float], List[int]] = {}

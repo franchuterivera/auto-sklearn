@@ -880,12 +880,14 @@ class EnsembleBuilder(object):
         # Find the biggest instance per num_run
         mapping = self.backend.get_map_from_run2repeat()
         highest_per_run = self.backend.get_map_from_run2repeat(only_max_instance=True)
-        self.logger.critical(f"mapping={mapping} and highest_per_run={highest_per_run}")
 
         max_instance = 0
         if len(mapping) > 0:
             # Take the maximum repetition so far
-            max_instance = max([len(value) for value in mapping.values()])
+            max_instance = max([len(repeats) for ((level, seed, num_run, budget, instance), repeats)
+                                in mapping.items() if num_run != 1])
+        self.logger.critical(f"mapping={mapping} and highest_per_run={highest_per_run} "
+                             f"max_instance={max_instance}")
 
         # First sort files chronologically
         to_read = {}
