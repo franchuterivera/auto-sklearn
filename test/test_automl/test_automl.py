@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import sklearn.datasets
+from sklearn.dummy import DummyClassifier
 from sklearn.base import clone
 from smac.scenario.scenario import Scenario
 from smac.facade.roar_facade import ROAR
@@ -718,3 +719,68 @@ def test_subsample_if_too_large(memory_limit, task):
         assert mock.warning.call_count == 1
     else:
         assert mock.warning.call_count == 0
+
+
+def test_predict_with_base_models(backend):
+
+    seed = 0
+    instance = 5
+    budget = 0.0
+    automl = autosklearn.automl.AutoML(
+        backend=backend,
+        time_left_for_this_task=30,
+        per_run_time_limit=5,
+        metric=accuracy,
+        max_stacking_level=2,
+        stacking_strategy='instances_anyasbase',
+    )
+    automl._logger = unittest.mock.Mock()
+    automl._task = BINARY_CLASSIFICATION
+    InputValidator = unittest.mock.Mock()
+    InputValidator.feature_validator.transform.return_value = np.zeros((10, 10))
+    automl.InputValidator = InputValidator
+
+    def model_creator(level, num_run):
+        model = unittest.mock.Mock(spec=DummyClassifier)
+        model.identifier = (level, seed, num_run, budget, instance)
+        if level > 1:
+            model.base_models_ = [(1, seed, idx, budget, (instance,)) for idx in range(3)]
+        else:
+            model.base_models_ = []
+        model.predict_proba.return_value = np.full(shape=(10, 2), fill_value=num_run/10)
+        return model
+
+    automl.models_ = {(level, seed, num_run, budget, instance): model_creator(level, num_run)
+                      for num_run in range(3) for level in [1, 2]}
+
+    # The ensemble will allow us to check that all models get the required inputs
+    ensemble = unittest.mock.Mock()
+    ensemble.predict.return_value = np.zeros(10)
+    ensemble.get_selected_model_identifiers.return_value = [
+        (level, seed, idx, budget, (instance), ) for idx in range(3) for level in [1, 2]]
+
+    automl.ensemble_ = ensemble
+
+    with unittest.mock.patch('autosklearn.automl.check_is_fitted') as fitted:
+        fitted.return_value = True
+        automl.predict(np.zeros(10))
+
+    # Every model was used for prediction. The ensemble mock predict
+    # will get a constant array so that the fill value is [0.num_run]
+    assert sorted(
+        [int(np.mean(pred)*10) for pred in list(ensemble.predict.call_args)[0][0]]
+    ) == sorted(
+        # The num_run=0 predicts zero on level 1, and zero on level two
+        # The num_run=1 predicts one on level 1, and one on level two, and so on...
+        [0, 0, 1, 1, 2, 2]
+    )
+
+    # Then the predict function of each model should have been called
+    for (level, seed, num_run, budget, instance), value in automl.models_.items():
+
+        input_array_used = list(value.predict_proba.call_args)[0][0]
+        if level > 1:
+            # Notice that data was nicely enriched with lower lever predictions
+            assert np.shape(input_array_used) == (10, 16)
+        else:
+            assert np.shape(input_array_used) == (10, 10)

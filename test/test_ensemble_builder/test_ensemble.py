@@ -735,3 +735,120 @@ def test_ensemble_builder_nbest_remembered(
     dask.distributed.wait([future])  # wait for the ensemble process to finish
     assert not os.path.exists(file_path)
     assert future.result() == ([], 2, None, None, None)
+
+
+def test_read_only_trusted_models(backend):
+
+    # Save target predictions
+    datamanager = unittest.mock.Mock()
+    datamanager.data.return_value = {'Y_valid': None, 'Y_test': None}
+    backend.load_datamanager = datamanager
+    backend.save_targets_ensemble(np.ones(10))
+
+    # We will always have the dummy classifier on all instances
+    model = {'dummy': 'model'}
+    for instance in range(5):
+        backend.save_numrun_to_dir(
+            level=1, seed=0, idx=1, budget=0.0, instance=instance,
+            model=model, cv_model=model, ensemble_predictions=np.ones((10, 2)),
+            valid_predictions=None, test_predictions=None,
+            run_metadata={'repeats_averaged': list(range(instance + 1))}
+        )
+
+    # First we create a group of runs, all at the same level
+    for level in [1, 2]:
+        for instance in range(2):
+            for num_run in range(2, 5):
+                backend.save_numrun_to_dir(
+                    level=level, seed=0, idx=num_run, budget=0.0, instance=instance,
+                    model=model, cv_model=model,
+                    ensemble_predictions=np.ones((10, 2)),
+                    valid_predictions=None, test_predictions=None,
+                    run_metadata={'repeats_averaged': list(range(instance + 1))}
+                )
+
+    ensbuilder = EnsembleBuilder(
+        max_stacking_level=2,
+        backend=backend,
+        dataset_name="TEST",
+        task_type=BINARY_CLASSIFICATION,
+        metric=accuracy,
+        seed=0,
+        ensemble_nbest=2,
+        max_models_on_disc=None,
+        read_at_most=np.inf,
+    )
+    with unittest.mock.patch('os.path.getmtime') as mtime:
+        mtime.return_value = 1234
+        assert ensbuilder.compute_loss_per_model()
+
+    # Make sure we have a proper value in the dictionary
+    expected_key = (level, 0, num_run, 0.0)
+    expected_value = {
+        'ens_loss': 1.0,
+        'mtime_ens': {1: 1234},
+        'mtime_valid': {},
+        'mtime_test': {},
+        'level': level,
+        'seed': 0,
+        'num_run': num_run,
+        'budget': 0.0,
+        'disc_space_cost_mb': 0.0,
+        'avg_repeats': [0, 1], 'loaded': 2
+    }
+    assert expected_key in ensbuilder.read_losses
+    assert expected_value == ensbuilder.read_losses[expected_key]
+
+    # We expect all num_run to be in the ensemble
+    assert set(ensbuilder.read_losses.keys()) == set(
+        [(level, 0, num_run, 0.0) for level in [1, 2]
+         for num_run in range(1, 5)]) - set([(2, 0, 1, 0.0)])
+
+    # Then mtime_ens is a dict with {instance_to_read: time} mapping
+    instances = [inst_ for value in ensbuilder.read_losses.values()
+                 for inst_ in value['mtime_ens'].keys()]
+    # 2 levels, on the max instances for 3 configurations + [dummy classifier instance]
+    assert sorted(instances) == sorted([1] * 2 * 1 * 3 + [4])
+
+    # Increase the max_instance
+    for instance in [3, 4]:
+        backend.save_numrun_to_dir(
+            level=2, seed=0, idx=3, budget=0.0, instance=instance,
+            model=model, cv_model=model,
+            ensemble_predictions=np.ones((10, 2)),
+            valid_predictions=None, test_predictions=None,
+            run_metadata={'repeats_averaged': list(range(instance + 1))}
+        )
+
+    with unittest.mock.patch('os.path.getmtime') as mtime:
+        mtime.return_value = 1234
+        assert ensbuilder.compute_loss_per_model()
+
+    # Num_run with just 1 as highest instance are invalidated, as the max instance is now
+    # 3
+    invalidated_value = {
+        'ens_loss': np.inf,
+        'mtime_ens': {1: 1234}, 'mtime_valid': {}, 'mtime_test': {},
+        'seed': 0, 'budget': 0.0,
+        'disc_space_cost_mb': 0.0, 'avg_repeats': [0, 1], 'loaded': 2
+    }
+    fixture = {
+        (1, 0, 1, 0.0): {
+            'ens_loss': 1.0,
+            'mtime_ens': {4: 1234}, 'mtime_valid': {}, 'mtime_test': {},
+            'level': 1, 'seed': 0, 'num_run': 1, 'budget': 0.0,
+            'disc_space_cost_mb': 0.0, 'avg_repeats': [0, 1, 2, 3, 4], 'loaded': 2
+        },
+        (1, 0, 2, 0.0): {**invalidated_value, **{'level': 1, 'num_run': 2}},
+        (1, 0, 3, 0.0): {**invalidated_value, **{'level': 1, 'num_run': 3}},
+        (1, 0, 4, 0.0): {**invalidated_value, **{'level': 1, 'num_run': 4}},
+        (2, 0, 2, 0.0): {**invalidated_value, **{'level': 2, 'num_run': 2}},
+        (2, 0, 3, 0.0): {
+            'ens_loss': 1.0,
+            'mtime_ens': {4: 1234}, 'mtime_valid': {}, 'mtime_test': {},
+            'level': 2, 'seed': 0, 'num_run': 3, 'budget': 0.0,
+            'disc_space_cost_mb': 0.0, 'avg_repeats': [0, 1, 2, 3, 4], 'loaded': 2
+        },
+        (2, 0, 4, 0.0): {**invalidated_value, **{'level': 2, 'num_run': 4}},
+    }
+    assert ensbuilder.read_losses == fixture
