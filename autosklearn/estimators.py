@@ -55,7 +55,6 @@ class AutoSklearnEstimator(BaseEstimator):
         scoring_functions: Optional[List[Scorer]] = None,
         load_models: bool = True,
         ensemble_folds: Optional[str] = None,
-        warmstart_with_initial_configurations: bool = False,
     ):
         """
         Parameters
@@ -289,7 +288,6 @@ class AutoSklearnEstimator(BaseEstimator):
         if ensemble_folds not in ['highest_repeat_per_run', 'highest_repeat',
                                   'highest_repeat_trusted', None]:
             raise ValueError(f"Unsupported {ensemble_folds}")
-        self.warmstart_with_initial_configurations = warmstart_with_initial_configurations
 
         self.automl_ = None  # type: Optional[AutoML]
 
@@ -346,7 +344,6 @@ class AutoSklearnEstimator(BaseEstimator):
             metric=self.metric,
             scoring_functions=self.scoring_functions,
             ensemble_folds=self.ensemble_folds,
-            warmstart_with_initial_configurations=self.warmstart_with_initial_configurations,
         )
 
         return automl

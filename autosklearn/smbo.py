@@ -425,7 +425,7 @@ class AutoMLSMBO(object):
             instances = [[json.dumps({'task_id': self.dataset_name,
                                       'fold': fold_number})]
                          for fold_number in range(num_folds)]
-        elif self.resampling_strategy in ['intensifier-cv']:
+        elif self.resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
             num_repeats = self.resampling_strategy_args['repeats']
             num_points = np.shape(self.datamanager.data['X_train'])[0]
             repeats = range(num_repeats)
@@ -528,6 +528,7 @@ class AutoMLSMBO(object):
                     )
             scenario_dict.update(self.smac_scenario_args)
 
+        del self.datamanager
         smac_args = {
             'run_id': self.run_id,
             'scenario_dict': scenario_dict,

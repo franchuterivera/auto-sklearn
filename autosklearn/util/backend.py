@@ -6,7 +6,7 @@ import tempfile
 import time
 import uuid
 import warnings
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 
@@ -15,6 +15,10 @@ from sklearn.pipeline import Pipeline
 from autosklearn.data.abstract_data_manager import AbstractDataManager
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.util.logging_ import PicklableClientLogger, get_named_client_logger
+
+
+# Level, seed, num_run, budget, (instance1, ...)
+IDENTIFIER_TYPE = Tuple[int, int, int, float, int]
 
 
 __all__ = [
@@ -464,9 +468,9 @@ class Backend(object):
                         budgets: Optional[List[float]] = None,
                         instances: Optional[List[int]] = None,
                         ) -> List[List[float]]:
-        runs_directory = self.get_runs_directory()
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 for path in glob.glob(os.path.join(glob.escape(self.get_runs_directory()),
+                                                    '*'))
                  # Temporal files might get in the way, we expect
                  # level, seed, num_run, budget, instance in the name
                  if len(os.path.basename(path).split('_')) == 5
@@ -498,9 +502,59 @@ class Backend(object):
             except Exception as e:
                 if self.logger is not None:
                     self.logger.error(
-                        f"Skipping {e}->{(level_, seed_, num_run_, budget_, instance_)}")
+                        f"Load opt losses Skipping {str(e)}"
+                        f"->{(level_, seed_, num_run_, budget_, instance_)}"
+                    )
                 pass
         return opt_losses
+
+    def get_lock_path(self,
+                      level: int,
+                      seed: int,
+                      num_run: int,
+                      budget: float,
+                      ) -> str:
+        return os.path.join(self.get_runs_directory(),
+                            f"{level}-{seed}-{num_run}-{budget}.lock")
+
+    def get_map_from_run2repeat(self, only_max_instance: bool = False
+                                ) -> Dict[IDENTIFIER_TYPE, List[int]]:
+        paths = [os.path.basename(path).split('_')
+                 for path in glob.glob(os.path.join(
+                     glob.escape(self.get_runs_directory()), '*'))
+                 # Temporal files might get in the way, we expect
+                 # level, seed, num_run, budget, instance in the name
+                 if len(os.path.basename(path).split('_')) == 5
+                 ]
+        runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
+                for level, seed, num_run, budget, instance in paths]
+
+        mapping: Dict[IDENTIFIER_TYPE, List[int]] = {}
+        biggest_per_num_run: Dict[Tuple[int, int, int, float], int] = {}
+        for level_, seed_, num_run_, budget_, instance_ in runs:
+            identifier = (level_, seed_, num_run_, budget_, instance_)
+            metadata = self.load_metadata_by_level_seed_and_id_and_budget_and_instance(
+                level=level_,
+                seed=seed_,
+                idx=num_run_,
+                budget=budget_,
+                instance=instance_,
+            )
+            mapping[identifier] = cast(List[int], metadata['repeats_averaged'])
+
+            # track biggest per num_run
+            config_id = (level_, seed_, num_run_, budget_)
+            if config_id not in biggest_per_num_run:
+                biggest_per_num_run[config_id] = 0
+            biggest_per_num_run[config_id] = max(biggest_per_num_run[config_id],
+                                                 len(metadata['repeats_averaged']))
+
+        if only_max_instance:
+            return {(level_, seed_, num_run_, budget_, instance_): repeats
+                    for ((level_, seed_, num_run_, budget_, instance_), repeats) in mapping.items()
+                    if biggest_per_num_run[(level_, seed_, num_run_, budget_)] == len(repeats)}
+        else:
+            return mapping
 
     def load_model_predictions(self,
                                subset: str,
@@ -509,18 +563,15 @@ class Backend(object):
                                idxs: Optional[List[int]] = None,
                                budgets: Optional[List[float]] = None,
                                instances: Optional[List[int]] = None,
-                               repeats_as_individual_models: bool = True,
-                               train_all_repeat_together: bool = True,
-                               max_repetition_instance: Optional[int] = None,
                                ) -> Dict[
                                    Tuple[int, int, int, float, Tuple],
                                    np.ndarray
                                ]:
-        runs_directory = self.get_runs_directory()
         identifier_to_prediction = {}
 
         paths = [os.path.basename(path).split('_')
-                 for path in glob.glob(os.path.join(runs_directory, '*'))
+                 for path in glob.glob(os.path.join(glob.escape(self.get_runs_directory()),
+                                                    '*'))
                  # Temporal files might get in the way, we expect
                  # level, seed, num_run, budget, instance in the name
                  if len(os.path.basename(path).split('_')) == 5
@@ -528,19 +579,17 @@ class Backend(object):
         runs = [(int(level), int(seed), int(num_run), float(budget), int(instance))
                 for level, seed, num_run, budget, instance in paths]
 
-        highest_instance: Dict = {}
-        max_instance = 0
-        for level_, seed_, num_run_, budget_, instance_ in runs:
-            if level_ not in highest_instance:
-                highest_instance[level_] = {}
-            if num_run_ not in highest_instance[level_] or (
-                    instance_ > highest_instance[level_][num_run_]):
-                highest_instance[level_][num_run_] = instance_
-            # k > 1 means that ignore dummy prediction for higest instance
-            if instance_ > max_instance and num_run_ > 1:
-                max_instance = instance_
+        mapping = self.get_map_from_run2repeat()
+        highest_per_run = self.get_map_from_run2repeat(only_max_instance=True)
 
-        # Filter the valid runs according to repeats_as_individual_models
+        max_instance = 0
+        if len(mapping) > 0:
+            # Take the maximum repetition so far
+            max_instance = max([len(repeats)
+                                for ((level, seed, num_run, budget, instance), repeats)
+                                in mapping.items() if num_run != 1])
+
+        # Filter the valid runs
         to_read: Dict[Tuple[int, int, int, float], List[int]] = {}
         for level_, seed_, num_run_, budget_, instance_ in runs:
             if num_run_ <= 1:
@@ -557,40 +606,19 @@ class Backend(object):
             if instances is not None and instance_ not in instances:
                 continue
             elif instances is None:
-                identifier = (level_, seed_, num_run_, budget_)
-                if not repeats_as_individual_models:
-                    # We have to search for the highest instance and only
-                    # this one
+                identifier_ = (level_, seed_, num_run_, budget_, instance_)
+                repetitions = len(mapping[identifier_])
+                # We have to search for the highest instance and only
+                # this one
 
-                    # Only allow highest instance available
-                    # Treat each level like a different config basically
-                    if num_run_ in highest_instance[level_] and (
-                            instance_ not in [
-                                max_instance,
-                                max_instance - 1
-                            ] or instance_ != highest_instance[level_][num_run_]):
-                        continue
-                    to_read[identifier] = [instance_]
-                else:
-                    if identifier not in to_read:
-                        to_read[identifier] = [instance_]
-                    else:
-                        to_read[identifier].append(instance_)
+                if repetitions not in [
+                    max_instance,
+                    max_instance - 1
+                ] or identifier_ not in highest_per_run:
+                    continue
 
-        # in the case we have repeats_as_individual_models==True
-        # we only accept models with all desired instances available
-        # so we have to post process
-        if repeats_as_individual_models and not train_all_repeat_together:
-            to_delete = [identifier for identifier in to_read.keys()
-                         if len(to_read[identifier]) < max_instance]
-            for identifier in to_delete:
-                del to_read[identifier]
-
-            # Then if repeats_as_individual_models the highest fidelity is already
-            # averaged, it is sufficient to just load this guy
-            for identifier in to_read.keys():
-                if max_repetition_instance in to_read[identifier]:
-                    to_read[identifier] = [max_repetition_instance]
+                # This instance has the highest repetitions available
+                to_read[(level_, seed_, num_run_, budget_)] = [instance_]
 
         # The read the predictions and average if needed
         for identifier, instances_ in to_read.items():
@@ -606,7 +634,7 @@ class Backend(object):
             except Exception as e:
                 if self.logger is not None:
                     self.logger.error(
-                        f"Skipping {e}->{(identifier, instances_)}")
+                        f"Skipped {str(e)}->{(identifier, instances_)}")
                 pass
         return identifier_to_prediction
 

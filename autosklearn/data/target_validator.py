@@ -166,6 +166,7 @@ class TargetValidator(BaseEstimator):
             # The label encoder makes sure data is, and remains
             # 1 dimensional
             self.encoder = preprocessing.OrdinalEncoder(handle_unknown='use_encoded_value',
+                                                        dtype=np.int32,
                                                         unknown_value=-1)
         else:
             # We should not reach this if statement as we check for type of targets before

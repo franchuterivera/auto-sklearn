@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 import traceback
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import List, Optional, Tuple, Union
 import zlib
 
 import dask.distributed
@@ -65,7 +65,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         pynisher_context: str = 'fork',
         ensemble_folds: Optional[str] = None,
-        resampling_strategy_arguments: Dict = {}
     ):
         """ SMAC callback to handle ensemble building
 
@@ -119,9 +118,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
             How to ensemble the repetitions. We can ensemble any repetitions,
             or only trusted repetitions -- like when we have many repetitions, we
             only want to use the models at a high repetition
-        resampling_strategy_arguments:
-            Temporary added this here to support multiple experimental settings.
-            TODO: Remove/cleanup for final push
 
     Returns
     -------
@@ -149,7 +145,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.ensemble_folds = ensemble_folds
         if self.ensemble_folds not in [None, 'highest_repeat_trusted']:
             raise NotImplementedError(self.ensemble_folds)
-        self.resampling_strategy_arguments = resampling_strategy_arguments
         self.pynisher_context = pynisher_context
 
         # Store something similar to SMAC's runhistory
@@ -255,7 +250,6 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
                     pynisher_context=self.pynisher_context,
                     logger_port=self.logger_port,
                     ensemble_folds=self.ensemble_folds,
-                    resampling_strategy_arguments=self.resampling_strategy_arguments,
                     unit_test=unit_test,
                 ))
 
@@ -297,7 +291,6 @@ def fit_and_return_ensemble(
     pynisher_context: str,
     logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
     ensemble_folds: str = None,
-    resampling_strategy_arguments: Dict = {},
     unit_test: bool = False,
 ) -> Tuple[
         List[Tuple[int, float, float, float]],
@@ -384,7 +377,6 @@ def fit_and_return_ensemble(
         random_state=random_state,
         logger_port=logger_port,
         ensemble_folds=ensemble_folds,
-        resampling_strategy_arguments=resampling_strategy_arguments,
         unit_test=unit_test,
     ).run(
         end_at=end_at,
@@ -414,7 +406,6 @@ class EnsembleBuilder(object):
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         ensemble_folds: str = None,
-        resampling_strategy_arguments: Dict = {},
         unit_test: bool = False,
     ):
         """
@@ -516,7 +507,6 @@ class EnsembleBuilder(object):
             port=self.logger_port,
         )
         self.ensemble_folds = ensemble_folds
-        self.resampling_strategy_arguments = resampling_strategy_arguments
 
         if ensemble_nbest == 1:
             self.logger.debug("Behaviour depends on int/float: %s, %s (ensemble_nbest, type)" %
@@ -888,33 +878,18 @@ class EnsembleBuilder(object):
         self.logger.critical(f"Available self.y_ens_files={self.y_ens_files}")
 
         # Find the biggest instance per num_run
-        highest_instance = {}
+        mapping = self.backend.get_map_from_run2repeat()
+        highest_per_run = self.backend.get_map_from_run2repeat(only_max_instance=True)
+
         max_instance = 0
-        for level_, seed_, num_run_, budget_, instance_ in self.y_ens_files:
-            if level_ not in highest_instance:
-                highest_instance[level_] = {}
-            if num_run_ not in highest_instance[level_] or (
-                    instance_ > highest_instance[level_][num_run_]):
-                highest_instance[level_][num_run_] = instance_
-            # k > 1 means that ignore dummy prediction for higest instance
-            if instance_ > max_instance and num_run_ > 1:
-                max_instance = instance_
+        if len(mapping) > 0:
+            # Take the maximum repetition so far
+            max_instance = max([len(repeats) for ((level, seed, num_run, budget, instance), repeats)
+                                in mapping.items() if num_run != 1])
+        self.logger.critical(f"mapping={mapping} and highest_per_run={highest_per_run} "
+                             f"max_instance={max_instance}")
 
         # First sort files chronologically
-        repeats_as_individual_models = cast(bool, self.resampling_strategy_arguments.get(
-            'repeats_as_individual_models'))
-        train_all_repeat_together = cast(bool, self.resampling_strategy_arguments.get(
-            'train_all_repeat_together'))
-
-        # ###########################################################################
-        # Same code in backend -- move to utils common
-        # ###########################################################################
-
-        # In the case of repeats_as_individual_models==True, when instance is highest max
-        # repeat possible, the train evaluator produces already averaged instances
-        max_repetition_instance = cast(int, self.resampling_strategy_arguments.get(
-            'repeats')) - 1
-
         to_read = {}
         for _level, _seed, _num_run, _budget, _instance in self.y_ens_files:
             identifier = (_level, _seed, _num_run, _budget)
@@ -927,58 +902,28 @@ class EnsembleBuilder(object):
                 instance=_instance
             )
 
+            if (_level, _seed, _num_run, _budget, _instance) not in highest_per_run:
+                # Only allow the highest instance seen for this config
+                continue
+
             # For dummy prediction we only use the highes budget always
             if _num_run == 1:
-                # There should not be dummy predict for every level, just level 1
-                if _instance == highest_instance[1][_num_run]:
-                    to_read[identifier] = {_instance: mtime}
-                else:
+                if _level != 1:
                     continue
+                to_read[identifier] = {_instance: mtime}
 
-            if not repeats_as_individual_models:
-                # If the repetitions are treated independently,
-                # (self.repeats_as_individual_models==True)
-                # we have to average the predictions in the ensemble builder,
-                # and for this reason we add to 'to_read' all instances
-                # In the case that self.repeats_as_individual_models==False
-                # we care only about the last model available
-                if _instance != highest_instance[_level][_num_run]:
-                    # Only allow the highest instance seen for this config
-                    continue
-
-                if _instance not in [max_instance, max_instance-1]:
-                    # Only the highest repetition should be stacked
-                    continue
+            if len(mapping[(_level, _seed, _num_run, _budget, _instance)]) not in [max_instance,
+                                                                                   max_instance-1]:
+                # Only the runs with trusted/denoised predictions should be used
+                continue
 
             if identifier not in to_read:
                 to_read[identifier] = {}
 
-            # To read will have 2 modes:
-            # if self.repeats_as_individual_models, it will have N instances
-            # if not self.repeats_as_individual_models: it will have only the highest instance
+            # To read will have only the instance per num_run with more repetitions
+            # it is not necessarily 5 if there where 5 repetitions, due to the nature of
+            # multiprocessing. Maybe repeat3 is the last to finish, so it will have all repeats
             to_read[identifier][_instance] = mtime
-
-        if repeats_as_individual_models and not train_all_repeat_together:
-            # if train_all_repeat_together==True
-            # Means that we can use any model in disc as it will have trained
-            # all repetitions together
-            #
-            # In this case, we only want to deal with predictions that
-            # have max_instance, max_instance-1 repetitions
-            to_delete = [identifier for identifier in to_read.keys()
-                         # Max instance starts at zero, whereas len() returns 1
-                         # so we as for at least max_instance - 1 + 1
-                         if len(to_read[identifier]) < max_instance and identifier[2] > 1]
-            for identifier in to_delete:
-                del to_read[identifier]
-
-            # One last fix for the instances to read! if you are max_repetition_instance
-            # then train evaluator already averaged things for you
-            for identifier in to_read.keys():
-                if max_repetition_instance in to_read[identifier]:
-                    for instance_already_avg in set(to_read[identifier].keys()
-                                                    ) - set([max_repetition_instance]):
-                        del to_read[identifier][instance_already_avg]
 
         # We cannot use old predictions when new ones are available
         # at a higher number of repetitions
@@ -1017,6 +962,8 @@ class EnsembleBuilder(object):
                     "num_run": _num_run,
                     "budget": _budget,
                     "disc_space_cost_mb": None,
+                    # For debug purposes, how many avg repeats
+                    "avg_repeats": 1,
                     # Lazy keys so far:
                     # 0 - not loaded
                     # 1 - loaded and in memory
@@ -1067,6 +1014,12 @@ class EnsembleBuilder(object):
                 # It is not needed to create the object here
                 # To save memory, we just compute the loss.
                 self.read_losses[y_ens_fn]["mtime_ens"] = mtime
+
+                # We expect a single instance to have the highest repeat
+                assert len(mtime) == 1, f"{mtime}/{y_ens_fn}"
+                instances_where_max_repeat = list(mtime.keys())[0]
+                self.read_losses[y_ens_fn]["avg_repeats"] = mapping[
+                    (_level, _seed, _num_run, _budget, instances_where_max_repeat)]
                 self.read_losses[y_ens_fn]["loaded"] = 2
                 self.read_losses[y_ens_fn]["disc_space_cost_mb"] = self.get_disk_consumption(
                     y_ens_fn,

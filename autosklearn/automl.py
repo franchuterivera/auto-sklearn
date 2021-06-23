@@ -114,7 +114,7 @@ def _model_predict(model, X, batch_size, logger, task, lower_level_predictions, 
                     )
         except Exception as e:
             logger.error(f"Failure on {identifier}")
-            raise e
+            raise Exception(f"Failure on {identifier}/->{str(e)}")
 
     if len(prediction.shape) < 1 or len(X_.shape) < 1 or \
             X_.shape[0] < 1 or prediction.shape[0] != X_.shape[0]:
@@ -157,7 +157,6 @@ class AutoML(BaseEstimator):
                  metric=None,
                  scoring_functions=None,
                  ensemble_folds=None,
-                 warmstart_with_initial_configurations=False,
                  ):
         super(AutoML, self).__init__()
         self.configuration_space = None
@@ -174,11 +173,14 @@ class AutoML(BaseEstimator):
         self._seed = seed
         self._max_stacking_level = max_stacking_level
         self._stacking_strategy = stacking_strategy
-        if self._max_stacking_level > 1 and self._stacking_strategy not in [
-            'time_split',
-            'instances_anyasbase',
-            'instances_selfasbase',
-        ]:
+        if (
+            self._max_stacking_level is not None and
+            self._max_stacking_level > 1 and
+            self._stacking_strategy not in [
+                'time_split',
+                'instances_anyasbase',
+                'instances_selfasbase']
+        ):
             raise ValueError(f"Unsupported stacking strategy {self._max_stacking_level}")
         self._memory_limit = memory_limit
         self._data_memory_limit = None
@@ -196,6 +198,7 @@ class AutoML(BaseEstimator):
                                              'cv',
                                              'cv-iterative-fit',
                                              'intensifier-cv',
+                                             'partial-iterative-intensifier-cv',
                                              'partial-cv',
                                              'partial-cv-iterative-fit',
                                              ] \
@@ -218,13 +221,13 @@ class AutoML(BaseEstimator):
                                          ]\
            and 'folds' not in self._resampling_strategy_arguments:
             self._resampling_strategy_arguments['folds'] = 5
-        if self._resampling_strategy in ['intensifier-cv']:
+        if self._resampling_strategy in ['intensifier-cv', 'partial-iterative-intensifier-cv']:
             if 'repeats' not in self._resampling_strategy_arguments:
                 self._resampling_strategy_arguments['repeats'] = 5
             # We are passing everything through the resampling strategy!
             # Think if there is a better way to do this
-            if 'repeats_as_individual_models' not in self._resampling_strategy_arguments:
-                self._resampling_strategy_arguments['repeats_as_individual_models'] = True
+            if 'fidelities_as_individual_models' not in self._resampling_strategy_arguments:
+                self._resampling_strategy_arguments['fidelities_as_individual_models'] = False
             if self._max_stacking_level > 1:
                 self._resampling_strategy_arguments['stacking_strategy'] = self._stacking_strategy
         self._n_jobs = n_jobs
@@ -290,7 +293,6 @@ class AutoML(BaseEstimator):
         # By default try to use the TCP logging port or get a new port
         self._logger_port = logging.handlers.DEFAULT_TCP_LOGGING_PORT
         self._ensemble_folds = ensemble_folds
-        self._warmstart_with_initial_configurations = warmstart_with_initial_configurations
 
         # After assigning and checking variables...
         # self._backend = Backend(self._output_dir, self._tmp_dir)
@@ -657,8 +659,6 @@ class AutoML(BaseEstimator):
         self._logger.debug('  max_models_on_disc: %s', str(self._max_models_on_disc))
         self._logger.debug('  seed: %d', self._seed)
         self._logger.debug("  ensemble_folds: {}".format(self._ensemble_folds))
-        self._logger.debug("  warmstart_with_initial_configurations: {}".format(
-            self._warmstart_with_initial_configurations))
         self._logger.debug('  max_stacking_level: %d', self._max_stacking_level)
         self._logger.debug('  self._max_stacking_level: %s', self._stacking_strategy)
         self._logger.debug('  memory_limit: %s', str(self._memory_limit))
@@ -793,7 +793,6 @@ class AutoML(BaseEstimator):
                 logger_port=self._logger_port,
                 pynisher_context=self._multiprocessing_context,
                 ensemble_folds=self._ensemble_folds,
-                resampling_strategy_arguments=self._resampling_strategy_arguments,
             )
 
         self._stopwatch.stop_task(ensemble_task_name)
@@ -809,14 +808,9 @@ class AutoML(BaseEstimator):
         self._stopwatch.start_task(smac_task_name)
 
         initial_configurations = []
-        if self._warmstart_with_initial_configurations:
-            initial_configurations = self.get_initial_configurations(
-                self.configuration_space,
-                datamanager,
-            )
 
         self.started_registered_time = time.time()
-        if 'time_split' in self._stacking_strategy:
+        if self._stacking_strategy is not None and 'time_split' in self._stacking_strategy:
             # Calculate the time each smac should last. This elapsed time here
             # makes the overhead up to this point which is usually less than 0.5 seconds
             # and is substracted from all smac runs to be safe
@@ -916,6 +910,7 @@ class AutoML(BaseEstimator):
                 dask_client=self._dask_client,
                 start_num_run=self.num_run,
                 num_metalearning_cfgs=0 if (
+                    self._stacking_strategy is not None and
                     'time_split' in self._stacking_strategy and level > 1
                 ) else self._initial_configurations_via_metalearning,
                 initial_configurations=initial_configurations,
@@ -924,7 +919,10 @@ class AutoML(BaseEstimator):
                 # here the stacking levels will be converted as part of the instances,
                 # so that evaluator closures can decide what to do with this
                 stacking_levels=list(
-                    range(1, level + 1)) if 'instances' in self._stacking_strategy else [level],
+                    range(1, level + 1)) if (
+                        self._stacking_strategy is not None and
+                        'instances' in self._stacking_strategy
+                    ) else [level],
                 run_id=run_id,
                 metadata_directory=self._metadata_directory,
                 metric=self._metric,
@@ -1230,7 +1228,7 @@ class AutoML(BaseEstimator):
                 load_function = \
                     self._backend.load_model_by_level_seed_and_id_and_budget_and_instance
             pipeline = load_function(
-                level=0,
+                level=1,
                 seed=self._seed,
                 idx=run_info.config.config_id + 1,
                 budget=run_info.budget,
@@ -1309,7 +1307,9 @@ class AutoML(BaseEstimator):
         """
         if (
             self._resampling_strategy not in (
-                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv')
+                'holdout', 'holdout-iterative-fit', 'cv', 'cv-iterative-fit', 'intensifier-cv',
+                'partial-iterative-intensifier-cv'
+            )
             and not self._can_predict
         ):
             raise NotImplementedError(
@@ -1466,7 +1466,6 @@ class AutoML(BaseEstimator):
             logger_port=self._logger_port,
             pynisher_context=self._multiprocessing_context,
             ensemble_folds=self._ensemble_folds,
-            resampling_strategy_arguments=self._resampling_strategy_arguments,
         )
         manager.build_ensemble(self._dask_client)
         future = manager.futures.pop()
@@ -1490,9 +1489,12 @@ class AutoML(BaseEstimator):
         if self.ensemble_:
             identifiers = self.ensemble_.get_selected_model_identifiers()
             self.models_ = self._backend.load_models_by_identifiers(identifiers)
-            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv'):
+            if self._resampling_strategy in ('cv', 'cv-iterative-fit', 'intensifier-cv',
+                                             'partial-iterative-intensifier-cv'):
                 include_base_models = False
-                if self._resampling_strategy == 'intensifier-cv' and self._max_stacking_level > 1:
+                if self._resampling_strategy in [
+                        'intensifier-cv',
+                        'partial-iterative-intensifier-cv'] and self._max_stacking_level > 1:
                     include_base_models = True
                 self.cv_models_ = self._backend.load_cv_models_by_identifiers(
                     identifiers,
@@ -1506,7 +1508,9 @@ class AutoML(BaseEstimator):
             ):
                 raise ValueError('No models fitted!')
             if (
-                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv']
+                self._resampling_strategy in ['cv', 'cv-iterative-fit', 'intensifier-cv',
+                                              'partial-iterative-intensifier-cv'
+                                              ]
                 and len(self.cv_models_) == 0
             ):
                 raise ValueError('No models fitted!')
