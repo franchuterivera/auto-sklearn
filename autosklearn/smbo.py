@@ -482,6 +482,7 @@ class AutoMLSMBO(object):
                     )
             scenario_dict.update(self.smac_scenario_args)
 
+        del self.datamanager
         smac_args = {
             'scenario_dict': scenario_dict,
             'seed': seed,

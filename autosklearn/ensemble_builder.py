@@ -1260,8 +1260,7 @@ class EnsembleBuilder(object):
 
         try:
             self.logger.debug(
-                "Fitting the ensemble on %d models.",
-                len(predictions_train),
+                f"Fitting the ensemble on {len(predictions_train)} models: {include_num_runs}"
             )
             start_time = time.time()
             ensemble.fit(predictions_train, self.y_true_ensemble,
