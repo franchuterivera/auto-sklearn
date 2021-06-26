@@ -6,18 +6,19 @@ import ConfigSpace.hyperparameters as CSH
 import pytest
 
 from smac.intensification.abstract_racer import RunInfoIntent
-from smac.intensification.full_parallel_ensemble_intensification import (
+from smac.runhistory.runhistory import (
+    RunHistory,
+    RunInfo,
+    RunKey,
+    RunValue,
+    StatusType
+)
+
+from autosklearn.optimizers.full_parallel_ensemble_intensification import (
     EnsembleIntensification,
     EnsembleIntensifierStage,
     MaxNumberChallengersReached,
     PrioritizedJobsQueueWithDependencies,
-)
-from smac.runhistory.runhistory import (
-    RunInfo,
-    RunHistory,
-    RunValue,
-    RunKey,
-    StatusType
 )
 
 
@@ -59,75 +60,78 @@ def test_priority_queue_get_priority(mock_get_runnable_jobs, jobs, jobs2priority
     assert queue.get() == expected_job
 
 
-@pytest.mark.parametrize("jobs,fidelities_as_individual_models,level_transition_ids,maxE,expected_job", [
-    (
-        # If all jobs are not runnable, then no valid job is available
-        {('A', 3): 'scheduled', ('B', 1): 'scheduled', ('C', 3): 'scheduled'},
-        True,
-        [3],
-        10,
-        [],
-    ), (
-        # If all jobs are not runnable, then no valid job is available
-        {('A', 0): 'cancel', ('B', 0): 'cancel', ('C', 0): 'cancel'},
-        False,
-        [3],
-        10,
-        [],
-    ), (
-        # A simple case, all jobs are valid, all are returned
-        {('A', 0): 'runnable', ('B', 0): 'runnable', ('C', 0): 'runnable'},
-        False,
-        [3],
-        10,
-        [('A', 0), ('B', 0), ('C', 0)],
-    ), (
-        # One instance has finished, fidelities_as_individual_models is False
-        # Only one the next instance can run
-        {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable'},
-        False,
-        [3],
-        1,
-        [('A', 1)],
-    ), (
-        # One instance has finished, fidelities_as_individual_models is False
-        # Only one the next instance can run. Test alongside multiple configs
-        {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('B', 0): 'runnable',
-         ('C', 0): 'done', ('C', 1): 'done', ('C', 2): 'done', ('C', 3): 'runnable'},
-        False,
-        [2],
-        1,
-        [('A', 1), ('B', 0), ('C', 3)],
-    ), (
-        # One instance has finished, fidelities_as_individual_models is True
-        # All pending instances can run. Notice how config B here is done, because
-        # maxE==1 we need at least a config completed on instance 0 and instance 1
-        # to schedule the configuration A. This is to make sure ensemble builder has a
-        # progressive number of configurations
-        {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('B', 0): 'done', ('B', 1): 'done'},
-        True,
-        [3],
-        1,
-        [('A', 1), ('A', 2)],
-    ), (
-        # One instance has finished, fidelities_as_individual_models is True
-        # Only instance 1 can run because instance 2 is a transition instance
-        {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable'},
-        True,
-        [2],
-        1,
-        [('A', 1)],
-    ), (
-        # With fidelities_as_individual_models==True, we can have many
-        # runs scheduled on a greedy fashion. We cannot launch a new level
-        # transition without previous levels being complete
-        {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('A', 3): 'runnable'},
-        True,
-        [2],
-        1,
-        [('A', 1)],
-    ),
-])
+@pytest.mark.parametrize(
+    "jobs,fidelities_as_individual_models,level_transition_ids,maxE,expected_job", [
+        (
+            # If all jobs are not runnable, then no valid job is available
+            {('A', 3): 'scheduled', ('B', 1): 'scheduled', ('C', 3): 'scheduled'},
+            True,
+            [3],
+            10,
+            [],
+        ), (
+            # If all jobs are not runnable, then no valid job is available
+            {('A', 0): 'cancel', ('B', 0): 'cancel', ('C', 0): 'cancel'},
+            False,
+            [3],
+            10,
+            [],
+        ), (
+            # A simple case, all jobs are valid, all are returned
+            {('A', 0): 'runnable', ('B', 0): 'runnable', ('C', 0): 'runnable'},
+            False,
+            [3],
+            10,
+            [('A', 0), ('B', 0), ('C', 0)],
+        ), (
+            # One instance has finished, fidelities_as_individual_models is False
+            # Only one the next instance can run
+            {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable'},
+            False,
+            [3],
+            1,
+            [('A', 1)],
+        ), (
+            # One instance has finished, fidelities_as_individual_models is False
+            # Only one the next instance can run. Test alongside multiple configs
+            {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('B', 0): 'runnable',
+             ('C', 0): 'done', ('C', 1): 'done', ('C', 2): 'done', ('C', 3): 'runnable'},
+            False,
+            [2],
+            1,
+            [('A', 1), ('B', 0), ('C', 3)],
+        ), (
+            # One instance has finished, fidelities_as_individual_models is True
+            # All pending instances can run. Notice how config B here is done, because
+            # maxE==1 we need at least a config completed on instance 0 and instance 1
+            # to schedule the configuration A. This is to make sure ensemble builder has a
+            # progressive number of configurations
+            {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('B', 0): 'done',
+             ('B', 1): 'done'},
+            True,
+            [3],
+            1,
+            [('A', 1), ('A', 2)],
+        ), (
+            # One instance has finished, fidelities_as_individual_models is True
+            # Only instance 1 can run because instance 2 is a transition instance
+            {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable'},
+            True,
+            [2],
+            1,
+            [('A', 1)],
+        ), (
+            # With fidelities_as_individual_models==True, we can have many
+            # runs scheduled on a greedy fashion. We cannot launch a new level
+            # transition without previous levels being complete
+            {('A', 0): 'done', ('A', 1): 'runnable', ('A', 2): 'runnable', ('A', 3): 'runnable'},
+            True,
+            [2],
+            1,
+            [('A', 1)],
+        ),
+    ]
+)
 def test_priority_queue_get_runnable_jobs(jobs,
                                           fidelities_as_individual_models,
                                           level_transition_ids,
@@ -220,8 +224,10 @@ def intensifier():
         maxE=2,
         rng=0,
         instances=[
-            '{"repeats": 0, "level": 0}', '{"repeats": 1, "level": 0}', '{"repeats": 2, "level": 0}',
-            '{"repeats": 0, "level": 1}', '{"repeats": 1, "level": 1}', '{"repeats": 2, "level": 1}',
+            '{"repeats": 0, "level": 0}', '{"repeats": 1, "level": 0}',
+            '{"repeats": 2, "level": 0}',
+            '{"repeats": 0, "level": 1}', '{"repeats": 1, "level": 1}',
+            '{"repeats": 2, "level": 1}',
         ],
     )
 
@@ -431,36 +437,6 @@ def test_ensembleintensification_is_highest_instance_for_config(intensifier, cha
     assert intensifier.is_highest_instance_for_config(run_history=run_history, run_key=run_key)
 
 
-def test_ensembleintensification_get_mean_level_cost(intensifier, challengers):
-    run_history = RunHistory()
-    config1 = challengers.pop(0)
-    intensifier.jobs_queue.mark_completed(config=config1, instance_id=0)
-    run_history.add(config=config1, cost=5, time=2,
-                    status=StatusType.SUCCESS, instance_id='{"repeats": 0, "level": 0}',
-                    seed=0,
-                    additional_info=None)
-
-    # The highest instance is '{"repeats": 0, "level": 0}' as is the only run available
-    run_key = RunKey(run_history.config_ids[config1], '{"repeats": 0, "level": 0}', 0, 0.0)
-    assert intensifier.get_mean_level_cost(run_history=run_history, run_key=run_key) == pytest.approx(5)
-
-    # Then add another instance
-    intensifier.jobs_queue.mark_completed(config=config1, instance_id=1)
-    run_history.add(config=config1, cost=7, time=2,
-                    status=StatusType.SUCCESS, instance_id='{"repeats": 1, "level": 0}',
-                    seed=0,
-                    additional_info=None)
-    assert intensifier.get_mean_level_cost(run_history=run_history, run_key=run_key) == pytest.approx(6)
-
-    # And then one last instance
-    intensifier.jobs_queue.mark_completed(config=config1, instance_id=2)
-    run_history.add(config=config1, cost=3, time=2,
-                    status=StatusType.SUCCESS, instance_id='{"repeats": 2, "level": 0}',
-                    seed=0,
-                    additional_info=None)
-    assert intensifier.get_mean_level_cost(run_history=run_history, run_key=run_key) == pytest.approx(5)
-
-
 def test_ensembleintensification_get_ensemble_members(intensifier, challengers):
     run_history = RunHistory()
     config1 = challengers.pop(0)
@@ -494,7 +470,8 @@ def test_ensembleintensification_get_ensemble_members(intensifier, challengers):
                     status=StatusType.SUCCESS, instance_id='{"repeats": 1, "level": 0}',
                     seed=0,
                     additional_info=None)
-    assert intensifier.get_ensemble_members(run_history=run_history) == [(0.6, 1, config3), (0.8, 0, config2)]
+    assert intensifier.get_ensemble_members(
+        run_history=run_history) == [(0.6, 1, config3), (0.8, 0, config2)]
 
     # An amazing configuration should be first in the list!
     # Notice that we only track 2 incumbents
@@ -505,7 +482,8 @@ def test_ensembleintensification_get_ensemble_members(intensifier, challengers):
                     seed=0,
                     additional_info=None)
     intensifier.jobs_queue.mark_completed(config=config4, instance_id=0)
-    assert intensifier.get_ensemble_members(run_history=run_history) == [(0.1, 0, config4), (0.6, 1, config3)]
+    assert intensifier.get_ensemble_members(
+        run_history=run_history) == [(0.1, 0, config4), (0.6, 1, config3)]
 
 
 def test_ensembleintensification_process_results(intensifier, challengers):
@@ -518,7 +496,8 @@ def test_ensembleintensification_process_results(intensifier, challengers):
         for i in range(3):
             intensifier.jobs_queue.mark_completed(config=config, instance_id=i)
             run_history.add(config=config, cost=5, time=2,
-                            status=StatusType.SUCCESS, instance_id='{"repeats": ' + str(i) + ', "level": 0}',
+                            status=StatusType.SUCCESS,
+                            instance_id='{"repeats": ' + str(i) + ', "level": 0}',
                             seed=0,
                             additional_info=None)
 
@@ -633,7 +612,8 @@ def test_ensembleintensification_process_results(intensifier, challengers):
     assert intensifier.maxE == 3
 
 
-def test_ensembleintensification_get_current_max_instance_id_of_incumbents(intensifier, challengers):
+def test_ensembleintensification_get_current_max_instance_id_of_incumbents(
+        intensifier, challengers):
     run_history = RunHistory()
     config1 = challengers.pop(0)
     config2 = challengers.pop(0)
@@ -641,7 +621,8 @@ def test_ensembleintensification_get_current_max_instance_id_of_incumbents(inten
         for i in range(3):
             intensifier.jobs_queue.mark_completed(config=config, instance_id=i)
             run_history.add(config=config, cost=5, time=2,
-                            status=StatusType.SUCCESS, instance_id='{"repeats": ' + str(i) + ', "level": 0}',
+                            status=StatusType.SUCCESS,
+                            instance_id='{"repeats": ' + str(i) + ', "level": 0}',
                             seed=0,
                             additional_info=None)
     ensemble_members = intensifier.get_ensemble_members(run_history)
@@ -668,7 +649,8 @@ def test_ensembleintensification_get_current_max_instance_id_of_incumbents(inten
         additional_info=None,
     )
 
-    assert intensifier.get_current_max_instance_id_of_incumbents(ensemble_members, result, run_info) == 2
+    assert intensifier.get_current_max_instance_id_of_incumbents(
+        ensemble_members, result, run_info) == 2
 
 
 def test_ensembleintensification_is_new_configuration(intensifier, challengers):
@@ -693,7 +675,8 @@ def test_ensembleintensification_completed_iteration(intensifier, challengers):
         for i in range(3):
             intensifier.jobs_queue.mark_completed(config=config, instance_id=i)
             run_history.add(config=config, cost=5, time=2,
-                            status=StatusType.SUCCESS, instance_id='{"repeats": ' + str(i) + ', "level": 0}',
+                            status=StatusType.SUCCESS,
+                            instance_id='{"repeats": ' + str(i) + ', "level": 0}',
                             seed=0,
                             additional_info=None)
 
@@ -705,7 +688,8 @@ def test_ensembleintensification_completed_iteration(intensifier, challengers):
         for i in range(3):
             intensifier.jobs_queue.mark_completed(config=config, instance_id=3 + i)
             run_history.add(config=config, cost=5, time=2,
-                            status=StatusType.SUCCESS, instance_id='{"repeats": ' + str(i) + ', "level": 1}',
+                            status=StatusType.SUCCESS,
+                            instance_id='{"repeats": ' + str(i) + ', "level": 1}',
                             seed=0,
                             additional_info=None)
 

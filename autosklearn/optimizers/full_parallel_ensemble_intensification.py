@@ -1,26 +1,26 @@
+import json
 import logging
 import typing
 from enum import Enum
-import json
 
 import numpy as np
 
-from smac.stats.stats import Stats
-from smac.utils.constants import MAXINT
 from smac.configspace import Configuration
-from smac.runhistory.runhistory import (
-    RunInfo,
-    RunHistory,
-    RunValue,
-    RunKey,
-    StatusType
-)
-from smac.utils.io.traj_logging import TrajLogger
 from smac.intensification.abstract_racer import (
     AbstractRacer,
     RunInfoIntent,
 )
 from smac.optimizer.epm_configuration_chooser import EPMChooser
+from smac.runhistory.runhistory import (
+    RunHistory,
+    RunInfo,
+    RunKey,
+    RunValue,
+    StatusType
+)
+from smac.stats.stats import Stats
+from smac.utils.constants import MAXINT
+from smac.utils.io.traj_logging import TrajLogger
 
 
 class MaxNumberChallengersReached(Exception):
@@ -28,15 +28,23 @@ class MaxNumberChallengersReached(Exception):
     This exception is triggered when we try to run more challengers
     than the maximum allowed number of challengers
 
-    Can only happen when only_intensify_members_repetitions==True
+    Ensemble intensification toggles between searching for new
+    configurations and making the best ones more robust. When provided
+    with the argument 'only_intensify_members_repetitions'==True
+    then we do not search for more than 'min_chall' configurations.
+    Then if all 'min_chall' are in the max instance, this exception
+    is raised to stop scheduling new jobs.
     """
     pass
 
 
 class EnsembleIntensifierStage(Enum):
-    """Class to define different stages of intensifier"""
+    """Class to define different stages of intensifier
+        Ensemble intensifier toggles between searching for new
+        configurations (RUN_NEW_CHALLENGER) and intensifying the best
+        ones (INTENSIFY_MEMBERS_REPETITIONS)
+    """
     RUN_NEW_CHALLENGER = 0
-    # We toggle between RUN_NEW_CHALLENGER and investing resources in more repetitions
     INTENSIFY_MEMBERS_REPETITIONS = 1
 
 
@@ -45,16 +53,23 @@ class PrioritizedJobsQueueWithDependencies:
     Implements a container of jobs, that are dispatched based on a priority
     provided by the user. In case of ties, the provided cost is used to determine
     which job has more priority. Lower (priority, cost) is more urgent.
+
+    Attributes
+    ----------
+    fidelities_as_individual_models: bool
+        Whether repetitions can run in parallel or not
+    level_transition_ids: List[int]
+        In which instance ids, we have a level transition
+    maxE: (int)
+        How many incumbents are currently being tracked
     """
     def __init__(self, fidelities_as_individual_models: bool,
                  level_transition_ids: typing.List[int],
                  maxE: int,
-                 fast_track_level_transition_to_max_repeat: bool = False,
                  ) -> None:
         self.fidelities_as_individual_models = fidelities_as_individual_models
         self.level_transition_ids = level_transition_ids
         self.maxE = maxE
-        self.fast_track_level_transition_to_max_repeat = fast_track_level_transition_to_max_repeat
         # ==============
         # Jobs supported
         # ==============
@@ -111,7 +126,8 @@ class PrioritizedJobsQueueWithDependencies:
         # + done
         # + scheduled
         runnable_jobs = []
-        for config, instance_id in [job for job, status in self.jobs.items() if status == 'runnable']:
+        for config, instance_id in [job for job, status in self.jobs.items()
+                                    if status == 'runnable']:
             if instance_id > 0:
 
                 # =====================
@@ -129,7 +145,8 @@ class PrioritizedJobsQueueWithDependencies:
                         # the higher level, lower repetition define the base models
                         or (instance_id - 1) in self.level_transition_ids
                     ):
-                        if any([self.jobs[(config, prev)] != 'done' for prev in range(instance_id)]):
+                        if any([self.jobs[(config, prev)] != 'done'
+                                for prev in range(instance_id)]):
                             continue
 
                     # We cannot run instance_id unless every lower level repetition=0
@@ -152,24 +169,16 @@ class PrioritizedJobsQueueWithDependencies:
                 # allow a very good configuration found at instance 0 to quickly
                 # reach the highest instance
 
-                lower_level_count = len([self.jobs[(config, inst)] for config, inst in self.jobs
-                                         if inst == (instance_id - 1) and self.jobs[(config, inst)] == 'done'])
-                if not self.fast_track_level_transition_to_max_repeat and lower_level_count < self.maxE:
+                lower_level_count = len([self.jobs[(config, inst)]
+                                         for config, inst in self.jobs
+                                         if inst == (instance_id - 1)
+                                         and self.jobs[(config, inst)] == 'done'])
+                if lower_level_count < self.maxE:
                     # At any time, going to instance + 1 means
                     # that there need to be self.maxE instances
                     # completed. Even if scheduled, we might not have
                     # enough ensemble members as desired if we allow
                     # greedy level transition
-                    continue
-                elif (
-                    self.fast_track_level_transition_to_max_repeat
-                    and lower_level_count < self.maxE
-                    and instance_id <= min(self.level_transition_ids)
-                ):
-                    # At the base level, we want a progressive transition. First
-                    # repeat 0, then repeat 1 and so on.
-                    # Nevertheless, on level=1 we want to jump fast to the highest
-                    # repetition, so it is used in ensemble selection
                     continue
             runnable_jobs.append((config, instance_id))
         return runnable_jobs
@@ -317,7 +326,8 @@ class EnsembleIntensification(AbstractRacer):
     rng : np.random.RandomState
     instances : typing.List[str]
         list of all instance ids.
-        We expect a list of dictionaries that indicate repetitions/folds and levels to intensify a configuration
+        We expect a list of dictionaries that indicate repetitions/folds and
+        levels to intensify a configuration
         For example:
         [{'repeats': 0, 'level': 1}, ..., {'repeats': 4, 'level': 2}]
     instance_specifics : typing.Mapping[str,np.ndarray]
@@ -338,47 +348,43 @@ class EnsembleIntensification(AbstractRacer):
         no configuration is repeated not it's stacking level is increased. As soon as min_chall
         configurations are available, we start repeating the configurations with lower cost
     maxE : int
-        Maximum number of incumbents to track. Ideally, these incumbents can be used by a post ensembling
-        procedure, for example ensemble selection. maxE configurations are optimized to the last intance
-        provided, i.e., instances[-1]. When this happens, we complete an interation.
-    performance_threshold_to_intensify_new_config: float
-        maxE incumbents are tracked, and only maxE elements are intensified. The works performer from this
-        maxE incumbents is said to have performance cost_worst. Only when if a new configuration with better
-        performance that cost_worst is found, such configuration is intensified. This can be relaxed with
-        performance_threshold_to_intensify_new_config which is multiplied by cost_worst, to allow proactive
-        intensification of configurations. In practice, we found that setting this variable to 1.0 (strictly
+        Maximum number of incumbents to track. Ideally, these incumbents can be used
+        by a post ensembling procedure, for example ensemble selection. maxE configurations
+        are optimized to the last intance provided, i.e., instances[-1].
+        When this happens, we complete an interation.
+    performance_threshold_lower_bound: float
+        maxE incumbents are tracked, and only maxE elements are intensified.
+        The works performer from this maxE incumbents is said to have performance cost_worst.
+        Only when if a new configuration with better performance that cost_worst is found,
+        such configuration is intensified. This can be relaxed with
+        performance_threshold_lower_bound which is multiplied by cost_worst,
+        to allow proactive intensification of configurations.
+        In practice, we found that setting this variable to 1.0 (strictly
         better performance is found) is sufficient.
     dynamic_maxE_increase: int
-        When all maxE incumbents are completely optimized, that is, all instances in self.instances have been
-        ran for maxE elements, maxE is increased by a factor of self.dynamic_maxE_increase to start a new iteration
+        When all maxE incumbents are completely optimized, that is, all instances
+        in self.instances have been ran for maxE elements, maxE is increased
+        by a factor of self.dynamic_maxE_increase to start a new iteration
     seed: int
         In case the run is deterministic, this provided seed is used
     fidelities_as_individual_models: bool
-        If True, all repetitions are treated as independent when possible. Transition from level0->level1,
-        requires all previous repetitions to be done. Also level=N+1 repetition=0 has to finish, before
-        we launch level=N+1 repetition=1 as the first repetition define the base models for the stacking.
+        If True, all repetitions are treated as independent when possible.
+        Transition from level0->level1, requires all previous repetitions to be done.
+        Also level=N+1 repetition=0 has to finish, before we launch level=N+1
+        repetition=1 as the first repetition define the base models for the stacking.
     only_intensify_members_repetitions: bool
         If provided, we do not toggle between finding a new configuration and repeating
-        old ones
+        old ones. Up to min_chall configurations are extracted from the provided
+        initial challengers or the model, and then only this min_chall configurations
+        are repeated and stacked together.
     fast_track_performance_criteria (str):
-        One of 'common_instances' (a new configuration is run on all active instances if the performance on the common
-        instances as the current incumbent list is as good as the worst incumbent tracked) or 'lower_bound' (a new
-        configuration is run on all active instance only if the new configuration loss is lower than the best incumbent)
+        One of 'common_instances' (a new configuration is run on all active instances
+        if the performance on the common instances as the current incumbent list is
+        as good as the worst incumbent tracked) or 'lower_bound' (a new configuration
+        is run on all active instance only if the new configuration
+        loss is lower than the best incumbent)
     fidelity: (str):
         One of ['repeats', 'folds']. What type of fidelity to intensify
-    fold_splits (Optional[List[int]]):
-        This arguments is used to determine the parallel dependencies of the fidelities. For example:
-            + If fidelity==repeat: a level transition, i.e. {'level': 1, 'repeat': 4}->{'level': 2, 'repeat': 0}
-              requires that all previous instances to repeat==4 are completed before actually running the instance
-              {'level': 2, 'repeat': 0}.
-            + If fidelity==folds, not only gating a level transition is imperative, but we must also build repetitions.
-              In this case, fold_splits contains how many folds are to be run. For example [3, 5, 10] means that we
-              perform 3 repetitions each with 3, 5, 10 folds.
-    fast_track_level_transition_to_max_repeat: bool
-        A level transition that just reached repeat 0 will take a important time to reach max repetition. This
-        intensifier by default only allow progressive repetitions increment. As ensemble selection only stack
-        max repetitions, we might want to allow a configuration that just did repetition zero on a higher
-        level to reach max repeat fast.
     """
 
     def __init__(
@@ -396,15 +402,13 @@ class EnsembleIntensification(AbstractRacer):
         maxE: int = 50,
         min_chall: int = 1,
         adaptive_capping_slackfactor: float = 1.2,
-        performance_threshold_to_intensify_new_config: float = 1.00,
+        performance_threshold_lower_bound: float = 1.00,
         dynamic_maxE_increase: float = 1.5,
         seed: int = 0,
         fidelities_as_individual_models: bool = False,
         only_intensify_members_repetitions: bool = False,
         fast_track_performance_criteria: str = 'common_instances',
         fidelity: str = 'repeats',
-        fold_splits: typing.Optional[typing.List[int]] = None,
-        fast_track_level_transition_to_max_repeat: bool = False,
     ):
         # We track instances as if they were numeric ordered objects.
         # We use the below dictionaries as a helped to convert from ordered instances
@@ -415,8 +419,10 @@ class EnsembleIntensification(AbstractRacer):
         try:
             self.lowest_level = min([json.loads(instance)['level'] for instance in instances])
             self.highest_level = max([json.loads(instance)['level'] for instance in instances])
-            self.lowest_fidelity = min([json.loads(instance)[self.fidelity] for instance in instances])
-            self.highest_fidelity = max([json.loads(instance)[self.fidelity] for instance in instances])
+            self.lowest_fidelity = min([json.loads(instance)[self.fidelity]
+                                        for instance in instances])
+            self.highest_fidelity = max([json.loads(instance)[self.fidelity]
+                                         for instance in instances])
         except Exception as e:
             raise ValueError(f"Unsupported format for instances. Ran into {e}. while "
                              "determining the maximum repetition and level from the instances. "
@@ -448,9 +454,8 @@ class EnsembleIntensification(AbstractRacer):
         self.run_limit = run_limit
         self.maxE = maxE
         self.use_ta_time_bound = use_ta_time_bound
-        self.performance_threshold_to_intensify_new_config = performance_threshold_to_intensify_new_config
+        self.performance_threshold_lower_bound = performance_threshold_lower_bound
         self.only_intensify_members_repetitions = only_intensify_members_repetitions
-        self.fast_track_level_transition_to_max_repeat = fast_track_level_transition_to_max_repeat
         self.fast_track_performance_criteria = fast_track_performance_criteria
         if self.fast_track_performance_criteria not in ['common_instances', 'lower_bound']:
             raise ValueError(self.fast_track_performance_criteria)
@@ -459,7 +464,8 @@ class EnsembleIntensification(AbstractRacer):
         if self.run_limit < 1:
             raise ValueError("run_limit must be > 1")
         if self.run_obj_time:
-            raise NotImplementedError('Ensemble Intensification is only supported for Quality setting.')
+            raise NotImplementedError('Ensemble Intensification is only '
+                                      'supported for Quality setting.')
 
         self.elapsed_time = 0.
         self.stage = EnsembleIntensifierStage.RUN_NEW_CHALLENGER
@@ -470,32 +476,12 @@ class EnsembleIntensification(AbstractRacer):
         # Track the jobs that most be launched using a priority queue with dependencies
         level_transition_ids = [instance_id for instance_id in self.id2instance.keys()
                                 if self.is_level_transition(self.id2instance[instance_id])]
-                                #if (
-                                #    self.is_level_transition(self.id2instance[instance_id])
-                                #    # In case we have individual models, the highest repeat
-                                #    # should be the average of all the other repeats
-                                #    or self.is_highest_fidelity(self.id2instance[instance_id]))
-                                #]
-        if fold_splits is not None:
-            if fidelity == 'repeats':
-                raise NotImplementedError(fidelity)
-            folds_with_complete_oof = []
-            for i, fold in enumerate(fold_splits):
-                if i > 0:
-                    folds_with_complete_oof.append(fold - 1 + sum([fold_splits[f] for f in range(i)]))
-                else:
-                    folds_with_complete_oof.append(fold - 1)
-            for instance in self.instances:
-                fold = json.loads(instance)['fold']
-                if fold in folds_with_complete_oof and self.instance2id[instance] not in level_transition_ids:
-                    level_transition_ids.append(self.instance2id[instance])
         level_transition_ids.sort()
 
         self.jobs_queue = PrioritizedJobsQueueWithDependencies(
             fidelities_as_individual_models=self.fidelities_as_individual_models,
             maxE=self.maxE,
             level_transition_ids=level_transition_ids,
-            fast_track_level_transition_to_max_repeat=self.fast_track_level_transition_to_max_repeat,
         )
 
         self.logger.info(
@@ -575,7 +561,8 @@ class EnsembleIntensification(AbstractRacer):
             raise ValueError(
                 f"While at stage {self.stage} proposed to run {instance_id}/{self.id2instance}."
                 "This internal error means that the instances were not properly decoded. We expect "
-                "instances to be something like => [{'" + str(self.fidelity) + "': 0, 'level': 0}, ...]."
+                "instances to be something like "
+                "=> [{'" + str(self.fidelity) + "': 0, 'level': 0}, ...]."
             )
 
         if self.deterministic:
@@ -603,7 +590,7 @@ class EnsembleIntensification(AbstractRacer):
         This functions is the heart of the intensification algorithm and determines what
         to run next, based on a state machine that:
             + Toggles between searching for new configurations and intensifying
-              the repetitions/stack elvel
+              the repetitions/stack level
             + If a promising configuration is found at a lower repetition, it is put on a
               fast track to reach a high repetition level. This include stack level transitions.
 
@@ -639,14 +626,15 @@ class EnsembleIntensification(AbstractRacer):
 
         elif self.stage == EnsembleIntensifierStage.INTENSIFY_MEMBERS_REPETITIONS:
 
-
             # We have to enrich the ensemble members with the information from the
             # priority queue. ensemble_members only contains success runs, yet for
             # scheduling, we have to consider repetitions that have been already
             # scheduled --> mutate the list to account for this
             ensemble_members = self.get_ensemble_members(run_history=run_history)
-            ensemble_members = [(loss, max(rep, self.jobs_queue.get_highest_planned_instance(cconfig)), cconfig)
-                                for loss, rep, cconfig in ensemble_members]
+            ensemble_members = [
+                (loss, max(rep, self.jobs_queue.get_highest_planned_instance(cconfig)), cconfig)
+                for loss, rep, cconfig in ensemble_members
+            ]
 
             repetitions = [rep for loss, rep, cconfig in ensemble_members]
 
@@ -656,18 +644,28 @@ class EnsembleIntensification(AbstractRacer):
             if len(repetitions) > 0:
                 max_repetition = max(repetitions)
 
+            #########
+            # Line #6: all([πi==πhighestforiinlength(−→Θinc)])
+            if (
+                self.completed_iteration(ensemble_members)
+                and not self.only_intensify_members_repetitions
+            ):
+                self.maxE = int(self.dynamic_maxE_increase * self.maxE)
+                self.logger.info(f"New Iteration: self.maxE->{self.maxE}")
+                self.stage == EnsembleIntensifierStage.RUN_NEW_CHALLENGER
+                return
             ##########
-            # Line #8: if all([πi == π curr,max for i in length(−→Θinc)]) then
-            if max_repetition is not None and all(
+            # Line #8: all([πi == π curr,max for i in length(−→Θinc)]) then
+            elif max_repetition is not None and all(
                     [r == max_repetition for r in repetitions]
             ) and max_repetition < max(list(self.id2instance.keys())):
                 ##########
-                # Line #9:
+                # Line #9: all([πi==πcurr,max for i in length(−→Θinc)])
                 challenger = ensemble_members[0][2]
                 instance_id = ensemble_members[0][1] + 1
             elif max_repetition is not None and any([r < max_repetition for r in repetitions]):
                 ##########
-                # Line #10:
+                # Line #10: else
                 not_in_higest_fidelity = [member for member in ensemble_members
                                           if member[1] < max_repetition]
 
@@ -675,12 +673,12 @@ class EnsembleIntensification(AbstractRacer):
                 challenger = not_in_higest_fidelity[0][2]
                 instance_id = not_in_higest_fidelity[0][1] + 1
             else:
-                ##########
-                # Line #4:
-                # If reached this point, it means that all incumbents are in the
-                # highest instance available. Likely this will trigger a new interation
-                # in which self.maxE is going to be increased, and new configurations
-                # should be searched.
+                # This case is unlikely to happen as there will always be
+                # configurations to intensify. Only if there is a big pool
+                # of workers, and long running configurations there demand
+                # of jobs is higher than the availability of configurations
+                # to intensify. The safe choice in this case is to search
+                # for a new configuration
                 challenger = self._next_challenger(challengers=challengers,
                                                    chooser=chooser,
                                                    run_history=run_history,
@@ -736,7 +734,7 @@ class EnsembleIntensification(AbstractRacer):
         if len(total_configs_scheduled) < self.min_chall:
             # Not enough challengers to start intensification of repetitions
             self.stage = EnsembleIntensifierStage.RUN_NEW_CHALLENGER
-            reason = f"total_configs_scheduled={len(total_configs_scheduled)} < min_chall={self.min_chall}"
+            reason = f"Total={len(total_configs_scheduled)} < min_chall={self.min_chall}"
         elif self.only_intensify_members_repetitions:
             # If this flag was provided, we only remain intensifying repetitions
             # and no new challengers are proposed
@@ -746,7 +744,8 @@ class EnsembleIntensification(AbstractRacer):
             if self.stage == EnsembleIntensifierStage.RUN_NEW_CHALLENGER:
 
                 instances = [inst for loss, inst, config in ensemble_members]
-                configs_on_max = len([inst for inst in instances if inst == max(list(self.id2instance))])
+                configs_on_max = len([inst for inst in instances
+                                      if inst == max(list(self.id2instance))])
 
                 # In case we have parallel runs, they should also be considered here
                 running_configurations_on_max = len([inst for config, inst in
@@ -756,20 +755,14 @@ class EnsembleIntensification(AbstractRacer):
                                                      if inst == max(list(self.id2instance))])
                 configs_on_max += running_configurations_on_max
 
-                if not self.fast_track_level_transition_to_max_repeat:
-                    # Notice we only transition from:
-                    # RUN_NEW_CHALLENGER->INTENSIFY_MEMBERS_REPETITIONS
-                    # if there is room to do so
-                    if len(ensemble_members) < self.maxE or configs_on_max < self.maxE:
-                        # We do not have all members yet or not all are on highest budget
-                        # so we toggle between looking for new configs and repetition intensification
-                        self.stage = EnsembleIntensifierStage.INTENSIFY_MEMBERS_REPETITIONS
-                        reason = f"ES={len(ensemble_members)}/Config_max={configs_on_max} < maxE={self.maxE}"
-                else:
-                    # We just toggle. The if above should not matter as this situation
-                    # is checked earlier in this procedure. Consider removing
+                # Notice we only transition from:
+                # RUN_NEW_CHALLENGER->INTENSIFY_MEMBERS_REPETITIONS
+                # if there is room to do so
+                if len(ensemble_members) < self.maxE or configs_on_max < self.maxE:
+                    # We do not have all members yet or not all are on highest budget
+                    # so we toggle between looking for new configs and repetition intensification
                     self.stage = EnsembleIntensifierStage.INTENSIFY_MEMBERS_REPETITIONS
-                    reason = f"ES={len(ensemble_members)}/Config_max={configs_on_max} < maxE={self.maxE}"
+                    reason = f"ES={len(ensemble_members)}/max={configs_on_max} < maxE={self.maxE}"
             elif self.stage == EnsembleIntensifierStage.INTENSIFY_MEMBERS_REPETITIONS:
                 self.stage = EnsembleIntensifierStage.RUN_NEW_CHALLENGER
             else:
@@ -779,11 +772,12 @@ class EnsembleIntensification(AbstractRacer):
         representation = "\n".join(
             [str((loss, i, self.id2instance[i], c.config_id)) for loss, i, c in ensemble_members]
         )
-        self.logger.info("\nTransition {} \n{}->{} for {}/{}\n(loss, instance_id, instance, config_id): \n{}".format(
-            reason,
+        self.logger.info(f"\nTransition {reason}")
+        self.logger.info("\n{}->{} for {}/{}\n(loss, instance_id, instance, config_id):\n{}".format(
             old_stage,
             self.stage,
-            challenger.config_id if (challenger is not None and challenger.config_id is not None) else hash(challenger),
+            challenger.config_id if (challenger is not None and challenger.config_id is not None)
+            else hash(challenger),
             instance_id,
             representation,
         ))
@@ -795,44 +789,47 @@ class EnsembleIntensification(AbstractRacer):
         """
         Returns true if the provided run_key corresponds to the
         highest instance available for a given configuration
-        """
-        max_instance = max([self.instance2id[key.instance_id] for key, value in run_history.data.items()
-                            # This is done for warm starting runhistory
-                            if key.instance_id in self.instance2id and key.config_id == run_key.config_id
-                            and value.status == StatusType.SUCCESS])
-        return max_instance == self.instance2id[run_key.instance_id]
-
-    def get_mean_level_cost(self, run_history: RunHistory, run_key: RunKey) -> float:
-        """
-        Return the mean cost of the instances bounded to a given level
-
         Parameters
         ----------
+        run_history : RunHistory
+            stores all runs we ran so far
         run_key: RunKey
-            A named tuple with config, instance, seed, budgets info
-
-        run_history: RunHistory
-            A history of all the completed runs
+            A named tuple that indicates the configuration/seed/budget context of a run
 
         Returns
         -------
-        float:
-            Mean cost for all successful instances of a given config
-            in a given level
+        bool:
+            If this is the highest instance of a given configuration
         """
-        config = run_history.ids_config[run_key.config_id]
-        level = json.loads(run_key.instance_id)['level']
-        inst_seed_budgets = list(dict.fromkeys(run_history.get_runs_for_config(config, only_max_observed_budget=True)))
-
-        # Consider only the current stacking level
-        inst_seed_budgets = [inst_seed_budget for inst_seed_budget in inst_seed_budgets
-                             if json.loads(inst_seed_budget.instance)['level'] == level]
-        return run_history.average_cost(config, inst_seed_budgets)
+        max_instance = max([self.instance2id[key.instance_id]
+                            for key, value in run_history.data.items()
+                            # This is done for warm starting runhistory
+                            if key.instance_id in self.instance2id
+                            and key.config_id == run_key.config_id
+                            and value.status == StatusType.SUCCESS])
+        return max_instance == self.instance2id[run_key.instance_id]
 
     def get_ensemble_members(
         self,
         run_history: RunHistory,
     ) -> typing.List[typing.Tuple[float, int, Configuration]]:
+        """
+        Implements Line #24 of the Algorithm
+        Θinc:= [θπii,θπjj,...]←GetConfigSortedbyCostInstance(R)[:maxE]
+
+        It extracts from the run_history, a list of loss/instance/config
+        that is sorted based on performance
+
+        Parameters
+        ----------
+        run_history : RunHistory
+            stores all runs we ran so far
+
+        Returns
+        -------
+        List[Tuple[float, int, Configuration]]:
+            A list of tuples that look like (loss, int, Configuration)
+        """
 
         ensemble_members = []
         for run_key, run_value in run_history.data.items():
@@ -847,8 +844,7 @@ class EnsembleIntensification(AbstractRacer):
                 ensemble_members.append(
                     (
                         # Cost for all repetitions at a given level
-                        run_value.cost if not self.fidelities_as_individual_models
-                        else self.get_mean_level_cost(run_history, run_key),
+                        run_value.cost,
 
                         # Instance id
                         self.instance2id[run_key.instance_id],
@@ -931,19 +927,25 @@ class EnsembleIntensification(AbstractRacer):
             if self.fast_track_performance_criteria == 'lower_bound':
                 if len(ensemble_members) > 0:
                     lower_bound_performance = max([loss for loss, rep, config in ensemble_members]
-                                                  ) * self.performance_threshold_to_intensify_new_config
+                                                  ) * self.performance_threshold_lower_bound
                 if json.loads(run_info.instance)['level'] > self.lowest_level:
-                    lower_level_cost = self.get_lower_level_cost(run_history=run_history, run_info=run_info)
+                    lower_level_cost = self.get_lower_level_cost(
+                        run_history=run_history, run_info=run_info)
                     if lower_level_cost is not None:
                         # We can have a None lower level cost in the case of interleaved
                         # configurations. For example, when we have r1l1 and then r1l2,
                         # we will not have a lower level cost for r1l2
                         lower_bound_performance = lower_level_cost
 
-            elif self.fast_track_performance_criteria == 'common_instances' and len(ensemble_members) > 0:
+            elif (
+                self.fast_track_performance_criteria == 'common_instances'
+                and len(ensemble_members) > 0
+            ):
                 incs_runs = [runs for cost, instanceid, inc in ensemble_members
-                             for runs in run_history.get_runs_for_config(inc, only_max_observed_budget=True)]
-                chall_runs = run_history.get_runs_for_config(run_info.config, only_max_observed_budget=True)
+                             for runs in run_history.get_runs_for_config(
+                                 inc, only_max_observed_budget=True)]
+                chall_runs = run_history.get_runs_for_config(
+                    run_info.config, only_max_observed_budget=True)
                 to_compare_runs = set(incs_runs).intersection(chall_runs)
 
                 # Be as good as the worst incumbent on the common instances
@@ -952,7 +954,8 @@ class EnsembleIntensification(AbstractRacer):
                     inc_perf = max([run_history.average_cost(inc, to_compare_runs)
                                     for cost, instanceid, inc in ensemble_members
                                     if to_compare_runs.issubset(
-                                        set(run_history.get_runs_for_config(inc, only_max_observed_budget=True)))])
+                                        set(run_history.get_runs_for_config(
+                                            inc, only_max_observed_budget=True)))])
 
                     if chal_perf > inc_perf:
                         # The lower bound performance is by default result.cost
@@ -961,14 +964,6 @@ class EnsembleIntensification(AbstractRacer):
                         lower_bound_performance = -np.inf
                     else:
                         lower_bound_performance = inc_perf
-                else:
-                    # This case can happen when self.fast_track_level_transition_to_max_repeat==True
-                    # So a very good configuration is pioneer in this instance_id, so we
-                    # keep running it iff the performance is as good as the worst incumbent
-                    if len(ensemble_members) > 0:
-                        lower_bound_performance = max(
-                            [loss for loss, rep, config in ensemble_members]
-                        ) * self.performance_threshold_to_intensify_new_config
 
         # If this is a new configuration, with promising results
         # we want to schedule more repetitions for it, so that it reaches
@@ -1037,11 +1032,14 @@ class EnsembleIntensification(AbstractRacer):
         self._ta_time += result.time
         self.num_run += 1
 
-        # Check if an iteration is done, which means all incumbents are at the highest
-        # instance available. If so, we increase the number of tracked incumbents
-        # Notice that there is no dynamic increase when only intensifying repetitions
-        # as we will have to do BO search to fill up the gaps
-        if self.completed_iteration(ensemble_members) and not self.only_intensify_members_repetitions:
+        #########
+        # Line #6: all([πi==πhighestforiinlength(−→Θinc)])
+        # This line also runs in the priority queue. We do this here
+        # also to proactively mark an iteration as done
+        if (
+            self.completed_iteration(ensemble_members)
+            and not self.only_intensify_members_repetitions
+        ):
             self.maxE = int(self.dynamic_maxE_increase * self.maxE)
             self.logger.info(f"New Iteration: self.maxE->{self.maxE}")
             self.iteration_done = True
@@ -1103,7 +1101,10 @@ class EnsembleIntensification(AbstractRacer):
         # Search for the instance_id of the most similar loss
         if index_new_config >= 0:
             # This new config is so good that is on the ensemble members
-            index_of_similar_loss = index_new_config - 1 if index_new_config > 0 else index_new_config + 1
+            if index_new_config > 0:
+                index_of_similar_loss = index_new_config - 1
+            else:
+                index_of_similar_loss = index_new_config + 1
         else:
             index_of_similar_loss = min(range(len(losses)),
                                         key=lambda i: abs(losses[i] - result.cost))
@@ -1250,7 +1251,8 @@ class EnsembleIntensification(AbstractRacer):
                 continue
             if int(instance_dict[self.fidelity]) != highest_fidelity_for_level:
                 continue
-            k = RunKey(run_history.config_ids[run_info.config], instance, run_info.seed, run_info.budget)
+            k = RunKey(run_history.config_ids[run_info.config],
+                       instance, run_info.seed, run_info.budget)
             if k not in run_history.data:
                 # Exit the for loop to trigger the failure
                 break
