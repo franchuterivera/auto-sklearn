@@ -882,7 +882,7 @@ class EnsembleBuilder(object):
         highest_per_run = self.backend.get_map_from_run2repeat(only_max_instance=True)
 
         max_instance = 0
-        if len(mapping) > 0:
+        if len([idx for level, seed, idx, budget, instance in mapping.keys() if idx != 1]) > 0:
             # Take the maximum repetition so far
             max_instance = max([len(repeats) for ((level, seed, num_run, budget, instance), repeats)
                                 in mapping.items() if num_run != 1])

@@ -20,7 +20,7 @@ import numpy as np
 import json
 
 
-def get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_as_individual_models):
+def get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_as_individual_models, only_intensify_members_repetitions):
 
     def get_smac_object(
         scenario_dict,
@@ -57,7 +57,6 @@ def get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_a
 
         return SMAC4AC(
             runhistory=runhistory,
-            smbo_kwargs={'max_budget_seen_per_config': True},
             scenario=scenario,
             rng=seed,
             tae_runner=ta,
@@ -70,6 +69,7 @@ def get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_a
             intensifier_kwargs={
                 'min_chall': min_challengers,
                 'maxE': max_ensemble_members,
+                'only_intensify_members_repetitions': only_intensify_members_repetitions,
                 'fidelities_as_individual_models': fidelities_as_individual_models,
             },
             n_jobs=n_jobs,
@@ -109,10 +109,11 @@ if __name__ == "__main__":
     max_ensemble_members = 4
     min_challengers = 6
     enable_heuristic = True
+    only_intensify_members_repetitions = False
     automl = autosklearn.classification.AutoSklearnClassifier(
         n_jobs=2,
         memory_limit=4096,
-        time_left_for_this_task=300,
+        time_left_for_this_task=100,
         tmp_folder='/tmp/autosklearn_classification_example_tmp',
         output_folder='/tmp/autosklearn_classification_example_out',
         resampling_strategy='intensifier-cv',
@@ -127,11 +128,12 @@ if __name__ == "__main__":
                                        'stack_at_most': max_ensemble_members,
                                        'max_ensemble_members': max_ensemble_members,
                                        'repeats': repeats,
+                                       'only_intensify_members_repetitions': only_intensify_members_repetitions,
                                        'fidelities_as_individual_models': fidelities_as_individual_models,
                                        'train_all_repeat_together': train_all_repeat_together,
                                        'enable_median_rule_prunning': enable_median_rule_prunning,
                                        },
-        get_smac_object_callback=get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_as_individual_models),
+        get_smac_object_callback=get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_as_individual_models, only_intensify_members_repetitions),
         seed=42,
     )
     #automl.fit(X_train, y_train, X_test, y_test, dataset_name='breast_cancer')
