@@ -83,9 +83,9 @@ if __name__ == "__main__":
     # Data Loading
     # ============
 
-    X, y = sklearn.datasets.load_breast_cancer(return_X_y=True)
+    #X, y = sklearn.datasets.load_breast_cancer(return_X_y=True)
     #data_id = np.random.choice([61, 1063, 54])
-    #X, y = sklearn.datasets.fetch_openml(data_id=13, return_X_y=True, as_frame=False)
+    X, y = sklearn.datasets.fetch_openml(data_id=3, return_X_y=True, as_frame=False)
     #X, y = sklearn.datasets.fetch_openml(data_id=54, return_X_y=True, as_frame=False)
     # adult
     #X, y = sklearn.datasets.fetch_openml(data_id=1590, return_X_y=True, as_frame=False)
@@ -101,19 +101,21 @@ if __name__ == "__main__":
     # =========================
 
     level = 2
-    k_folds = [2, 2, 2]
+    k_folds = [2, 2, 3]
     repeats = len(k_folds)
     train_all_repeat_together = False
     fidelities_as_individual_models = True
     enable_median_rule_prunning = True
-    max_ensemble_members = 4
-    min_challengers = 6
+    max_ensemble_members = 5
+    min_challengers = 5
     enable_heuristic = True
     only_intensify_members_repetitions = False
+    stack_based_on_log_loss = True
     automl = autosklearn.classification.AutoSklearnClassifier(
-        n_jobs=2,
+        n_jobs=4,
         memory_limit=4096,
-        time_left_for_this_task=100,
+        time_left_for_this_task=1000,
+        per_run_time_limit=50,
         tmp_folder='/tmp/autosklearn_classification_example_tmp',
         output_folder='/tmp/autosklearn_classification_example_out',
         resampling_strategy='intensifier-cv',
@@ -127,6 +129,7 @@ if __name__ == "__main__":
                                        'enable_heuristic': enable_heuristic,
                                        'stack_at_most': max_ensemble_members,
                                        'max_ensemble_members': max_ensemble_members,
+                                       'stack_based_on_log_loss': True,
                                        'repeats': repeats,
                                        'only_intensify_members_repetitions': only_intensify_members_repetitions,
                                        'fidelities_as_individual_models': fidelities_as_individual_models,
@@ -134,7 +137,7 @@ if __name__ == "__main__":
                                        'enable_median_rule_prunning': enable_median_rule_prunning,
                                        },
         get_smac_object_callback=get_smac_object_callback(max_ensemble_members, min_challengers, fidelities_as_individual_models, only_intensify_members_repetitions),
-        seed=42,
+        seed=32,
     )
     #automl.fit(X_train, y_train, X_test, y_test, dataset_name='breast_cancer')
     automl.fit(X_train, y_train, dataset_name='breast_cancer')

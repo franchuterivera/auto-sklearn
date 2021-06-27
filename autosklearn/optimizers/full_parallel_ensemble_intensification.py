@@ -690,6 +690,11 @@ class EnsembleIntensification(AbstractRacer):
                     max_number_challenger = max(self.maxE, self.min_chall)
                     num_configs = len(run_history.config_ids)
                     if num_configs > max_number_challenger:
+                        # We redefine ensemble members here, so don't print
+                        # the maximum planned instance, but rather the real
+                        # instance
+                        ensemble_members = self.get_ensemble_members(
+                            run_history=run_history)
                         representation = "\n".join(
                             [str((loss,
                                   i,
