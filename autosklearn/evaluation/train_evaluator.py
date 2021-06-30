@@ -269,6 +269,8 @@ class TrainEvaluator(AbstractEvaluator):
                     'stack_based_on_log_loss', False)
                 stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
                     'stack_tiebreak_w_log_loss', True)
+                stack_bestperfamily = self.resampling_strategy_args.get(
+                    'stack_bestperfamily', True)
                 if stack_at_most is not None and len(identifiers) > int(stack_at_most):
                     modeltypes = [
                         self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
@@ -320,7 +322,9 @@ class TrainEvaluator(AbstractEvaluator):
                     # We want to have the best performer per model,
                     # then fill the rest with top performers
                     # Get the first occurrence in sorted list, that is the best performer
-                    diversity = [identifiers[i_] for i_ in index_first_ocurrence]
+                    diversity = []
+                    if stack_bestperfamily:
+                        diversity = [identifiers[i_] for i_ in index_first_ocurrence]
                     total_remaining = int(stack_at_most) - len(diversity)
                     identifiers = [idx_ for idx_ in identifiers
                                    if idx_ not in diversity][:total_remaining+1] + diversity

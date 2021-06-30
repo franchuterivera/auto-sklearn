@@ -101,20 +101,24 @@ if __name__ == "__main__":
     # =========================
 
     level = 2
-    k_folds = [2, 2, 3]
+    k_folds = [2, 2, 2]
     repeats = len(k_folds)
     train_all_repeat_together = False
     fidelities_as_individual_models = True
     enable_median_rule_prunning = True
     max_ensemble_members = 5
-    min_challengers = 5
-    enable_heuristic = True
+    min_challengers = 8
+    enable_heuristic = False
     only_intensify_members_repetitions = False
-    stack_based_on_log_loss = True
+    stack_based_on_log_loss = False
+    stack_tiebreak_w_log_loss = True
+    ensemble_folds='highest_repeat_trusted'
+    #ensemble_folds='any'
+    stack_bestperfamily = True
     automl = autosklearn.classification.AutoSklearnClassifier(
         n_jobs=4,
         memory_limit=4096,
-        time_left_for_this_task=1000,
+        time_left_for_this_task=1500,
         per_run_time_limit=50,
         tmp_folder='/tmp/autosklearn_classification_example_tmp',
         output_folder='/tmp/autosklearn_classification_example_out',
@@ -123,13 +127,15 @@ if __name__ == "__main__":
         delete_tmp_folder_after_terminate=False,
         max_stacking_level=level,
         stacking_strategy='instances_anyasbase',
-        ensemble_folds='highest_repeat_trusted',
+        ensemble_folds=ensemble_folds,
         resampling_strategy_arguments={'folds': k_folds,
                                        'avg_previous_repeats': True,
                                        'enable_heuristic': enable_heuristic,
                                        'stack_at_most': max_ensemble_members,
+                                       'stack_bestperfamily': stack_bestperfamily,
                                        'max_ensemble_members': max_ensemble_members,
-                                       'stack_based_on_log_loss': True,
+                                       'stack_tiebreak_w_log_loss': stack_tiebreak_w_log_loss,
+                                       'stack_based_on_log_loss': False,
                                        'repeats': repeats,
                                        'only_intensify_members_repetitions': only_intensify_members_repetitions,
                                        'fidelities_as_individual_models': fidelities_as_individual_models,

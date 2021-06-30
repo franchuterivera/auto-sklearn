@@ -64,7 +64,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         random_state: int,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
         pynisher_context: str = 'fork',
-        ensemble_folds: Optional[str] = None,
+        ensemble_folds: Optional[str] = 'highest_repeat_trusted',
     ):
         """ SMAC callback to handle ensemble building
 
@@ -143,7 +143,7 @@ class EnsembleBuilderManager(IncorporateRunResultCallback):
         self.random_state = random_state
         self.logger_port = logger_port
         self.ensemble_folds = ensemble_folds
-        if self.ensemble_folds not in [None, 'highest_repeat_trusted']:
+        if self.ensemble_folds not in [None, 'highest_repeat_trusted', 'any']:
             raise NotImplementedError(self.ensemble_folds)
         self.pynisher_context = pynisher_context
 
@@ -405,7 +405,7 @@ class EnsembleBuilder(object):
         read_at_most: int = 5,
         random_state: Optional[Union[int, np.random.RandomState]] = None,
         logger_port: int = logging.handlers.DEFAULT_TCP_LOGGING_PORT,
-        ensemble_folds: str = None,
+        ensemble_folds: Optional[str] = 'highest_repeat_trusted',
         unit_test: bool = False,
     ):
         """
@@ -912,8 +912,12 @@ class EnsembleBuilder(object):
                     continue
                 to_read[identifier] = {_instance: mtime}
 
-            if len(mapping[(_level, _seed, _num_run, _budget, _instance)]) not in [max_instance,
-                                                                                   max_instance-1]:
+            if (
+                self.ensemble_folds == 'highest_repeat_trusted'
+                and len(mapping[(_level, _seed, _num_run, _budget, _instance)]) not in [
+                    max_instance,
+                    max_instance-1]
+            ):
                 # Only the runs with trusted/denoised predictions should be used
                 continue
 

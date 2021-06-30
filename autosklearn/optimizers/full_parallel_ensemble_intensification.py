@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import typing
 from enum import Enum
 
@@ -647,10 +648,13 @@ class EnsembleIntensification(AbstractRacer):
             #########
             # Line #6: all([πi==πhighestforiinlength(−→Θinc)])
             if (
-                self.completed_iteration(ensemble_members)
+                self.completed_iteration(self.get_ensemble_members(run_history=run_history))
                 and not self.only_intensify_members_repetitions
+                # Multiple cores can call the queue
+                and not self.iteration_done
             ):
-                self.maxE = int(self.dynamic_maxE_increase * self.maxE)
+                self.iteration_done = True
+                self.maxE = math.ceil(self.dynamic_maxE_increase * self.maxE)
                 self.logger.info(f"New Iteration: self.maxE->{self.maxE}")
                 self.stage == EnsembleIntensifierStage.RUN_NEW_CHALLENGER
                 return
@@ -1045,7 +1049,7 @@ class EnsembleIntensification(AbstractRacer):
             self.completed_iteration(ensemble_members)
             and not self.only_intensify_members_repetitions
         ):
-            self.maxE = int(self.dynamic_maxE_increase * self.maxE)
+            self.maxE = math.ceil(self.dynamic_maxE_increase * self.maxE)
             self.logger.info(f"New Iteration: self.maxE->{self.maxE}")
             self.iteration_done = True
 
@@ -1161,7 +1165,7 @@ class EnsembleIntensification(AbstractRacer):
                 allocation
         """
         # ensemble_members is really:
-        if len(ensemble_members) == 0:
+        if len(ensemble_members) == 0 or len(ensemble_members) < self.maxE:
             return False
         instances = [self.id2instance[member[1]] for member in ensemble_members]
         levels = [json.loads(instance)['level'] for instance in instances]

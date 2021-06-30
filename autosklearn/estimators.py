@@ -286,7 +286,7 @@ class AutoSklearnEstimator(BaseEstimator):
         self.load_models = load_models
         self.ensemble_folds = ensemble_folds
         if ensemble_folds not in ['highest_repeat_per_run', 'highest_repeat',
-                                  'highest_repeat_trusted', None]:
+                                  'highest_repeat_trusted', None, 'any']:
             raise ValueError(f"Unsupported {ensemble_folds}")
 
         self.automl_ = None  # type: Optional[AutoML]
