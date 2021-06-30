@@ -42,7 +42,10 @@ from autosklearn.util.backend import Backend
 from autosklearn.util.logging_ import PicklableClientLogger
 import gc
 
-from autosklearn.util.repeated_kfold import RepeatedStratifiedMultiKFold
+from autosklearn.util.repeated_kfold import (
+    RepeatedMultiKFold,
+    RepeatedStratifiedMultiKFold,
+)
 
 
 __all__ = ['TrainEvaluator', 'eval_holdout', 'eval_iterative_holdout',
@@ -271,6 +274,11 @@ class TrainEvaluator(AbstractEvaluator):
                     'stack_tiebreak_w_log_loss', True)
                 stack_bestperfamily = self.resampling_strategy_args.get(
                     'stack_bestperfamily', True)
+
+                if self.datamanager.info['task'] in REGRESSION_TASKS:
+                    stack_tiebreak_w_log_loss = False
+                    stack_based_on_log_loss = False
+
                 if stack_at_most is not None and len(identifiers) > int(stack_at_most):
                     modeltypes = [
                         self.backend.load_metadata_by_level_seed_and_id_and_budget_and_instance(
@@ -1411,7 +1419,17 @@ class TrainEvaluator(AbstractEvaluator):
                     cv = PredefinedSplit(test_fold=test_fold)
                     cv.n_splits = 1  # As sklearn is inconsistent here
             elif self.resampling_strategy in ['cv', 'partial-cv',
+                                              'intensifier-cv',
+                                              'partial-iterative-intensifier-cv'
                                               'partial-cv-iterative-fit']:
+
+                if isinstance(self.resampling_strategy_args['folds'], list):
+                    return RepeatedMultiKFold(
+                        n_splits=self.resampling_strategy_args['folds'],
+                        n_repeats=repeats,
+                        random_state=1,
+                    )
+
                 random_state = 1 if shuffle else None
                 if repeats is not None:
                     cv = RepeatedKFold(

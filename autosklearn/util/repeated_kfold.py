@@ -7,7 +7,7 @@ from typing import Any, Generator, List, Optional
 
 import numpy as np
 
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.utils import check_random_state
 
 
@@ -155,4 +155,53 @@ class RepeatedStratifiedMultiKFold(_RepeatedMultiSplits):
         assert len(n_splits) == n_repeats, "Repetitions come through n_splits schedule"
         super().__init__(
             StratifiedKFold, n_repeats=n_repeats, random_state=random_state,
+            n_splits=n_splits)
+
+
+class RepeatedMultiKFold(_RepeatedMultiSplits):
+    """Repeated Multi-K-Fold cross validator.
+    Repeats Multi K-Fold n times with different randomization in each
+    repetition, for multiple k-splits.
+    Read more in the :ref:`User Guide <repeated_k_fold>`.
+    Parameters
+    ----------
+    n_splits : List[int], default=[3, 5, 10]
+        Number of folds. Must be at least 2.
+    n_repeats : int, default=1
+        Number of times cross-validator needs to be repeated.
+    random_state : int, RandomState instance or None, default=None
+        Controls the generation of the random states for each repetition.
+        Pass an int for reproducible output across multiple function calls.
+        See :term:`Glossary <random_state>`.
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from sklearn.model_selection import RepeatedMultiKFold
+    >>> X = np.array([[1, 2], [3, 4], [1, 2], [3, 4]])
+    >>> y = np.array([0, 0, 1, 1])
+    >>> rskf = RepeatedMultiKFold(n_splits=2, n_repeats=2,
+    ...     random_state=36851234)
+    >>> for train_index, test_index in rskf.split(X, y):
+    ...     print("TRAIN:", train_index, "TEST:", test_index)
+    ...     X_train, X_test = X[train_index], X[test_index]
+    ...     y_train, y_test = y[train_index], y[test_index]
+    ...
+    TRAIN: [1 2] TEST: [0 3]
+    TRAIN: [0 3] TEST: [1 2]
+    TRAIN: [1 3] TEST: [0 2]
+    TRAIN: [0 2] TEST: [1 3]
+    Notes
+    -----
+    Randomized CV splitters may return different results for each call of
+    split. You can make the results identical by setting `random_state`
+    to an integer.
+    See Also
+    --------
+    RepeatedKFold : Repeats K-Fold n times.
+    """
+    def __init__(self, *, n_splits: List[int] = [3, 5, 10, 5, 3], n_repeats: int = 1,
+                 random_state: Optional[np.random.RandomState] = None):
+        assert len(n_splits) == n_repeats, "Repetitions come through n_splits schedule"
+        super().__init__(
+            KFold, n_repeats=n_repeats, random_state=random_state,
             n_splits=n_splits)

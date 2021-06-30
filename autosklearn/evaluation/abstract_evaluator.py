@@ -565,6 +565,11 @@ class AbstractEvaluator(object):
                 'stack_based_on_log_loss', False)
             stack_tiebreak_w_log_loss = self.resampling_strategy_args.get(
                 'stack_tiebreak_w_log_loss', True)
+
+            if self.datamanager.info['task'] in REGRESSION_TASKS:
+                stack_tiebreak_w_log_loss = False
+                stack_based_on_log_loss = False
+
             if stack_based_on_log_loss or stack_tiebreak_w_log_loss:
                 loss_log_loss = cast(float, self._loss(
                     self.Y_optimization,

@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 
-from autosklearn.constants import TASK_TYPES
+from autosklearn.constants import REGRESSION_TASKS, TASK_TYPES
 from autosklearn.ensembles.abstract_ensemble import AbstractEnsemble
 from autosklearn.metrics import Scorer, calculate_loss, log_loss
 from autosklearn.pipeline.base import BasePipeline
@@ -51,6 +51,8 @@ class EnsembleSelection(AbstractEnsemble):
             raise ValueError('Ensemble size cannot be less than one!')
         if self.task_type not in TASK_TYPES:
             raise ValueError('Unknown task type %s.' % self.task_type)
+        if self.task_type in REGRESSION_TASKS:
+            self.tie_breaker_metric = None
         if not isinstance(self.metric, Scorer):
             raise ValueError("The provided metric must be an instance of Scorer, "
                              "nevertheless it is {}({})".format(
